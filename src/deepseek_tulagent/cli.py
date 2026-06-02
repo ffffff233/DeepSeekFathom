@@ -643,8 +643,8 @@ def slash_items(settings) -> list[tuple[str, str]]:
         ("/doctor", "check live DeepSeek config"),
         ("/skills", "list discovered skills"),
         ("/compact", "compress older conversation context now"),
-        ("/goal", "show active goal"),
         ("/goal ", "set active goal"),
+        ("/goal", "show active goal"),
         ("/goal clear", "clear active goal"),
         ("/exit", "leave and print resume command"),
     ]

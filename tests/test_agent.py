@@ -898,6 +898,7 @@ def test_slash_items_include_manual_compact(tmp_path: Path):
 
     commands = [command for command, _description in cli.slash_items(settings(tmp_path))]
     assert "/compact" in commands
+    assert commands.index("/goal ") < commands.index("/goal")
 
 
 def test_slash_skill_selection_inserts_agent_prompt():

@@ -1,5 +1,15 @@
 # 更新记录 / Changelog
 
+## v0.1.27
+
+中文：
+
+- 调整 `/` 面板里的 `/goal ` 排序，默认优先插入输入框，方便继续输入目标文本。
+
+English:
+
+- Reordered `/goal ` in the slash palette so it is selected as an insertion template first, making it easier to keep typing the objective.
+
 ## v0.1.26
 
 中文：
