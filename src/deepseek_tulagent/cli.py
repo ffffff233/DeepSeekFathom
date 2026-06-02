@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 
+from . import __version__
 from .agent import TuLAgent, parse_tool_call
 from .config import get_settings, load_file_config, save_file_config
 from .messages import Message
@@ -13,6 +15,7 @@ from .session import SessionStore
 from .skills import SkillStore
 from .tools import ToolRegistry
 from .tui import ChatTui, TuiState
+from .updates import check_for_update, update_to
 from .ui import ThinkingSpinner, assistant_prefix, choose_palette, composer_prompt, confirm_tool, print_box, print_header, print_slash_palette, print_tool_palette, read_composer, startup_animation
 
 
@@ -53,6 +56,9 @@ def main(argv: list[str] | None = None) -> int:
     doctor_parser.add_argument("--live", action="store_true", help="also call DeepSeek API")
 
     sub.add_parser("models", help="list live DeepSeek models")
+    sub.add_parser("version", help="print DeepSeek TuLAgent version")
+    update_parser = sub.add_parser("update", help="check for and install the latest tagged version")
+    update_parser.add_argument("--check", action="store_true", help="only check; do not install")
 
     auth_parser = sub.add_parser("config", help="manage default local config")
     auth_sub = auth_parser.add_subparsers(dest="config_cmd", required=True)
@@ -110,6 +116,13 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{model}{marker}")
         return 0
 
+    if args.cmd == "version":
+        print(__version__)
+        return 0
+
+    if args.cmd == "update":
+        return update_command(check_only=args.check)
+
     if args.cmd == "config":
         return config_command(args)
 
@@ -164,6 +177,24 @@ def main(argv: list[str] | None = None) -> int:
     return 1
 
 
+def update_command(check_only: bool = False) -> int:
+    try:
+        info = check_for_update(__version__, timeout=5.0)
+    except Exception as exc:
+        print(f"update check failed: {exc}", file=sys.stderr)
+        return 2
+    if not info:
+        print(f"deepseekTul is up to date: {__version__}")
+        return 0
+    print(f"update available: {info.current} -> {info.latest}")
+    print(info.url)
+    if check_only:
+        return 0
+    ok, output = update_to(info.latest)
+    print(output)
+    return 0 if ok else 2
+
+
 def interactive(settings, mode: str, thinking_name: str, yes: bool, resume: str | None = None) -> int:
     thinking = ThinkingMode.resolve(thinking_name)
     settings = settings.with_runtime(model=thinking.model_hint, max_tokens=min(settings.max_tokens, thinking.max_tokens))
@@ -196,6 +227,7 @@ def interactive(settings, mode: str, thinking_name: str, yes: bool, resume: str 
     except Exception as exc:
         print(f"live     : failed: {exc}", file=sys.stderr)
         return 2
+    maybe_prompt_update()
     skills = SkillStore(settings.workspace)
     discovered_skills = skills.list()
     if discovered_skills:
@@ -322,7 +354,34 @@ def interactive(settings, mode: str, thinking_name: str, yes: bool, resume: str 
         if session is None:
             session = SessionStore(settings.workspace).load(result.session_id)
         last_session_id = result.session_id
-        print()
+    print()
+
+
+def maybe_prompt_update() -> None:
+    if os.getenv("DSTUL_NO_UPDATE_CHECK"):
+        return
+    if not sys.stdin.isatty() or not sys.stdout.isatty():
+        return
+    try:
+        info = check_for_update(__version__, timeout=1.5)
+    except Exception:
+        return
+    if not info:
+        print(f"version  : {__version__} (latest)")
+        return
+    print(f"version  : {__version__}; update available: {info.latest}")
+    choice = choose_palette(
+        [
+            ("update", f"install v{info.latest}; config, API key, model and skills stay untouched"),
+            ("skip", "do not update now"),
+        ],
+        title=f"update {info.current} -> {info.latest}",
+    )
+    if choice != "update":
+        print("update   : skipped")
+        return
+    ok, output = update_to(info.latest)
+    print(("update   : done" if ok else "update   : failed") + f"\n{output}")
 
 
 def interactive_tui(settings, mode: str, thinking: ThinkingMode, yes: bool, session) -> int:

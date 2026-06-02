@@ -37,6 +37,9 @@ deepseekTul start --resume <SESSION_ID>
 deepseekTul sessions list
 deepseekTul sessions show <SESSION_ID>
 deepseekTul models
+deepseekTul version
+deepseekTul update --check
+deepseekTul update
 deepseekTul skills list
 ```
 
@@ -130,6 +133,43 @@ root + fast + deepseek-v4-flash
 在 `/` 面板里选中技能时，不会立刻执行命令，而是把 `Use skill <name>: ` 插入输入框，你可以继续补充任务再回车发送给 AI。
 
 更新记录见 [CHANGELOG.md](CHANGELOG.md)。
+
+## 版本和更新
+
+查看当前版本：
+
+```bash
+deepseekTul version
+```
+
+检查更新：
+
+```bash
+deepseekTul update --check
+```
+
+执行更新：
+
+```bash
+deepseekTul update
+```
+
+交互启动时也会自动检查 GitHub 最新 tag。如果有新版本，会弹出选择面板：默认第一项是更新，直接回车更新；按下键再回车是不更新。
+
+更新不会修改这些用户数据：
+
+- `~/.deepseek-tulagent/config.json`，包括 API key、base URL、默认模型
+- `~/.deepseek-tulagent/skills` 和工作区技能目录
+- 会话目录
+
+如果源码目录里有你自己改过但还没提交的文件，更新会停止，避免覆盖你的改动。
+
+拉取老版本：
+
+```bash
+git fetch --tags
+git checkout v0.1.1
+```
 
 ## 会话恢复
 

@@ -77,6 +77,9 @@ deepseekTul sessions list
 deepseekTul sessions show <SESSION_ID>
 deepseekTul sessions resume <SESSION_ID>
 deepseekTul start --resume <SESSION_ID>
+deepseekTul version
+deepseekTul update --check
+deepseekTul update
 ```
 
 Resume example:
@@ -115,6 +118,25 @@ Discovered skills are shown in the same palette as `/skill <name>` entries.
 Selecting a skill from the `/` palette inserts `Use skill <name>: ` into the composer so you can keep typing the task before sending it to the agent.
 
 See [CHANGELOG.md](CHANGELOG.md) for update history.
+
+## Versions and Updates
+
+```bash
+deepseekTul version
+deepseekTul update --check
+deepseekTul update
+```
+
+Interactive startup checks the latest GitHub tag. If a newer version exists, the update picker opens with `update` selected by default; press Enter to update, or press Down then Enter to skip.
+
+The updater does not touch user configuration, API keys, model defaults, sessions, or skill directories. If the source checkout has local uncommitted changes, the update stops instead of overwriting user edits.
+
+Install an older version:
+
+```bash
+git fetch --tags
+git checkout v0.1.1
+```
 
 ## Permission Modes
 

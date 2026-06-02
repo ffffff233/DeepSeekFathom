@@ -398,6 +398,47 @@ def test_interactive_model_command_uses_picker(monkeypatch, tmp_path: Path, caps
     assert "model set to deepseek-v4-pro" in out
 
 
+def test_update_version_comparison():
+    from deepseek_tulagent.updates import is_newer, normalize_version
+
+    assert normalize_version("v0.1.2") == "0.1.2"
+    assert is_newer("v0.1.2", "0.1.1") is True
+    assert is_newer("v0.1.1", "0.1.1") is False
+
+
+def test_update_refuses_dirty_source_tree(monkeypatch, tmp_path: Path):
+    import deepseek_tulagent.updates as updates
+
+    subprocesses = [
+        ["git", "init"],
+        ["git", "config", "user.email", "test@example.com"],
+        ["git", "config", "user.name", "Test"],
+    ]
+    for command in subprocesses:
+        import subprocess
+
+        subprocess.run(command, cwd=tmp_path, check=True, capture_output=True)
+    (tmp_path / "dirty.txt").write_text("dirty", encoding="utf-8")
+    monkeypatch.setattr(updates, "source_root", lambda: tmp_path)
+
+    ok, output = updates.update_to("0.1.2")
+    assert ok is False
+    assert "avoid overwriting user edits" in output
+
+
+def test_update_command_runs_updater(monkeypatch, capsys):
+    import deepseek_tulagent.cli as cli
+    from deepseek_tulagent.updates import UpdateInfo
+
+    monkeypatch.setattr(cli, "check_for_update", lambda current, timeout=5.0: UpdateInfo(current, "0.1.2", "url"))
+    monkeypatch.setattr(cli, "update_to", lambda version: (True, f"updated {version}"))
+
+    assert cli.update_command(check_only=False) == 0
+    out = capsys.readouterr().out
+    assert "0.1.0" not in out
+    assert "updated 0.1.2" in out
+
+
 def test_session_store_lists_and_loads_messages(tmp_path: Path):
     client = FakeClient(["hello"])
     result = TuLAgent(settings(tmp_path), mode="plan", client=client).run("say hello")
