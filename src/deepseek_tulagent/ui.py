@@ -5,8 +5,10 @@ import time
 import shutil
 import os
 import select
+import subprocess
 import termios
 import tty
+import atexit
 from threading import Event, Thread
 from collections.abc import Callable
 
@@ -24,6 +26,27 @@ BRIGHT_GREEN = "\033[92m"
 YELLOW = "\033[33m"
 WHITE = "\033[97m"
 GRAY = "\033[90m"
+
+
+def install_terminal_safety() -> None:
+    if not sys.stdin.isatty() or not sys.stdout.isatty():
+        return
+    force_terminal_sane()
+    atexit.register(force_terminal_sane)
+
+
+def force_terminal_sane() -> None:
+    if sys.stdout.isatty():
+        try:
+            sys.stdout.write("\033[?25h\033[0m\033[?1049l")
+            sys.stdout.flush()
+        except OSError:
+            pass
+    if sys.stdin.isatty():
+        try:
+            subprocess.run(["stty", "sane"], stdin=sys.stdin, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=1)
+        except Exception:
+            pass
 
 
 def startup_animation(enabled: bool = True) -> None:
@@ -381,7 +404,24 @@ def exit_palette_screen() -> None:
 
 
 def read_raw_char(fd: int) -> str:
-    return os.read(fd, 1).decode("utf-8", errors="ignore")
+    first = os.read(fd, 1)
+    if not first:
+        return ""
+    lead = first[0]
+    if lead < 0x80:
+        return first.decode("utf-8", errors="ignore")
+    if 0xC0 <= lead < 0xE0:
+        needed = 2
+    elif 0xE0 <= lead < 0xF0:
+        needed = 3
+    elif 0xF0 <= lead < 0xF8:
+        needed = 4
+    else:
+        return ""
+    data = bytearray(first)
+    while len(data) < needed:
+        data.extend(os.read(fd, needed - len(data)))
+    return bytes(data).decode("utf-8", errors="ignore")
 
 
 def read_escape_suffix(fd: int) -> str:

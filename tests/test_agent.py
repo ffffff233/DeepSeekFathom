@@ -14,7 +14,7 @@ from deepseek_tulagent.provider import apply_thinking_payload
 from deepseek_tulagent.session import SessionStore
 from deepseek_tulagent.skills import SkillStore
 from deepseek_tulagent.tui import ChatTui, TuiState
-from deepseek_tulagent.ui import filter_slash_items, read_escape_suffix, selected_window_start, slash_selection_insertion
+from deepseek_tulagent.ui import filter_slash_items, read_escape_suffix, read_raw_char, selected_window_start, slash_selection_insertion
 from deepseek_tulagent.tools import ToolError, ToolRegistry
 
 
@@ -643,6 +643,16 @@ def test_escape_suffix_reads_arrow_bytes_from_fd():
     try:
         os.write(write_fd, b"[B")
         assert read_escape_suffix(read_fd) == "[B"
+    finally:
+        os.close(read_fd)
+        os.close(write_fd)
+
+
+def test_raw_char_reads_complete_utf8_character():
+    read_fd, write_fd = os.pipe()
+    try:
+        os.write(write_fd, "你".encode("utf-8"))
+        assert read_raw_char(read_fd) == "你"
     finally:
         os.close(read_fd)
         os.close(write_fd)

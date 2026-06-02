@@ -16,7 +16,7 @@ from .skills import SkillStore
 from .tools import ToolRegistry
 from .tui import ChatTui, TuiState
 from .updates import check_for_update, update_to
-from .ui import ThinkingSpinner, assistant_prefix, choose_palette, composer_prompt, confirm_tool, print_box, print_header, print_slash_palette, print_tool_palette, read_composer, startup_animation
+from .ui import ThinkingSpinner, assistant_prefix, choose_palette, composer_prompt, confirm_tool, install_terminal_safety, print_box, print_header, print_slash_palette, print_tool_palette, read_composer, startup_animation
 
 
 BANNER = r"""
@@ -30,6 +30,7 @@ THINKING = ThinkingMode.names()
 
 
 def main(argv: list[str] | None = None) -> int:
+    install_terminal_safety()
     if argv is None:
         argv = sys.argv[1:]
     if not argv:

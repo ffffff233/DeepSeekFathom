@@ -1,5 +1,19 @@
 # 更新记录 / Changelog
 
+## v0.1.9
+
+中文：
+
+- 修复 raw 输入只能读单字节导致中文输入不显示的问题。
+- raw 输入现在会读取完整 UTF-8 字符，同时保留方向键 ESC 序列处理。
+- CLI 启动和退出时会强制恢复终端 sane 状态、显示光标、退出 alternate screen。
+
+English:
+
+- Fixed Chinese/non-ASCII input being dropped because raw input read only one byte at a time.
+- Raw input now reads complete UTF-8 characters while keeping arrow-key escape handling.
+- CLI now forces terminal sane state, visible cursor, and alternate-screen exit on startup and exit.
+
 ## v0.1.8
 
 中文：
