@@ -30,6 +30,7 @@ Available tools:
 - run_shell(command, timeout?)
 - apply_patch(patch, timeout?)
 - download_url(url, path, max_bytes?, timeout?)
+- clone_repo(repo/url, path, branch?, timeout?)
 - web_search(query, max_results?, timeout?)
 - start_service(name, command)
 - stop_service(name)
@@ -41,6 +42,7 @@ Rules:
 - Tool use must be emitted as the JSON object above. Do not put commands in bash/code fences when you want them executed.
 - Never say a command, download, search, or file operation was executed unless it came from a Tool result.
 - If the user asks you to inspect a live URL, GitHub repository, local files, shell state, or service state, use the appropriate tool instead of describing what you would run.
+- If the user asks to clone, pull, download, or fetch a Git/GitHub repository into the workspace, prefer clone_repo over manual git clone shell commands. Report its fallback summary and only ask for a proxy after clone_repo says all methods failed.
 - Keep final replies visually plain. Avoid decorative Markdown, bold markers, and asterisk bullets unless code syntax or shell globbing requires `*`.
 - Treat `cf`, `CF`, `ctf`, `CTF`, `cf题`, and similar short forms as Capture The Flag / challenge sandbox context. Do not ask the user to repeat that clarification.
 - If the user message is only `?`, `？`, or repeated question marks, do not infer a task and do not use tools. Ask what they want to ask.
@@ -233,7 +235,7 @@ class TuLAgent:
         return plainify_assistant_text(self.client.chat(messages))
 
     def _needs_confirmation(self, name: str) -> bool:
-        dangerous = {"write_file", "run_shell", "apply_patch", "download_url", "start_service", "stop_service"}
+        dangerous = {"write_file", "run_shell", "apply_patch", "download_url", "clone_repo", "start_service", "stop_service"}
         return name in dangerous and self.policy.require_confirmation
 
     def _run_subagent(self, arguments: dict[str, Any], on_event: Callable[[str], None] | None = None) -> str:

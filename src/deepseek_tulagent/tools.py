@@ -7,11 +7,14 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import tarfile
+import tempfile
 from typing import Any
 from html import unescape
 import re
 import urllib.parse
 import urllib.request
+import zipfile
 
 from .policy import ApprovalPolicy
 
@@ -41,6 +44,7 @@ TOOL_DESCRIPTIONS = {
     "run_shell": "gated shell: run a shell command in the workspace",
     "apply_patch": "gated write: apply a unified diff with git apply",
     "download_url": "gated network+write: download URL into workspace",
+    "clone_repo": "gated network+write: clone a Git/GitHub repository with mirror and archive fallbacks",
     "web_search": "network: search the web and return result snippets",
     "start_service": "gated shell: start background service with pid/log tracking",
     "stop_service": "gated shell: stop a tracked background service",
@@ -76,6 +80,7 @@ class ToolRegistry:
             "run_shell": self.run_shell,
             "apply_patch": self.apply_patch,
             "download_url": self.download_url,
+            "clone_repo": self.clone_repo,
             "web_search": self.web_search,
             "start_service": self.start_service,
             "stop_service": self.stop_service,
@@ -255,6 +260,56 @@ class ToolRegistry:
         path.write_bytes(data)
         return ToolResult(True, f"Downloaded {len(data)} bytes to {path.relative_to(self.workspace)}")
 
+    def clone_repo(self, arguments: dict[str, Any]) -> ToolResult:
+        if not self.policy.allow_network or not self.allow_write:
+            raise ToolError("clone_repo is disabled in this mode")
+        repo = str(arguments.get("repo") or arguments.get("url") or "").strip()
+        if not repo:
+            raise ToolError("Missing string argument: repo")
+        dest = self.resolve_workspace_path(require_str(arguments, "path"))
+        branch = str(arguments.get("branch") or "").strip()
+        timeout = int(arguments.get("timeout", 120))
+        if dest.exists() and any(dest.iterdir() if dest.is_dir() else [dest]):
+            return ToolResult(False, f"target exists and is not empty: {dest.relative_to(self.workspace)}")
+        dest.parent.mkdir(parents=True, exist_ok=True)
+
+        attempts: list[str] = []
+        for clone_url in clone_url_candidates(repo):
+            command = ["git", "clone", "--depth", "1"]
+            if branch:
+                command += ["--branch", branch]
+            command += [clone_url, str(dest)]
+            ok, summary = run_clone_attempt(command, self.workspace, timeout)
+            attempts.append(f"git clone {redact_url(clone_url)} -> {summary}")
+            if ok:
+                return ToolResult(True, "Repository cloned.\n" + "\n".join(attempts))
+            cleanup_empty_path(dest)
+
+        github_repo = parse_github_repo(repo)
+        if github_repo:
+            owner, name = github_repo
+            refs = [branch] if branch else ["main", "master"]
+            with tempfile.TemporaryDirectory(prefix="dstul-clone-") as tmp:
+                tmp_path = Path(tmp)
+                for ref in refs:
+                    for archive_url in github_archive_candidates(owner, name, ref):
+                        archive_path = tmp_path / archive_filename(archive_url)
+                        ok, summary = download_archive(archive_url, archive_path, timeout)
+                        attempts.append(f"archive {redact_url(archive_url)} -> {summary}")
+                        if not ok:
+                            continue
+                        ok, summary = extract_repo_archive(archive_path, dest)
+                        attempts.append(f"extract {archive_path.name} -> {summary}")
+                        if ok:
+                            return ToolResult(True, "Repository downloaded from archive fallback.\n" + "\n".join(attempts))
+                        cleanup_empty_path(dest)
+
+        hint = (
+            "All clone methods failed. If the network requires a local proxy, set HTTPS_PROXY/HTTP_PROXY "
+            "or configure git proxy, then retry clone_repo."
+        )
+        return ToolResult(False, "\n".join(attempts + [hint]))
+
     def web_search(self, arguments: dict[str, Any]) -> ToolResult:
         if not self.policy.allow_network:
             raise ToolError("web_search is disabled in this mode")
@@ -358,6 +413,152 @@ def strip_background(command: str) -> str:
         if stripped.endswith(suffix):
             return stripped[: -len(suffix)].strip()
     return stripped
+
+
+def clone_url_candidates(repo: str) -> list[str]:
+    normalized = normalize_git_url(repo)
+    candidates = [normalized]
+    github_repo = parse_github_repo(normalized)
+    if github_repo:
+        owner, name = github_repo
+        https_url = f"https://github.com/{owner}/{name}.git"
+        candidates = [
+            https_url,
+            f"https://ghproxy.net/{https_url}",
+            f"https://mirror.ghproxy.com/{https_url}",
+            f"https://hub.gitmirror.com/{https_url}",
+            f"https://gitclone.com/github.com/{owner}/{name}.git",
+            f"https://githubfast.com/{owner}/{name}.git",
+        ]
+        if normalized not in candidates:
+            candidates.insert(0, normalized)
+    return dedupe(candidates)
+
+
+def normalize_git_url(repo: str) -> str:
+    repo = repo.strip()
+    if re.fullmatch(r"[\w.-]+/[\w.-]+", repo):
+        return f"https://github.com/{repo}.git"
+    if repo.startswith("git@github.com:"):
+        slug = repo.removeprefix("git@github.com:").removesuffix(".git")
+        return f"https://github.com/{slug}.git"
+    return repo
+
+
+def parse_github_repo(repo: str) -> tuple[str, str] | None:
+    repo = normalize_git_url(repo)
+    if repo.startswith("git@github.com:"):
+        repo = "https://github.com/" + repo.removeprefix("git@github.com:")
+    parsed = urllib.parse.urlparse(repo)
+    path = parsed.path.strip("/")
+    if "github.com" not in parsed.netloc and not path.startswith("github.com/"):
+        return None
+    if path.startswith("github.com/"):
+        path = path.removeprefix("github.com/")
+    parts = path.removesuffix(".git").split("/")
+    if len(parts) < 2 or not parts[0] or not parts[1]:
+        return None
+    return parts[0], parts[1]
+
+
+def github_archive_candidates(owner: str, repo: str, ref: str) -> list[str]:
+    quoted_ref = urllib.parse.quote(ref, safe="")
+    direct = f"https://github.com/{owner}/{repo}/archive/refs/heads/{quoted_ref}.zip"
+    codeload = f"https://codeload.github.com/{owner}/{repo}/zip/refs/heads/{quoted_ref}"
+    return [
+        direct,
+        codeload,
+        f"https://ghproxy.net/{direct}",
+        f"https://mirror.ghproxy.com/{direct}",
+        f"https://hub.gitmirror.com/{direct}",
+    ]
+
+
+def run_clone_attempt(command: list[str], cwd: Path, timeout: int) -> tuple[bool, str]:
+    try:
+        completed = subprocess.run(command, cwd=cwd, text=True, capture_output=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return False, f"timeout after {timeout}s"
+    output = (completed.stderr or completed.stdout or "").strip().splitlines()
+    summary = output[-1][:300] if output else f"exit {completed.returncode}"
+    return completed.returncode == 0, summary
+
+
+def download_archive(url: str, dest: Path, timeout: int) -> tuple[bool, str]:
+    request = urllib.request.Request(url, headers={"User-Agent": "DeepSeekTuL/0.1"})
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            dest.write_bytes(response.read())
+    except Exception as exc:  # urllib raises several network-specific subclasses.
+        return False, str(exc)[:300]
+    return True, f"downloaded {dest.stat().st_size} bytes"
+
+
+def extract_repo_archive(archive_path: Path, dest: Path) -> tuple[bool, str]:
+    try:
+        with tempfile.TemporaryDirectory(prefix="dstul-extract-") as tmp:
+            tmp_path = Path(tmp)
+            if zipfile.is_zipfile(archive_path):
+                with zipfile.ZipFile(archive_path) as archive:
+                    safe_extract_zip(archive, tmp_path)
+            elif tarfile.is_tarfile(archive_path):
+                with tarfile.open(archive_path) as archive:
+                    safe_extract_tar(archive, tmp_path)
+            else:
+                return False, "unsupported archive format"
+            roots = [path for path in tmp_path.iterdir()]
+            source = roots[0] if len(roots) == 1 and roots[0].is_dir() else tmp_path
+            dest.mkdir(parents=True, exist_ok=True)
+            for item in source.iterdir():
+                shutil.move(str(item), str(dest / item.name))
+    except (OSError, ValueError, zipfile.BadZipFile, tarfile.TarError) as exc:
+        return False, str(exc)[:300]
+    return True, f"extracted to {dest.name}"
+
+
+def safe_extract_zip(archive: zipfile.ZipFile, dest: Path) -> None:
+    for member in archive.infolist():
+        target = (dest / member.filename).resolve()
+        target.relative_to(dest.resolve())
+    archive.extractall(dest)
+
+
+def safe_extract_tar(archive: tarfile.TarFile, dest: Path) -> None:
+    for member in archive.getmembers():
+        target = (dest / member.name).resolve()
+        target.relative_to(dest.resolve())
+    archive.extractall(dest)
+
+
+def archive_filename(url: str) -> str:
+    parsed = urllib.parse.urlparse(url)
+    name = Path(parsed.path).name or "repo.zip"
+    return name if "." in name else f"{name}.zip"
+
+
+def cleanup_empty_path(path: Path) -> None:
+    if path.is_dir() and not any(path.iterdir()):
+        path.rmdir()
+
+
+def redact_url(url: str) -> str:
+    parsed = urllib.parse.urlparse(url)
+    if parsed.username or parsed.password:
+        netloc = parsed.hostname or ""
+        if parsed.port:
+            netloc += f":{parsed.port}"
+        return urllib.parse.urlunparse(parsed._replace(netloc=netloc))
+    return url
+
+
+def dedupe(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for value in values:
+        if value not in seen:
+            result.append(value)
+            seen.add(value)
+    return result
 
 
 def parse_duckduckgo_results(html: str, max_results: int) -> list[str]:

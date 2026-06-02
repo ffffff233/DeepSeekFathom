@@ -1,5 +1,19 @@
 # 更新记录 / Changelog
 
+## v0.1.31
+
+中文：
+
+- 新增 `clone_repo` 工具：拉取 Git/GitHub 仓库时会自动尝试直连、镜像和 GitHub archive fallback。
+- 模型提示词现在要求仓库拉取优先使用 `clone_repo`，避免反复手写失败的镜像 `git clone` 命令。
+- README 增加仓库拉取兼容说明，并把安装包示例更新到 `v0.1.31`。
+
+English:
+
+- Added the `clone_repo` tool with direct git, mirror, and GitHub archive fallbacks.
+- Updated prompting so repository fetch requests prefer `clone_repo` instead of repeated manual mirror `git clone` commands.
+- README now documents repository-fetch compatibility and updates tarball examples to `v0.1.31`.
+
 ## v0.1.30
 
 中文：

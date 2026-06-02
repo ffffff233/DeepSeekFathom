@@ -5,6 +5,8 @@ import json
 import io
 import os
 import re
+import subprocess
+import zipfile
 
 from deepseek_tulagent.agent import TuLAgent, compact_context_messages, is_question_mark_only, parse_tool_call, plainify_assistant_text, promises_more_work, trim_tool_content, tool_result_message
 from deepseek_tulagent.cli import main
@@ -510,6 +512,62 @@ def test_trusted_mode_allows_download_tool_when_approved(tmp_path: Path):
     tools = ToolRegistry(tmp_path, policy=ApprovalPolicy.from_mode("trusted"))
     assert "download_url" in tools.names
     assert "web_search" in tools.names
+
+
+def test_clone_repo_rejects_non_empty_target(tmp_path: Path):
+    target = tmp_path / "repo"
+    target.mkdir()
+    (target / "keep.txt").write_text("keep", encoding="utf-8")
+    tools = ToolRegistry(tmp_path, policy=ApprovalPolicy.from_mode("root"))
+    result = tools.run("clone_repo", {"repo": "ffffff233/deepseek-tulagent", "path": "repo"})
+    assert result.ok is False
+    assert "not empty" in result.output
+    assert (target / "keep.txt").read_text(encoding="utf-8") == "keep"
+
+
+def test_clone_repo_uses_github_archive_fallback(monkeypatch, tmp_path: Path):
+    archive_bytes = io.BytesIO()
+    with zipfile.ZipFile(archive_bytes, "w") as archive:
+        archive.writestr("open-design-main/README.md", "hello archive")
+
+    clone_commands: list[list[str]] = []
+    requested_urls: list[str] = []
+
+    def fake_run(command, **_kwargs):
+        clone_commands.append(command)
+        return subprocess.CompletedProcess(command, 128, "", "clone failed")
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return archive_bytes.getvalue()
+
+    def fake_urlopen(request, timeout=0):
+        requested_urls.append(request.full_url)
+        return FakeResponse()
+
+    monkeypatch.setattr("deepseek_tulagent.tools.subprocess.run", fake_run)
+    monkeypatch.setattr("deepseek_tulagent.tools.urllib.request.urlopen", fake_urlopen)
+
+    tools = ToolRegistry(tmp_path, policy=ApprovalPolicy.from_mode("root"))
+    result = tools.run("clone_repo", {"repo": "https://github.com/nexu-io/open-design.git", "path": "open-design", "branch": "main"})
+
+    assert result.ok is True
+    assert (tmp_path / "open-design" / "README.md").read_text(encoding="utf-8") == "hello archive"
+    assert any("github.com/nexu-io/open-design.git" in command for command in clone_commands[0])
+    assert requested_urls[0] == "https://github.com/nexu-io/open-design/archive/refs/heads/main.zip"
+    assert "archive fallback" in result.output
+
+
+def test_system_prompt_mentions_clone_repo(tmp_path: Path):
+    prompt = TuLAgent(settings(tmp_path), client=FakeClient(["ok"]))._system_prompt()
+    assert "clone_repo(repo/url, path, branch?, timeout?)" in prompt
+    assert "prefer clone_repo over manual git clone" in prompt
 
 
 def test_normalize_bing_redirect_url():

@@ -9,7 +9,7 @@ DeepSeek TuLAgent 是一个专门适配 DeepSeek OpenAI 兼容接口的终端编
 - DeepSeek 优先配置：`DEEPSEEK_API_KEY`、`DEEPSEEK_BASE_URL`、`DEEPSEEK_MODEL`
 - 默认全局命令：`deepseekTul`
 - DeepSeek V4 模型别名：`pro`、`v4-pro`、`flash`、`v4-flash`
-- 工具：读写文件、本地搜索、联网搜索、Git 状态、Shell、补丁、下载、后台服务
+- 工具：读写文件、本地搜索、联网搜索、Git 状态、Shell、补丁、下载、仓库拉取、后台服务
 - 权限模式：`plan`、`review`、`agent`、`trusted`、`yolo`、`root`
 - 思考模式：`off`、`instant`、`fast`、`standard`、`balanced`、`careful`、`deep`、`deeper`、`max`、`ultra`
 - 本地技能目录：自动发现 `SKILL.md`
@@ -31,7 +31,7 @@ deepseekTul
 如果用户机器上的 `git clone` 因代理、端口写法或 git 配置失败，可以不依赖 git，直接安装 GitHub tag 源码包：
 
 ```bash
-python3 -m pip install --upgrade https://github.com/ffffff233/deepseek-tulagent/archive/refs/tags/v0.1.30.tar.gz
+python3 -m pip install --upgrade https://github.com/ffffff233/deepseek-tulagent/archive/refs/tags/v0.1.31.tar.gz
 ```
 
 代理环境示例：
@@ -39,8 +39,10 @@ python3 -m pip install --upgrade https://github.com/ffffff233/deepseek-tulagent/
 ```bash
 export HTTPS_PROXY=http://127.0.0.1:7890
 export HTTP_PROXY=http://127.0.0.1:7890
-python3 -m pip install --upgrade https://github.com/ffffff233/deepseek-tulagent/archive/refs/tags/v0.1.30.tar.gz
+python3 -m pip install --upgrade https://github.com/ffffff233/deepseek-tulagent/archive/refs/tags/v0.1.31.tar.gz
 ```
+
+让 agent 拉取其他 GitHub 仓库时，可以直接说“把 `owner/repo` 拉到 `path`”。它会优先使用 `clone_repo` 工具，自动尝试直连、镜像和 GitHub archive 下载，不会反复手写同一批失败的 `git clone` 命令。全部失败后才会提示你配置 `HTTP_PROXY` / `HTTPS_PROXY` 或 git proxy。
 
 ## 常用命令
 
@@ -88,7 +90,7 @@ deepseekTul config show
 | `DEEPSEEK_BASE_URL` | `https://api.deepseek.com` | API 地址 |
 | `DEEPSEEK_MODEL` | `deepseek-v4-flash` | 模型名或别名 |
 | `DSTUL_WORKSPACE` | 当前目录 | 工作目录 |
-| `DSTUL_MAX_TOOL_ROUNDS` | `8` | 最大工具循环次数 |
+| `DSTUL_MAX_TOOL_ROUNDS` | `256` | 最大工具循环次数 |
 | `DSTUL_MAX_TOKENS` | `2048` | 最大输出 token |
 | `DSTUL_REQUEST_TIMEOUT` | `180` | 请求超时时间 |
 
@@ -301,6 +303,7 @@ deepseekTul skills new repo-debug \
 - `search_text`：本地文本搜索
 - `web_search`：联网搜索
 - `download_url`：下载 URL 到工作区
+- `clone_repo`：拉取 Git/GitHub 仓库，支持镜像和 archive fallback
 - `start_service`：启动后台服务
 - `stop_service`：停止后台服务
 - `service_status`：查看服务状态

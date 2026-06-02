@@ -18,7 +18,7 @@ DeepSeek TuLAgent is a terminal coding agent built specifically around DeepSeek'
 - Native DeepSeek V4 aliases: `pro`, `v4-pro`, `flash`, `v4-flash`
 - Live model discovery through `deepseekTul models` and `deepseekTul doctor --live`
 - Global `deepseekTul` command for interactive use
-- Tool registry: files, local search, web search, git status, shell, patch, downloads, background services
+- Tool registry: files, local search, web search, git status, shell, patch, downloads, resilient repository cloning, background services
 - Six permission modes: `plan`, `review`, `agent`, `trusted`, `yolo`, `root`
 - Five thinking modes: `off`, `fast`, `balanced`, `deep`, `max`
 - Local skill directories with `SKILL.md` discovery and skill creation
@@ -42,7 +42,7 @@ deepseekTul
 If `git clone` is blocked by local proxy/git configuration, install directly from the tagged source tarball instead:
 
 ```bash
-python3 -m pip install --upgrade https://github.com/ffffff233/deepseek-tulagent/archive/refs/tags/v0.1.30.tar.gz
+python3 -m pip install --upgrade https://github.com/ffffff233/deepseek-tulagent/archive/refs/tags/v0.1.31.tar.gz
 ```
 
 Proxy-compatible examples:
@@ -50,8 +50,10 @@ Proxy-compatible examples:
 ```bash
 export HTTPS_PROXY=http://127.0.0.1:7890
 export HTTP_PROXY=http://127.0.0.1:7890
-python3 -m pip install --upgrade https://github.com/ffffff233/deepseek-tulagent/archive/refs/tags/v0.1.30.tar.gz
+python3 -m pip install --upgrade https://github.com/ffffff233/deepseek-tulagent/archive/refs/tags/v0.1.31.tar.gz
 ```
+
+When asking the agent to fetch another GitHub repository, say something like `clone owner/repo into path`. The agent should use `clone_repo`, which tries direct git, mirror URLs, and GitHub archive download before asking you to configure `HTTP_PROXY`, `HTTPS_PROXY`, or git proxy settings.
 
 One-shot usage:
 
@@ -262,7 +264,7 @@ Environment variables:
 | `DEEPSEEK_BASE_URL` | `https://api.deepseek.com` | API base URL |
 | `DEEPSEEK_MODEL` | `deepseek-v4-flash` | Model name or alias |
 | `DSTUL_WORKSPACE` | current directory | Workspace root |
-| `DSTUL_MAX_TOOL_ROUNDS` | `8` | Max tool loop iterations |
+| `DSTUL_MAX_TOOL_ROUNDS` | `256` | Max tool loop iterations |
 | `DSTUL_MAX_TOKENS` | `2048` | Max model output tokens |
 | `DSTUL_REQUEST_TIMEOUT` | `180` | DeepSeek request timeout seconds |
 
@@ -292,6 +294,7 @@ Available tools:
 - `write_file`: create or overwrite a file
 - `apply_patch`: apply a unified diff through `git apply`
 - `download_url`: download a URL into the workspace when network policy allows it
+- `clone_repo`: clone a Git/GitHub repository with mirror and archive fallbacks
 - `start_service`: launch a background service and store pid/log under `.deepseek-tulagent/services`
 - `stop_service`: stop a recorded service
 - `service_status`: check a recorded service
