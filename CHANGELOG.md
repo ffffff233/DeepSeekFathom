@@ -1,5 +1,17 @@
 # 更新记录 / Changelog
 
+## v0.1.34
+
+中文：
+
+- 修复 Windows desktop workflow：桌面 assets 不再被 Hatch 重复加入 wheel。
+- Windows exe 构建脚本改用当前 `python`，避免 GitHub Actions 里 `py -3` 误选其他 Python 版本。
+
+English:
+
+- Fixed the Windows desktop workflow by avoiding duplicate Hatch wheel inclusion for desktop assets.
+- The Windows exe build script now uses the current `python` so GitHub Actions does not accidentally select another Python version through `py -3`.
+
 ## v0.1.33
 
 中文：

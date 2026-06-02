@@ -1,9 +1,9 @@
 $ErrorActionPreference = "Stop"
 
-py -3 -m pip install --upgrade pip
-py -3 -m pip install --upgrade ".[desktop]" pyinstaller
+python -m pip install --upgrade pip
+python -m pip install --upgrade ".[desktop]" pyinstaller
 
-py -3 -m PyInstaller `
+python -m PyInstaller `
   --noconfirm `
   --clean `
   --windowed `
