@@ -258,6 +258,7 @@ def interactive(settings, mode: str, thinking_name: str, yes: bool, resume: str 
     print()
 
     current_mode = mode
+    active_goal: str | None = None
     last_session_id = session.session_id if session else None
     last_submitted_prompt = ""
     last_submitted_at = 0.0
@@ -288,6 +289,18 @@ def interactive(settings, mode: str, thinking_name: str, yes: bool, resume: str 
             print()
             print_palette(settings)
             print()
+            continue
+        if prompt == "/goal":
+            print(f"goal     : {active_goal or 'none'}")
+            continue
+        if prompt.startswith("/goal "):
+            requested_goal = prompt.split(maxsplit=1)[1].strip()
+            if requested_goal in {"clear", "off", "none"}:
+                active_goal = None
+                print("goal     : cleared")
+            else:
+                active_goal = requested_goal
+                print(f"goal     : {active_goal}")
             continue
         if prompt.startswith("/mode "):
             requested = prompt.split(maxsplit=1)[1].strip()
@@ -411,6 +424,7 @@ def interactive(settings, mode: str, thinking_name: str, yes: bool, resume: str 
                     stream=False,
                     on_event=event,
                     session=session,
+                    goal=active_goal,
                 )
         except KeyboardInterrupt:
             print("\ninterrupted")
@@ -610,6 +624,7 @@ def print_palette(settings) -> None:
         ("/doctor", "check live DeepSeek config"),
         ("/skills", "list discovered skills"),
         ("/compact", "compress older conversation context now"),
+        ("/goal <text>", "set persistent objective; continue until complete or blocked"),
         ("/skill <name>", "show a skill body"),
         ("/tool <json>", "execute a tool JSON object directly"),
     ]
@@ -628,6 +643,9 @@ def slash_items(settings) -> list[tuple[str, str]]:
         ("/doctor", "check live DeepSeek config"),
         ("/skills", "list discovered skills"),
         ("/compact", "compress older conversation context now"),
+        ("/goal", "show active goal"),
+        ("/goal ", "set active goal"),
+        ("/goal clear", "clear active goal"),
         ("/exit", "leave and print resume command"),
     ]
     for name in THINKING:

@@ -372,6 +372,8 @@ def choose_palette(items: list[tuple[str, str]], title: str = "commands") -> str
 
 
 def slash_selection_insertion(selection: str) -> str | None:
+    if selection.startswith("/") and selection.endswith(" "):
+        return selection
     if selection.startswith("/skill "):
         name = selection.split(maxsplit=1)[1].strip()
         if name:

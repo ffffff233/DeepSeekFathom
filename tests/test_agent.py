@@ -164,6 +164,37 @@ def test_agent_continues_after_assistant_promises_next_tool(tmp_path: Path):
     assert result.rounds == 4
 
 
+def test_goal_mode_does_not_stop_on_intermediate_answer(tmp_path: Path):
+    class GoalClient:
+        def __init__(self):
+            self.calls = 0
+
+        def chat(self, messages):
+            self.calls += 1
+            if self.calls == 1:
+                return "我先检查一下。"
+            if self.calls == 2:
+                assert "Active goal" in messages[-1].content
+                return '{"tool":"write_file","arguments":{"path":"done.txt","content":"ok"}}'
+            return "目标已完成：done.txt 已写入。"
+
+    result = TuLAgent(settings(tmp_path), mode="root", client=GoalClient()).run(
+        "开始",
+        goal="写出 done.txt",
+    )
+    assert result.answer == "目标已完成：done.txt 已写入。"
+    assert result.rounds == 3
+    assert (tmp_path / "done.txt").read_text(encoding="utf-8") == "ok"
+
+
+def test_goal_mode_allows_explicit_block(tmp_path: Path):
+    result = TuLAgent(settings(tmp_path), mode="root", client=FakeClient(["被阻塞：缺少目标路径。"])).run(
+        "开始",
+        goal="完成未知文件",
+    )
+    assert "被阻塞" in result.answer
+
+
 def test_agent_retries_after_tool_failure_when_model_stops(tmp_path: Path):
     class RetryClient:
         def __init__(self):
@@ -625,6 +656,45 @@ def test_interactive_think_command_uses_picker(monkeypatch, tmp_path: Path, caps
     assert get_settings().default_thinking == "deep"
 
 
+def test_interactive_goal_command_passes_goal_to_agent(monkeypatch, tmp_path: Path, capsys):
+    import deepseek_tulagent.cli as cli
+
+    prompts = iter(["/goal 完成部署", "继续", "/exit"])
+    captured = {}
+
+    class FakeDeepSeekClient:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def ping(self):
+            return {"model_available": True}
+
+    class FakeAgent:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def run(self, *_args, **kwargs):
+            from deepseek_tulagent.agent import AgentResult
+            from deepseek_tulagent.messages import Message
+            from deepseek_tulagent.session import Session
+
+            captured["goal"] = kwargs.get("goal")
+            session = Session(tmp_path, session_id="abc-123")
+            session.append(Message("assistant", "目标已完成。"))
+            return AgentResult(session.session_id, "目标已完成。", 1)
+
+    monkeypatch.setattr(cli, "startup_animation", lambda enabled=True: None)
+    monkeypatch.setattr(cli, "read_composer", lambda *_args, **_kwargs: next(prompts))
+    monkeypatch.setattr(cli, "DeepSeekClient", FakeDeepSeekClient)
+    monkeypatch.setattr(cli, "TuLAgent", FakeAgent)
+
+    code = cli.interactive(settings(tmp_path), "root", "fast", True)
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "goal     : 完成部署" in out
+    assert captured["goal"] == "完成部署"
+
+
 def test_interactive_startup_prints_version(monkeypatch, tmp_path: Path, capsys):
     import deepseek_tulagent.cli as cli
 
@@ -832,6 +902,7 @@ def test_slash_items_include_manual_compact(tmp_path: Path):
 
 def test_slash_skill_selection_inserts_agent_prompt():
     assert slash_selection_insertion("/skill repo-debug") == "Use skill repo-debug: "
+    assert slash_selection_insertion("/goal ") == "/goal "
     assert slash_selection_insertion("/model") is None
 
 

@@ -88,6 +88,7 @@ class TuLAgent:
         session: Session | None = None,
         max_tool_rounds: int | None = None,
         stop_after_tool: bool = False,
+        goal: str | None = None,
     ) -> AgentResult:
         session = session or Session(self.settings.workspace)
         if not session.messages:
@@ -138,6 +139,9 @@ class TuLAgent:
                         )
                     )
                     last_turn_had_tool_error = False
+                    continue
+                if goal and not goal_answer_is_terminal(assistant_text):
+                    session.append(Message("user", goal_continuation_prompt(goal)))
                     continue
                 final_answer = assistant_text
                 break
@@ -303,6 +307,18 @@ def declares_blocked_or_complete(text: str) -> bool:
     lowered = text.lower()
     cues = ("blocked", "无法继续", "被阻塞", "需要用户", "已完成", "完成了", "done", "finished")
     return any(cue in lowered for cue in cues)
+
+
+def goal_answer_is_terminal(text: str) -> bool:
+    return declares_blocked_or_complete(text) or any(cue in text for cue in ("目标已完成", "目标完成", "已经达成目标"))
+
+
+def goal_continuation_prompt(goal: str) -> str:
+    return (
+        f"Active goal: {goal}\n"
+        "The goal is not explicitly complete or blocked. Do not stop yet. "
+        "Choose the next concrete tool-backed step, or explicitly state completion/blockage with evidence."
+    )
 
 
 def is_complex_task(prompt: str) -> bool:

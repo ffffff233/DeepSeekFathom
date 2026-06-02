@@ -1,5 +1,19 @@
 # 更新记录 / Changelog
 
+## v0.1.26
+
+中文：
+
+- 新增 `/goal <目标>`：设置持续目标后，agent 不会因为中间回复就主动停下，会继续推进到明确完成或阻塞。
+- `/goal` 查看当前目标，`/goal clear` 清除目标。
+- `/` 面板选择 `/goal ` 会插入输入框，方便继续补目标文本，不会直接当命令执行。
+
+English:
+
+- Added `/goal <objective>` so the agent keeps working toward an active objective until explicit completion or blockage.
+- `/goal` shows the active goal; `/goal clear` clears it.
+- Selecting `/goal ` from the slash palette inserts it into the composer so the user can finish typing the goal.
+
 ## v0.1.25
 
 中文：
