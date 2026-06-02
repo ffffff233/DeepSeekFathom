@@ -1,5 +1,15 @@
 # DeepSeek TuLAgent
 
+## 中文用户请点这里
+
+👉 **[查看简体中文文档 / 点击进入中文介绍](README.zh-CN.md)**
+
+这个仓库同时提供中文和英文文档。如果你看不懂英文，直接点上面的 **简体中文文档**，里面有安装、配置、启动命令、权限模式、思考模式、会话恢复、技能目录和工具说明。
+
+---
+
+English
+
 DeepSeek TuLAgent is a terminal coding agent built specifically around DeepSeek's OpenAI-compatible chat API. It provides local tools, session resume, slash commands, permission modes, thinking modes, and installable skills while keeping the implementation independent and compact.
 
 ## Features
