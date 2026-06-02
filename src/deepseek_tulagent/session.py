@@ -42,17 +42,20 @@ class SessionStore:
         rows: list[dict] = []
         for path in sorted(self.sessions_dir.glob("*.jsonl"), key=lambda item: item.stat().st_mtime, reverse=True):
             loaded = self.load(path.stem)
+            meta = self.metadata(loaded.session_id)
             first_user = next((message.content for message in loaded.messages if message.role == "user"), "")
             rows.append(
                 {
                     "session_id": loaded.session_id,
                     "created_at": loaded.created_at,
+                    "updated_at": datetime.fromtimestamp(path.stat().st_mtime, timezone.utc).isoformat(),
                     "path": str(path),
                     "messages": len(loaded.messages),
-                    "title": first_user[:80],
+                    "title": meta.get("title") or session_title_from_text(first_user),
+                    "pinned": bool(meta.get("pinned")),
                 }
             )
-        return rows
+        return sorted(rows, key=lambda row: (bool(row["pinned"]), row["updated_at"]), reverse=True)
 
     def load(self, session_id: str) -> Session:
         path = self.resolve_session_path(session_id)
@@ -86,3 +89,31 @@ class SessionStore:
             if path.exists():
                 return path
         return candidates[0]
+
+    def metadata_path(self, session_id: str) -> Path:
+        return self.sessions_dir / f"{session_id}.meta.json"
+
+    def metadata(self, session_id: str) -> dict:
+        path = self.metadata_path(session_id)
+        if not path.exists():
+            return {}
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    def update_metadata(self, session_id: str, **changes) -> dict:
+        data = self.metadata(session_id)
+        data.update(changes)
+        self.metadata_path(session_id).parent.mkdir(parents=True, exist_ok=True)
+        self.metadata_path(session_id).write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        return data
+
+
+def session_title_from_text(text: str) -> str:
+    cleaned = " ".join(text.strip().split())
+    if not cleaned:
+        return "未命名会话"
+    cleaned = cleaned.replace("```", "").replace("\n", " ")
+    return cleaned[:36] + ("..." if len(cleaned) > 36 else "")

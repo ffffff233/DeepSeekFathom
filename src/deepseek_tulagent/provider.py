@@ -109,6 +109,8 @@ def raise_for_status_with_body(response: httpx.Response) -> None:
 
 
 def apply_thinking_payload(payload: dict, settings: Settings) -> None:
+    if getattr(settings, "provider_format", "deepseek") != "deepseek":
+        return
     payload["thinking"] = {"type": "enabled" if settings.thinking_enabled else "disabled"}
     if settings.thinking_enabled and settings.reasoning_effort:
         payload["reasoning_effort"] = settings.reasoning_effort

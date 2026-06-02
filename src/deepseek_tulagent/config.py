@@ -24,6 +24,7 @@ class Settings:
     request_timeout: float
     default_mode: str
     default_thinking: str
+    provider_format: str = "deepseek"
     thinking_enabled: bool = True
     reasoning_effort: str | None = None
 
@@ -62,6 +63,7 @@ def get_settings() -> Settings:
         request_timeout=float(os.getenv("DSTUL_REQUEST_TIMEOUT") or file_config.get("request_timeout") or "180"),
         default_mode=str(file_config.get("default_mode") or "root"),
         default_thinking=str(file_config.get("default_thinking") or "fast"),
+        provider_format=str(file_config.get("provider_format") or "deepseek"),
     )
 
 
@@ -94,6 +96,12 @@ def save_file_config(data: dict) -> Path:
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     path.chmod(0o600)
     return path
+
+
+def merge_file_config(data: dict) -> Path:
+    merged = load_file_config()
+    merged.update({key: value for key, value in data.items() if value is not None})
+    return save_file_config(merged)
 
 
 def string_or_none(value: object) -> str | None:

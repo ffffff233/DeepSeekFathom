@@ -7,64 +7,130 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <main class="shell">
-    <aside class="rail">
+  <main class="app">
+    <aside class="sidebar">
       <div class="brand">
-        <div class="mark">D</div>
-        <div>
-          <strong>DeepSeek TuLAgent</strong>
-          <span id="version">desktop</span>
+        <div class="logo">T</div>
+        <div class="brandText">
+          <strong>TuLAgent</strong>
+          <span id="version">v0.0.0</span>
         </div>
       </div>
-      <button id="newSession" class="quiet">新对话</button>
-      <section>
-        <h2>会话</h2>
-        <div id="sessions" class="list muted">暂无会话</div>
+      <button id="newSession" class="primary wide">新对话</button>
+      <section class="panel">
+        <div class="panelHead">
+          <h2>会话</h2>
+          <button id="refreshSessions" class="ghost small">刷新</button>
+        </div>
+        <div id="sessions" class="navList subtle">暂无会话</div>
       </section>
-      <section>
-        <h2>技能</h2>
-        <div id="skills" class="list muted">暂无技能</div>
+      <section class="panel">
+        <div class="panelHead">
+          <h2>技能</h2>
+        </div>
+        <div id="skills" class="navList subtle">暂无技能</div>
       </section>
     </aside>
 
-    <section class="work">
-      <header class="topbar">
-        <div class="selectors">
-          <label>模型 <select id="model"></select></label>
-          <label>思考 <select id="thinking"></select></label>
-          <label>权限 <select id="mode"></select></label>
-          <label>接口 <select id="format"><option>DeepSeek</option><option>OpenAI-compatible</option></select></label>
+    <section class="chatPane">
+      <header class="toolbar">
+        <div class="topIdentity">
+          <span class="pulse"></span>
+          <strong>DeepSeek TuLAgent</strong>
+          <small id="topRuntime">ready</small>
         </div>
-        <button id="settingsBtn" class="quiet">API</button>
+        <div class="toolbarActions">
+          <span id="workspace" class="workspace"></span>
+          <button id="settingsBtn" class="ghost">设置</button>
+        </div>
       </header>
 
       <div id="messages" class="messages">
-        <div class="empty">
-          <h1>DeepSeek TuLAgent</h1>
-          <p>选择模型和思考模式，发送任务。工具、技能和内部思考会在需要时折叠显示。</p>
+        <div class="intro">
+          <div class="introMark">DeepSeek TuLAgent</div>
+          <h1>本地工具代理桌面端</h1>
+          <p>文件、技能、工具调用和内部思考集中在一个工作台里。思考和工具详情默认折叠，按需展开。</p>
         </div>
       </div>
 
       <div id="activity" class="activity"></div>
 
       <footer class="composer">
-        <input id="fileInput" type="file" multiple hidden>
-        <button id="attach" class="icon" title="添加文件">+</button>
+        <div class="composerControl">
+          <label><span>模型</span><select id="model"></select></label>
+          <label><span>思考</span><select id="thinking"></select></label>
+          <label><span>权限</span><select id="mode"></select></label>
+          <label><span>接口</span><select id="format"></select></label>
+          <div class="saveState">
+            <span id="saveDot" class="saveDot"></span>
+            <strong id="saveState">新会话</strong>
+            <small id="composerSession">未保存</small>
+          </div>
+        </div>
         <div id="attachments" class="attachments"></div>
-        <textarea id="prompt" rows="1" placeholder="输入任务，Enter 发送，Shift+Enter 换行"></textarea>
-        <button id="send">发送</button>
+        <div class="composeRow">
+          <input id="fileInput" type="file" multiple hidden>
+          <button id="attach" class="icon" title="添加文件">+</button>
+          <textarea id="prompt" rows="1" placeholder="输入任务，Enter 发送，Shift+Enter 换行"></textarea>
+          <button id="send" class="primary">发送</button>
+        </div>
       </footer>
     </section>
 
+    <aside class="inspector">
+      <section class="panel">
+        <h2>运行状态</h2>
+        <div class="kv"><span>API</span><strong id="apiState">未检查</strong></div>
+        <div class="kv"><span>会话</span><strong id="sessionState">新会话</strong></div>
+        <div class="kv"><span>工具事件</span><strong id="eventCount">0</strong></div>
+      </section>
+      <section class="panel">
+        <h2>TuL 能力</h2>
+        <button id="manualCompact" class="ghost wide">手动压缩上下文</button>
+        <button id="insertSubagent" class="ghost wide">插入子代理任务</button>
+        <div class="capList">
+          <div><strong>自动压缩</strong><span>上下文接近窗口上限时自动整理旧消息</span></div>
+          <div><strong>子代理</strong><span>delegate_agent 隔离上下文执行研究、验证、复核</span></div>
+          <div><strong>技能目录</strong><span>本地 SKILL.md 自动发现，点击即可插入</span></div>
+        </div>
+      </section>
+      <section class="panel">
+        <h2>权限说明</h2>
+        <div id="modeHelp" class="modeHelp subtle">选择权限模式后显示说明。</div>
+      </section>
+      <section class="panel">
+        <h2>事件流</h2>
+        <div id="eventMirror" class="eventMirror subtle">工具、思考和子代理事件会显示在这里。</div>
+      </section>
+    </aside>
+
     <dialog id="settingsDialog">
       <form method="dialog" class="settings">
-        <h2>第三方 API / 兼容接口</h2>
-        <label>Base URL <input id="baseUrl" placeholder="https://api.deepseek.com"></label>
-        <label>API Key <input id="apiKey" type="password" placeholder="sk-..."></label>
-        <label>默认模型 <input id="defaultModel" placeholder="deepseek-v4-flash"></label>
+        <header>
+          <div>
+            <h2>API 设置</h2>
+            <p>支持 DeepSeek 原生和 OpenAI 兼容接口。保存后立即生效。</p>
+          </div>
+          <button value="cancel" class="iconClose">×</button>
+        </header>
+        <label>接口格式
+          <select id="providerFormat">
+            <option value="deepseek">DeepSeek</option>
+            <option value="openai-compatible">OpenAI-compatible</option>
+          </select>
+        </label>
+        <label>Base URL
+          <input id="baseUrl" placeholder="https://api.deepseek.com">
+        </label>
+        <label>API Key
+          <input id="apiKey" type="password" placeholder="留空则保留原 key">
+        </label>
+        <label>默认模型
+          <input id="defaultModel" placeholder="deepseek-v4-flash">
+        </label>
         <menu>
-          <button value="cancel" class="quiet">取消</button>
-          <button id="saveSettings" value="default">保存</button>
+          <button value="cancel" class="ghost">取消</button>
+          <button id="saveSettings" value="default" class="primary">保存并刷新</button>
         </menu>
       </form>
     </dialog>
@@ -72,4 +138,3 @@
   <script src="app.js"></script>
 </body>
 </html>
-

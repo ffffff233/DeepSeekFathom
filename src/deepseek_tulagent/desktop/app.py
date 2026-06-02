@@ -9,8 +9,8 @@ import traceback
 from typing import Any
 
 from .. import __version__
-from ..agent import TuLAgent
-from ..config import Settings, get_settings, save_file_config
+from ..agent import TuLAgent, compact_context_messages, estimate_message_tokens
+from ..config import Settings, get_settings, merge_file_config
 from ..messages import Message
 from ..policy import ThinkingMode
 from ..provider import DeepSeekClient
@@ -40,29 +40,40 @@ class DesktopApi:
             "workspace": str(self.settings.workspace),
             "baseUrl": self.settings.base_url,
             "model": self.settings.model,
+            "providerFormat": self.settings.provider_format,
             "mode": self.mode,
             "thinking": self.thinking.name,
             "modes": list(MODES),
+            "modeDescriptions": {
+                "plan": "只读规划，不写文件，不跑 shell",
+                "review": "读取和诊断，危险动作需要确认",
+                "agent": "少量权限，写文件/shell 需要确认",
+                "trusted": "可信工作区，网络和写入仍有确认",
+                "yolo": "自动确认受限工具",
+                "root": "最高权限，直接执行",
+            },
             "thinkingModes": ThinkingMode.names(),
             "skills": [asdict(skill) | {"path": str(skill.path)} for skill in SkillStore(self.settings.workspace).list()],
             "sessionId": self.session.session_id if self.session else None,
             "apiKeySet": bool(self.settings.api_key),
-            "compatFormats": ["DeepSeek", "OpenAI-compatible"],
+            "autoCompact": True,
+            "compatFormats": ["deepseek", "openai-compatible"],
         }
 
     def configure(self, data: dict[str, Any]) -> dict[str, Any]:
         config: dict[str, Any] = {}
-        if isinstance(data.get("apiKey"), str) and data["apiKey"]:
-            config["api_key"] = data["apiKey"]
-        if isinstance(data.get("baseUrl"), str) and data["baseUrl"]:
-            config["base_url"] = data["baseUrl"].rstrip("/")
-        if isinstance(data.get("model"), str) and data["model"]:
-            config["model"] = data["model"]
-        if isinstance(data.get("defaultMode"), str) and data["defaultMode"]:
-            config["default_mode"] = data["defaultMode"]
-        if isinstance(data.get("defaultThinking"), str) and data["defaultThinking"]:
-            config["default_thinking"] = data["defaultThinking"]
-        save_file_config(config)
+        for source, target in {
+            "apiKey": "api_key",
+            "baseUrl": "base_url",
+            "model": "model",
+            "providerFormat": "provider_format",
+            "defaultMode": "default_mode",
+            "defaultThinking": "default_thinking",
+        }.items():
+            value = data.get(source)
+            if isinstance(value, str) and value.strip():
+                config[target] = value.strip().rstrip("/") if source == "baseUrl" else value.strip()
+        merge_file_config(config)
         self.settings = get_settings()
         self.mode = self.settings.default_mode
         self.thinking = ThinkingMode.resolve(self.settings.default_thinking)
@@ -94,6 +105,17 @@ class DesktopApi:
     def sessions(self) -> list[dict[str, Any]]:
         return SessionStore(self.settings.workspace).list()
 
+    def rename_session(self, session_id: str, title: str) -> dict[str, Any]:
+        title = " ".join(str(title).strip().split())[:80]
+        if not title:
+            return {"ok": False, "error": "empty title"}
+        SessionStore(self.settings.workspace).update_metadata(session_id, title=title)
+        return {"ok": True, "sessions": self.sessions()}
+
+    def pin_session(self, session_id: str, pinned: bool = True) -> dict[str, Any]:
+        SessionStore(self.settings.workspace).update_metadata(session_id, pinned=bool(pinned))
+        return {"ok": True, "sessions": self.sessions()}
+
     def resume(self, session_id: str) -> dict[str, Any]:
         self.session = SessionStore(self.settings.workspace).load(session_id)
         return {"ok": True, "sessionId": self.session.session_id, "messages": serialize_messages(self.session.messages)}
@@ -101,6 +123,14 @@ class DesktopApi:
     def new_session(self) -> dict[str, Any]:
         self.session = None
         return {"ok": True}
+
+    def compact(self) -> dict[str, Any]:
+        if self.session is None:
+            return {"ok": False, "error": "no active session"}
+        before = estimate_message_tokens(self.session.messages)
+        self.session.messages = compact_context_messages(self.session.messages, self.settings.model, force=True)
+        after = estimate_message_tokens(self.session.messages)
+        return {"ok": True, "before": before, "after": after, "messages": serialize_messages(self.session.messages)}
 
     def save_upload(self, file: dict[str, Any]) -> dict[str, Any]:
         name = safe_upload_name(str(file.get("name") or "upload.bin"))
@@ -145,6 +175,7 @@ class DesktopApi:
                     approve=(lambda _name, _args: True) if self.mode in {"root", "yolo"} else None,
                 ).run(prompt, stream=True, on_delta=delta, on_event=event, session=self.session)
                 self.session = SessionStore(self.settings.workspace).load(result.session_id)
+                ensure_session_title(self.settings.workspace, self.session)
                 self._emit("turn:done", {"sessionId": result.session_id, "rounds": result.rounds})
             except Exception as exc:
                 self._emit("turn:error", {"error": str(exc), "trace": traceback.format_exc(limit=8)})
@@ -168,6 +199,17 @@ def serialize_messages(messages: list[Message]) -> list[dict[str, str]]:
     return visible[-40:]
 
 
+def ensure_session_title(workspace: Path, session: Session) -> None:
+    store = SessionStore(workspace)
+    meta = store.metadata(session.session_id)
+    if meta.get("title"):
+        return
+    first_user = next((message.content for message in session.messages if message.role == "user"), "")
+    from ..session import session_title_from_text
+
+    store.update_metadata(session.session_id, title=session_title_from_text(first_user))
+
+
 def parse_agent_event(text: str) -> dict[str, str]:
     if text.startswith("tool "):
         rest = text.removeprefix("tool ").strip()
@@ -179,6 +221,8 @@ def parse_agent_event(text: str) -> dict[str, str]:
         return {"kind": "thinking", "name": "internal", "detail": text}
     if text.startswith("subagent "):
         return {"kind": "subagent", "name": "subagent", "detail": text}
+    if text.startswith("skill "):
+        return {"kind": "skill", "name": "skill", "detail": text}
     if text.startswith("context compacted"):
         return {"kind": "compact", "name": "context", "detail": text}
     return {"kind": "event", "name": "agent", "detail": text}

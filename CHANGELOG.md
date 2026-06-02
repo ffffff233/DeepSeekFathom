@@ -1,5 +1,29 @@
 # 更新记录 / Changelog
 
+## v0.1.35
+
+中文：
+
+- 重做桌面端视觉结构：改为深色开发者工作台，左侧会话/技能，中间 transcript，右侧运行状态和能力面板。
+- 桌面端突出 TuLAgent 自有能力：自动压缩、手动压缩、子代理、技能目录、工具调用和内部思考事件。
+- 修复桌面端自定义 API 配置：保存时不再清空旧 API key，第三方 OpenAI 兼容接口可切换 `provider_format`。
+- OpenAI-compatible 模式不再发送 DeepSeek 专属 `thinking` / `reasoning_effort` 字段。
+- 桌面端新增手动压缩按钮和子代理任务插入按钮。
+- 输入框上方新增主控制台，可直接切换模型、思考模式、权限模式和接口格式。
+- 新增对话保存状态、会话 ID 展示、置顶会话、复制会话 ID、重命名会话。
+- 右侧面板新增权限模式说明，方便只给模型一点权限或切到最高权限。
+
+English:
+
+- Reworked the desktop UI into a dark developer workspace with session/skill navigation, central transcript, and a right-side runtime/capability inspector.
+- Surfaced TuLAgent-specific features: auto/manual compaction, subagents, skills, tool calls, and internal-thinking events.
+- Fixed desktop custom API configuration so saving no longer clears an existing API key and OpenAI-compatible providers can switch `provider_format`.
+- OpenAI-compatible mode no longer sends DeepSeek-only `thinking` / `reasoning_effort` fields.
+- Added desktop actions for manual context compaction and subagent task insertion.
+- Added a composer-level control console for model, thinking, permission, and provider-format switching.
+- Added conversation save state, session id display, pinned sessions, copy-session-id, and rename-session actions.
+- Added permission-mode descriptions in the right inspector.
+
 ## v0.1.34
 
 中文：

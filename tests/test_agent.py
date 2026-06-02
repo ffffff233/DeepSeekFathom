@@ -10,7 +10,7 @@ import zipfile
 
 from deepseek_tulagent.agent import TuLAgent, compact_context_messages, is_question_mark_only, parse_tool_call, plainify_assistant_text, promises_more_work, trim_tool_content, tool_result_message
 from deepseek_tulagent.cli import main
-from deepseek_tulagent.config import Settings, get_settings, resolve_model
+from deepseek_tulagent.config import Settings, get_settings, merge_file_config, resolve_model
 from deepseek_tulagent.policy import ApprovalPolicy, ThinkingMode
 from deepseek_tulagent.provider import apply_thinking_payload
 from deepseek_tulagent.session import SessionStore
@@ -426,6 +426,25 @@ def test_deepseek_payload_includes_thinking_controls(tmp_path: Path):
     assert payload["thinking"] == {"type": "disabled"}
     assert "reasoning_effort" not in payload
 
+    payload = {}
+    apply_thinking_payload(payload, settings(tmp_path).with_runtime(thinking_enabled=True))
+    assert "thinking" in payload
+    openai_settings = Settings(
+        api_key="test",
+        base_url="https://example.com",
+        model="gpt-4o",
+        workspace=tmp_path,
+        max_tool_rounds=4,
+        max_tokens=8192,
+        request_timeout=180,
+        default_mode="root",
+        default_thinking="fast",
+        provider_format="openai-compatible",
+    )
+    payload = {}
+    apply_thinking_payload(payload, openai_settings)
+    assert payload == {}
+
 
 def test_codex_style_workspace_tools(tmp_path: Path):
     (tmp_path / "src").mkdir()
@@ -674,11 +693,72 @@ def test_desktop_upload_saves_file(monkeypatch, tmp_path: Path):
     assert ".." not in result["name"]
 
 
+def test_desktop_configure_merges_existing_key(monkeypatch, tmp_path: Path):
+    import deepseek_tulagent.desktop.app as desktop
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("DSTUL_CONFIG_HOME", str(tmp_path / "config-home"))
+    merge_file_config({"api_key": "sk-old", "base_url": "https://api.deepseek.com", "model": "deepseek-v4-flash"})
+    api = desktop.DesktopApi()
+    result = api.configure({"baseUrl": "https://example.com/v1", "model": "gpt-4o", "providerFormat": "openai-compatible"})
+    settings_obj = get_settings()
+    assert settings_obj.api_key == "sk-old"
+    assert settings_obj.base_url == "https://example.com/v1"
+    assert settings_obj.model == "gpt-4o"
+    assert settings_obj.provider_format == "openai-compatible"
+    assert result["providerFormat"] == "openai-compatible"
+
+
+def test_desktop_manual_compact(monkeypatch, tmp_path: Path):
+    import deepseek_tulagent.desktop.app as desktop
+    from deepseek_tulagent.messages import Message
+    from deepseek_tulagent.session import Session
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("DSTUL_CONFIG_HOME", str(tmp_path / "config-home"))
+    api = desktop.DesktopApi()
+    api.session = Session(tmp_path, session_id="s")
+    api.session.messages = [Message("system", "system")] + [Message("user", "old " + "x" * 200) for _ in range(20)]
+    result = api.compact()
+    assert result["ok"] is True
+    assert result["after"] > 0
+    assert len(api.session.messages) < 21
+    assert "Auto-compressed earlier conversation context" in api.session.messages[1].content
+    assert isinstance(result["messages"], list)
+
+
+def test_desktop_session_metadata_pin_and_rename(monkeypatch, tmp_path: Path):
+    import deepseek_tulagent.desktop.app as desktop
+    from deepseek_tulagent.messages import Message
+    from deepseek_tulagent.session import Session, SessionStore
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("DSTUL_CONFIG_HOME", str(tmp_path / "config-home"))
+    session = Session(tmp_path, session_id="abc")
+    session.append(Message("user", "请检查这个项目并修复测试失败的问题"))
+    api = desktop.DesktopApi()
+    renamed = api.rename_session("abc", "项目测试修复")
+    assert renamed["ok"] is True
+    pinned = api.pin_session("abc", True)
+    assert pinned["ok"] is True
+    rows = SessionStore(tmp_path).list()
+    assert rows[0]["title"] == "项目测试修复"
+    assert rows[0]["pinned"] is True
+
+
+def test_session_title_from_text():
+    from deepseek_tulagent.session import session_title_from_text
+
+    assert session_title_from_text("  你好   世界  ") == "你好 世界"
+    assert session_title_from_text("") == "未命名会话"
+
+
 def test_desktop_event_parser():
     from deepseek_tulagent.desktop.app import parse_agent_event
 
     assert parse_agent_event("tool run_shell command=ls") == {"kind": "tool", "name": "run_shell", "detail": "command=ls"}
     assert parse_agent_event("thinking pass 1/2")["kind"] == "thinking"
+    assert parse_agent_event("skill repo-debug")["kind"] == "skill"
     assert parse_agent_event("done read_file") == {"kind": "done", "name": "read_file", "detail": ""}
 
 
