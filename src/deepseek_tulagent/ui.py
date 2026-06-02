@@ -204,6 +204,13 @@ def read_composer(prompt: str, slash_items: list[tuple[str, str]] | None = None)
             if char == "/" and not buffer and slash_items:
                 selected = slash_select(slash_items)
                 if selected:
+                    insertion = slash_selection_insertion(selected)
+                    if insertion is not None:
+                        buffer.extend(insertion)
+                        sys.stdout.write("\r\033[2K")
+                        sys.stdout.write(prompt + insertion)
+                        sys.stdout.flush()
+                        continue
                     sys.stdout.write(prompt + selected + "\n")
                     sys.stdout.flush()
                     return selected
@@ -229,6 +236,14 @@ def choose_palette(items: list[tuple[str, str]], title: str = "commands") -> str
         return slash_select(items, title=title)
     finally:
         termios.tcsetattr(fd, termios.TCSADRAIN, old)
+
+
+def slash_selection_insertion(selection: str) -> str | None:
+    if selection.startswith("/skill "):
+        name = selection.split(maxsplit=1)[1].strip()
+        if name:
+            return f"Use skill {name}: "
+    return None
 
 
 def slash_select(items: list[tuple[str, str]], title: str = "commands") -> str | None:

@@ -112,6 +112,9 @@ Common commands:
 Discovered skills are shown in the same palette as `/skill <name>` entries.
 
 `/model` opens the model picker and switches the current session model. `/models` only prints the live model list.
+Selecting a skill from the `/` palette inserts `Use skill <name>: ` into the composer so you can keep typing the task before sending it to the agent.
+
+See [CHANGELOG.md](CHANGELOG.md) for update history.
 
 ## Permission Modes
 

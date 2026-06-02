@@ -127,6 +127,9 @@ root + fast + deepseek-v4-flash
 ```
 
 `/model` 会打开模型选择面板，回车后切换当前会话模型；`/models` 只打印模型列表。
+在 `/` 面板里选中技能时，不会立刻执行命令，而是把 `Use skill <name>: ` 插入输入框，你可以继续补充任务再回车发送给 AI。
+
+更新记录见 [CHANGELOG.md](CHANGELOG.md)。
 
 ## 会话恢复
 

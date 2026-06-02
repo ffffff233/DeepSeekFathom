@@ -13,7 +13,7 @@ from deepseek_tulagent.policy import ApprovalPolicy, ThinkingMode
 from deepseek_tulagent.session import SessionStore
 from deepseek_tulagent.skills import SkillStore
 from deepseek_tulagent.tui import ChatTui, TuiState
-from deepseek_tulagent.ui import filter_slash_items
+from deepseek_tulagent.ui import filter_slash_items, slash_selection_insertion
 from deepseek_tulagent.tools import ToolError, ToolRegistry
 
 
@@ -456,6 +456,11 @@ def test_slash_filter_matches_command_initial():
     assert filter_slash_items(items, "m")[0][0] == "/model"
     assert filter_slash_items(items, "mo")[0][0] == "/model"
     assert filter_slash_items(items, "t")[0][0] == "/think fast"
+
+
+def test_slash_skill_selection_inserts_agent_prompt():
+    assert slash_selection_insertion("/skill repo-debug") == "Use skill repo-debug: "
+    assert slash_selection_insertion("/model") is None
 
 
 def test_slash_select_draw_clips_to_terminal_width(monkeypatch):
