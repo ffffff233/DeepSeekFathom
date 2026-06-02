@@ -135,6 +135,8 @@ Install an older version:
 
 ```bash
 git fetch --tags
+git checkout v0.1.2
+# or
 git checkout v0.1.1
 ```
 

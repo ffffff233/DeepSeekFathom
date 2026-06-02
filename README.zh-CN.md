@@ -168,6 +168,8 @@ deepseekTul update
 
 ```bash
 git fetch --tags
+git checkout v0.1.2
+# 或
 git checkout v0.1.1
 ```
 

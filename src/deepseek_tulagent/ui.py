@@ -271,11 +271,13 @@ def slash_select(items: list[tuple[str, str]], title: str = "commands") -> str |
                 return command
             if char == "\x1b":
                 next_chars = read_escape_suffix()
-                if next_chars == "[A":
+                if next_chars in {"[A", "OA"}:
                     selected = max(0, selected - 1)
                     continue
-                if next_chars == "[B":
+                if next_chars in {"[B", "OB"}:
                     selected = min(max(len(filtered) - 1, 0), selected + 1)
+                    continue
+                if next_chars.startswith(("[", "O")):
                     continue
                 return None
             if char in {"\x7f", "\b"}:
@@ -286,6 +288,12 @@ def slash_select(items: list[tuple[str, str]], title: str = "commands") -> str |
                 continue
             if char == "\x03":
                 raise KeyboardInterrupt
+            if char in {"k", "K"} and not query:
+                selected = max(0, selected - 1)
+                continue
+            if char in {"j", "J"} and not query:
+                selected = min(max(len(filtered) - 1, 0), selected + 1)
+                continue
             if char.isprintable():
                 query += char
                 selected = 0
@@ -313,36 +321,30 @@ def draw_slash_select(items: list[tuple[str, str]], query: str, selected: int, p
     width, height = shutil.get_terminal_size((88, 24))
     width = max(width, 24)
     height = max(height, 12)
-    box_width = min(width - 2, 76)
-    inner_width = max(box_width - 4, 20)
+    inner_width = max(width - 2, 20)
     visible = items[:6]
     total_lines = 3 + max(len(visible), 1)
-    top = max((height - total_lines) // 3, 1)
-    left = " " * max((width - box_width) // 2, 0)
+    top = max((height - total_lines) // 4, 1)
     sys.stdout.write("\033[H\033[2J")
     sys.stdout.write("\n" * top)
-    title_text = f" {title} /{query}" if query else f" {title}"
-    sys.stdout.write(left + color("╭─", CYAN) + color(clip_visible(title_text, inner_width), BOLD + WHITE))
-    title_fill = max(box_width - visible_len(title_text) - 3, 0)
-    sys.stdout.write(color("─" * title_fill + "╮", CYAN) + "\n")
+    title_text = f"{title} /{query}" if query else title
+    sys.stdout.write(color(clip_visible(title_text, inner_width), BOLD + WHITE) + "\n")
     command_width = min(max(max((len(item[0]) for item in visible), default=8), 12), 22)
     for index, (command, description) in enumerate(visible):
-        marker = "›" if index == selected else " "
+        marker = ">" if index == selected else " "
         desc_width = max(inner_width - command_width - 3, 8)
         desc = clip_visible(description, desc_width)
         line = f"{marker} {command:<{command_width}} {desc}"
         line = clip_visible(line, inner_width)
-        line = pad_ansi(line, inner_width)
         if index == selected:
             line = color(line, BOLD + WHITE)
         else:
             line = color(line, GRAY)
-        sys.stdout.write(left + color("│ ", CYAN) + line + color(" │", CYAN) + "\n")
+        sys.stdout.write(line + "\n")
     if not visible:
-        sys.stdout.write(left + color("│ ", CYAN) + color(pad_ansi("no matches", inner_width), GRAY) + color(" │", CYAN) + "\n")
-    footer = clip_visible("enter run · ↑/↓ select · esc cancel · backspace closes", inner_width)
-    sys.stdout.write(left + color("│ ", CYAN) + color(pad_ansi(footer, inner_width), GRAY) + color(" │", CYAN) + "\n")
-    sys.stdout.write(left + color("╰" + "─" * (box_width - 2) + "╯", CYAN) + "\n")
+        sys.stdout.write(color("no matches", GRAY) + "\n")
+    footer = clip_visible("enter: run | up/down or j/k: select | esc/backspace: cancel", inner_width)
+    sys.stdout.write(color(footer, GRAY) + "\n")
     sys.stdout.flush()
     return total_lines
 
@@ -369,11 +371,13 @@ def exit_palette_screen() -> None:
 
 def read_escape_suffix() -> str:
     chars: list[str] = []
-    for timeout in (0.15, 0.05):
+    for timeout in (0.35, 0.2, 0.05, 0.02):
         ready, _, _ = select.select([sys.stdin], [], [], timeout)
         if not ready:
             break
         chars.append(sys.stdin.read(1))
+        if "".join(chars) in {"[A", "[B", "[C", "[D", "OA", "OB", "OC", "OD"}:
+            break
     return "".join(chars)
 
 

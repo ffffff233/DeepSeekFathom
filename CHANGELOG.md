@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Reworked the slash palette into a plain left-aligned vertical list and made arrow-key parsing more tolerant; `j/k` also move the selection.
 - Added version/update commands and startup update checks against GitHub tags.
 - Added safe update behavior: user config, API keys, model defaults, sessions, skills, and uncommitted source edits are not overwritten.
 - Slash palette skill selection now inserts `Use skill <name>: ` into the composer so the user can continue typing a task and send it to the agent.
