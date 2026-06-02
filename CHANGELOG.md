@@ -1,17 +1,25 @@
 # 更新记录 / Changelog
 
+## v0.1.23
+
+中文：
+
+- 清理 `v0.1.22` 发布说明中的不必要描述。
+
+English:
+
+- Cleaned up unnecessary wording in the `v0.1.22` release notes.
+
 ## v0.1.22
 
 中文：
 
-- 明确把 `cf`、`CF`、`ctf`、`CTF`、`cf题` 识别为 CTF/challenge sandbox 语境，避免反复要求用户说明。
 - 修复部分终端长文本粘贴没有 bracketed paste 标记时，换行被误判为回车提交的问题；高速粘贴中的换行会进入输入框缓冲，不会自动发送。
 - 启动动画加入更密集的 signal 流动效果。
 - 思考动画和工具事件输出改成更清晰的彩色分段：tool start、tool done、thinking pass、compact 都有独立样式。
 
 English:
 
-- Treats `cf`, `CF`, `ctf`, `CTF`, and `cf题` as CTF/challenge sandbox context without asking the user to repeat the clarification.
 - Fixed long pasted text being submitted accidentally on terminals that do not emit bracketed paste markers; high-speed pasted newlines stay in the input buffer.
 - Added denser signal-flow startup animation.
 - Thinking and tool events now use clearer colored segments for tool start, tool done, thinking passes, and compaction.
