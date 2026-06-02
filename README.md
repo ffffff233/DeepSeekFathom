@@ -215,14 +215,15 @@ Discovered skill summaries are injected into the agent prompt at startup/run tim
 
 | Mode | Route | Max output | API thinking | Internal passes |
 | --- | --- | ---: | --- | ---: |
-| `off` | `deepseek-v4-flash` | 4K | disabled | 0 |
-| `instant` | `deepseek-v4-flash` | 8K | disabled | 0 |
-| `fast` | `deepseek-v4-flash` | 32K | high | 0 |
-| `standard` | `deepseek-v4-flash` | 64K | high | 0 |
-| `balanced` | `deepseek-v4-pro` | 128K | high | 1 |
-| `careful` | `deepseek-v4-pro` | 192K | high | 1 |
-| `deep` | `deepseek-v4-pro` | 256K | high | 2 |
-| `deeper` | `deepseek-v4-pro` | 320K | max | 2 |
+| `auto` | auto-selected | 384K | auto | auto |
+| `off` | `deepseek-v4-flash` | 384K | disabled | 0 |
+| `instant` | `deepseek-v4-flash` | 384K | disabled | 0 |
+| `fast` | `deepseek-v4-flash` | 384K | high | 0 |
+| `standard` | `deepseek-v4-flash` | 384K | high | 0 |
+| `balanced` | `deepseek-v4-pro` | 384K | high | 1 |
+| `careful` | `deepseek-v4-pro` | 384K | high | 1 |
+| `deep` | `deepseek-v4-pro` | 384K | high | 2 |
+| `deeper` | `deepseek-v4-pro` | 384K | max | 2 |
 | `max` | `deepseek-v4-pro` | 384K | max | 3 |
 | `ultra` | `deepseek-v4-pro` | 384K | max | 4 |
 

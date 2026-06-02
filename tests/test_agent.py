@@ -174,7 +174,8 @@ def test_thinking_mode_resolves_model_and_budget():
     deep = ThinkingMode.resolve("deep")
     ultra = ThinkingMode.resolve("ultra")
     assert fast.model_hint == "deepseek-v4-flash"
-    assert fast.max_tokens < deep.max_tokens
+    assert fast.max_tokens == 384000
+    assert deep.max_tokens == 384000
     assert ultra.max_tokens == 384000
     assert ultra.reasoning_effort == "max"
     assert deep.deliberation_passes > 0
@@ -438,6 +439,21 @@ def test_interactive_think_command_uses_picker(monkeypatch, tmp_path: Path, caps
     assert code == 0
     assert "thinking set to deep" in out
     assert "internal_passes=2" in out
+
+
+def test_auto_thinking_uses_model_choice(monkeypatch, tmp_path: Path):
+    import deepseek_tulagent.cli as cli
+
+    class FakeDeepSeekClient:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def chat(self, _messages):
+            return "deep"
+
+    monkeypatch.setattr(cli, "DeepSeekClient", FakeDeepSeekClient)
+    selected = cli.choose_auto_thinking(settings(tmp_path), "hard debugging task")
+    assert selected.name == "deep"
 
 
 def test_internal_thinking_runs_extra_model_pass(tmp_path: Path):

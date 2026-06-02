@@ -223,7 +223,7 @@ def read_composer(prompt: str, slash_items: list[tuple[str, str]] | None = None)
                 sys.stdout.write(char)
                 sys.stdout.flush()
     finally:
-        termios.tcsetattr(fd, termios.TCSADRAIN, old)
+        termios.tcsetattr(fd, termios.TCSANOW, old)
 
 
 def choose_palette(items: list[tuple[str, str]], title: str = "commands") -> str | None:
@@ -235,7 +235,7 @@ def choose_palette(items: list[tuple[str, str]], title: str = "commands") -> str
         tty.setraw(fd)
         return slash_select(items, title=title)
     finally:
-        termios.tcsetattr(fd, termios.TCSADRAIN, old)
+        termios.tcsetattr(fd, termios.TCSANOW, old)
 
 
 def slash_selection_insertion(selection: str) -> str | None:

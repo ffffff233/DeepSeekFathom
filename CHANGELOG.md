@@ -1,5 +1,21 @@
 # 更新记录 / Changelog
 
+## v0.1.6
+
+中文：
+
+- 所有思考模式最大输出上限统一提升到 384K，包括 `off`、`instant`、`fast`。
+- 新增 `auto` 思考模式：由模型先判断任务难度，再自动选择具体思考档位。
+- 选择器退出后终端立即恢复，降低从 `/think` 或 `/model` 回来后输入不显示的问题。
+- 系统提示默认要求少用星号、少用花哨 Markdown。
+
+English:
+
+- Raised every thinking mode to a 384K max output cap, including `off`, `instant`, and `fast`.
+- Added `auto` thinking mode, where the model chooses the concrete thinking depth for the task.
+- Restores terminal mode immediately after pickers to reduce input-not-showing issues after `/think` or `/model`.
+- Prompt now asks the model to avoid decorative asterisks and heavy Markdown by default.
+
 ## v0.1.5
 
 中文：

@@ -39,6 +39,7 @@ Rules:
 - Tool use must be emitted as the JSON object above. Do not put commands in bash/code fences when you want them executed.
 - Never say a command, download, search, or file operation was executed unless it came from a Tool result.
 - If the user asks you to inspect a live URL, GitHub repository, local files, shell state, or service state, use the appropriate tool instead of describing what you would run.
+- Keep final replies visually plain. Avoid decorative Markdown, bold markers, and asterisk bullets unless code syntax or shell globbing requires `*`.
 - To start a long-running/background process, use start_service(name, command). Do not use shell "&" backgrounding.
 - For text search, prefer a narrow path and small max_matches. Broad searches can time out.
 - If no tool is needed, answer directly.

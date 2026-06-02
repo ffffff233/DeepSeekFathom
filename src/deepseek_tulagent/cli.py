@@ -148,16 +148,24 @@ def main(argv: list[str] | None = None) -> int:
             print(f"\n[{text}]", file=sys.stderr)
 
         approver = (lambda _name, _args: True) if args.yes or args.mode in {"yolo", "root"} else None
+        if thinking.name == "auto":
+            thinking = choose_auto_thinking(runtime_settings, args.prompt)
+            runtime_settings = runtime_settings.with_runtime(
+                model=thinking.model_hint,
+                max_tokens=thinking.max_tokens,
+                thinking_enabled=thinking.api_thinking,
+                reasoning_effort=thinking.reasoning_effort,
+            )
         if args.stream:
-            result = TuLAgent(runtime_settings, mode=args.mode, thinking=args.think, approve=approver).run(
+            result = TuLAgent(runtime_settings, mode=args.mode, thinking=thinking.name, approve=approver).run(
                 args.prompt,
                 stream=True,
                 on_delta=delta if not args.json else None,
                 on_event=event if not args.json else None,
             )
         else:
-            with ThinkingSpinner(f"thinking:{args.think}"):
-                result = TuLAgent(runtime_settings, mode=args.mode, thinking=args.think, approve=approver).run(
+            with ThinkingSpinner(f"thinking:{thinking.name}"):
+                result = TuLAgent(runtime_settings, mode=args.mode, thinking=thinking.name, approve=approver).run(
                     args.prompt,
                     stream=False,
                     on_event=event if not args.json else None,
@@ -374,9 +382,20 @@ def interactive(settings, mode: str, thinking_name: str, yes: bool, resume: str 
             print(f"  {text}", flush=True)
 
         approver = (lambda _name, _args: True) if yes or current_mode in {"yolo", "root"} else confirm_tool
+        run_thinking = thinking
+        run_settings = settings
+        if thinking.name == "auto":
+            run_thinking = choose_auto_thinking(settings, prompt)
+            run_settings = settings.with_runtime(
+                model=run_thinking.model_hint,
+                max_tokens=run_thinking.max_tokens,
+                thinking_enabled=run_thinking.api_thinking,
+                reasoning_effort=run_thinking.reasoning_effort,
+            )
+            print(f"auto think -> {run_thinking.name}; model={run_settings.model}; max_tokens={run_settings.max_tokens}")
         try:
-            with ThinkingSpinner(f"thinking:{thinking.name}"):
-                result = TuLAgent(settings, mode=current_mode, thinking=thinking.name, approve=approver).run(
+            with ThinkingSpinner(f"thinking:{run_thinking.name}"):
+                result = TuLAgent(run_settings, mode=current_mode, thinking=run_thinking.name, approve=approver).run(
                     prompt,
                     stream=False,
                     on_event=event,
@@ -598,6 +617,29 @@ def thinking_description(name: str) -> str:
     mode = ThinkingMode.resolve(name)
     passes = f"{mode.deliberation_passes} internal pass" + ("" if mode.deliberation_passes == 1 else "es")
     return f"{mode.model_hint}, {mode.max_tokens} max tokens, {passes}"
+
+
+def choose_auto_thinking(settings, prompt: str) -> ThinkingMode:
+    candidates = ["instant", "fast", "standard", "balanced", "careful", "deep", "deeper", "max", "ultra"]
+    selector_settings = settings.with_runtime(
+        model="deepseek-v4-flash",
+        max_tokens=512,
+        thinking_enabled=False,
+        reasoning_effort=None,
+    )
+    try:
+        choice = DeepSeekClient(selector_settings).chat(
+            [
+                Message("system", "Choose one thinking mode for the user's task. Return only one mode name, no punctuation."),
+                Message("user", "Modes: " + ", ".join(candidates) + "\nTask:\n" + prompt[:8000]),
+            ]
+        ).strip().lower()
+    except Exception:
+        return ThinkingMode.resolve("balanced")
+    for name in candidates:
+        if name in choice.split() or choice == name:
+            return ThinkingMode.resolve(name)
+    return ThinkingMode.resolve("balanced")
 
 
 def print_session_handoff(session_id: str) -> None:
