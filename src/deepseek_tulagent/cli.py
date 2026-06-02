@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 import sys
+import time
 
 from . import __version__
 from .agent import TuLAgent, compact_context_messages, estimate_message_tokens, parse_tool_call
@@ -257,6 +258,8 @@ def interactive(settings, mode: str, thinking_name: str, yes: bool, resume: str 
 
     current_mode = mode
     last_session_id = session.session_id if session else None
+    last_submitted_prompt = ""
+    last_submitted_at = 0.0
     while True:
         try:
             prompt = read_composer(
@@ -270,6 +273,12 @@ def interactive(settings, mode: str, thinking_name: str, yes: bool, resume: str 
             return 0
         if not prompt:
             continue
+        now = time.monotonic()
+        if prompt == last_submitted_prompt and now - last_submitted_at < 1.0:
+            print("input    : duplicate ignored")
+            continue
+        last_submitted_prompt = prompt
+        last_submitted_at = now
         if prompt in {"/exit", "/quit"}:
             if last_session_id:
                 print_session_handoff(last_session_id)

@@ -14,7 +14,7 @@ from deepseek_tulagent.provider import apply_thinking_payload
 from deepseek_tulagent.session import SessionStore
 from deepseek_tulagent.skills import SkillStore
 from deepseek_tulagent.tui import ChatTui, TuiState
-from deepseek_tulagent.ui import display_width, filter_slash_items, read_escape_suffix, read_raw_char, redraw_composer, selected_window_start, tail_for_width, slash_selection_insertion
+from deepseek_tulagent.ui import display_width, filter_slash_items, read_bracketed_paste, read_escape_suffix, read_raw_char, redraw_composer, selected_window_start, tail_for_width, slash_selection_insertion
 from deepseek_tulagent.tools import ToolError, ToolRegistry
 
 
@@ -539,10 +539,21 @@ def test_context_compaction_keeps_recent_messages(monkeypatch):
     messages.extend(Message("user", "old " + str(index) + " " + ("x" * 200)) for index in range(20))
     monkeypatch.setattr(agent, "context_window_tokens", lambda _model: 200)
 
-    compacted = compact_context_messages(messages, "tiny")
+    compacted = compact_context_messages(messages, "tiny", force=True)
     assert len(compacted) < len(messages)
     assert "Auto-compressed earlier conversation context" in compacted[1].content
     assert "old 19" in compacted[-1].content
+
+
+def test_auto_context_compaction_is_disabled_by_default(monkeypatch):
+    from deepseek_tulagent.messages import Message
+    import deepseek_tulagent.agent as agent
+
+    messages = [Message("system", "system")]
+    messages.extend(Message("user", "old " + ("x" * 200)) for _ in range(20))
+    monkeypatch.setattr(agent, "context_window_tokens", lambda _model: 200)
+
+    assert compact_context_messages(messages, "tiny") is messages
 
 
 def test_update_version_comparison():
@@ -730,6 +741,18 @@ def test_raw_char_reads_complete_utf8_character():
     try:
         os.write(write_fd, "你".encode("utf-8"))
         assert read_raw_char(read_fd) == "你"
+    finally:
+        os.close(read_fd)
+        os.close(write_fd)
+
+
+def test_bracketed_paste_keeps_newlines_in_buffer():
+    read_fd, write_fd = os.pipe()
+    try:
+        os.write(write_fd, "第一行\n第二行\x1b[201~".encode("utf-8"))
+        buffer: list[str] = []
+        read_bracketed_paste(read_fd, buffer)
+        assert "".join(buffer) == "第一行\n第二行"
     finally:
         os.close(read_fd)
         os.close(write_fd)

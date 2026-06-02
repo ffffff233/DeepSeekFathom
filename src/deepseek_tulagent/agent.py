@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
+import os
 import re
 import subprocess
 from typing import Any, Callable
@@ -225,6 +226,8 @@ def compact_context_messages(
     on_event: Callable[[str], None] | None = None,
     force: bool = False,
 ) -> list[Message]:
+    if not force and os.getenv("DSTUL_AUTO_COMPACT", "").lower() not in {"1", "true", "yes"}:
+        return messages
     limit = context_window_tokens(model)
     threshold = int(limit * 0.82)
     estimated = estimate_message_tokens(messages)

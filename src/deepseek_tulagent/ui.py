@@ -206,9 +206,16 @@ def read_composer(prompt: str, slash_items: list[tuple[str, str]] | None = None)
     buffer: list[str] = []
     try:
         tty.setraw(fd)
+        sys.stdout.write("\033[?2004h")
         redraw_composer(prompt, buffer)
         while True:
             char = read_raw_char(fd)
+            if char == "\x1b":
+                suffix = read_escape_suffix(fd)
+                if suffix == "[200~":
+                    read_bracketed_paste(fd, buffer)
+                    redraw_composer(prompt, buffer)
+                continue
             if char in {"\r", "\n"}:
                 sys.stdout.write("\r\n")
                 sys.stdout.flush()
@@ -240,6 +247,8 @@ def read_composer(prompt: str, slash_items: list[tuple[str, str]] | None = None)
                 redraw_composer(prompt, buffer)
                 continue
     finally:
+        sys.stdout.write("\033[?2004l")
+        sys.stdout.flush()
         termios.tcsetattr(fd, termios.TCSANOW, old)
 
 
@@ -465,6 +474,22 @@ def read_raw_char(fd: int) -> str:
     while len(data) < needed:
         data.extend(os.read(fd, needed - len(data)))
     return bytes(data).decode("utf-8", errors="ignore")
+
+
+def read_bracketed_paste(fd: int, buffer: list[str]) -> None:
+    tail = ""
+    while True:
+        char = read_raw_char(fd)
+        if not char:
+            return
+        tail += char
+        if tail.endswith("\x1b[201~"):
+            payload = tail[: -len("\x1b[201~")]
+            buffer.extend(payload)
+            return
+        if len(tail) > len("\x1b[201~"):
+            buffer.append(tail[0])
+            tail = tail[1:]
 
 
 def read_escape_suffix(fd: int) -> str:

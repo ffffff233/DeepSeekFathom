@@ -1,5 +1,21 @@
 # 更新记录 / Changelog
 
+## v0.1.15
+
+中文：
+
+- 支持 bracketed paste，粘贴长文本或多行文本时，粘贴内容中的换行不会自动提交。
+- 增加 1 秒内相同输入的重复提交保护，避免同一段长文本被发送两次。
+- 自动上下文压缩默认关闭，避免过早摘要导致忘上下文；需要自动压缩可设置 `DSTUL_AUTO_COMPACT=1`。
+- 手动 `/compact` 仍然可用。
+
+English:
+
+- Added bracketed paste support so pasted long or multiline text does not submit on embedded newlines.
+- Added duplicate-submit protection for identical prompts within one second.
+- Automatic context compaction is now disabled by default to avoid premature context loss; set `DSTUL_AUTO_COMPACT=1` to enable it.
+- Manual `/compact` remains available.
+
 ## v0.1.14
 
 中文：
