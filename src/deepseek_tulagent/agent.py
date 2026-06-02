@@ -92,6 +92,7 @@ class TuLAgent:
 
         final_answer = ""
         rounds = 0
+        last_turn_had_tool_result = False
         round_limit = max_tool_rounds or self.settings.max_tool_rounds
         for rounds in range(1, round_limit + 1):
             model_messages = compact_context_messages(session.messages, self.settings.model, on_event=on_event)
@@ -109,9 +110,21 @@ class TuLAgent:
             if not tool_call:
                 assistant_text = plainify_assistant_text(assistant_text)
                 session.append(Message("assistant", assistant_text))
+                if last_turn_had_tool_result and promises_more_work(assistant_text):
+                    session.append(
+                        Message(
+                            "user",
+                            "You said you would continue with more work, but you did not request a tool. "
+                            "Continue now by returning the next required tool JSON. "
+                            "If the task is actually complete, give the final answer instead.",
+                        )
+                    )
+                    last_turn_had_tool_result = False
+                    continue
                 final_answer = assistant_text
                 break
             session.append(Message("assistant", assistant_text))
+            last_turn_had_tool_result = False
             name, arguments = tool_call
             if on_event:
                 on_event(f"tool {name} {summarize_arguments(arguments)}")
@@ -125,6 +138,7 @@ class TuLAgent:
             if on_event:
                 on_event(f"done {name}")
             session.append(Message("user", f"Tool result from {name}:\n{content}"))
+            last_turn_had_tool_result = True
             if stop_after_tool:
                 return AgentResult(session.session_id, "", rounds)
         else:
@@ -205,6 +219,47 @@ def parse_tool_call(text: str) -> tuple[str, dict[str, Any]] | None:
 def is_question_mark_only(text: str) -> bool:
     stripped = text.strip()
     return bool(stripped) and all(char in {"?", "？"} for char in stripped)
+
+
+def promises_more_work(text: str) -> bool:
+    stripped = re.sub(r"\s+", "", text)
+    if len(stripped) > 260:
+        return False
+    future_cues = (
+        "接下来",
+        "下一步",
+        "继续",
+        "马上",
+        "随后",
+        "然后",
+        "现在继续",
+        "next",
+        "continue",
+    )
+    action_cues = (
+        "执行",
+        "检查",
+        "启动",
+        "验证",
+        "运行",
+        "查看",
+        "创建",
+        "写入",
+        "修改",
+        "搜索",
+        "下载",
+        "放行",
+        "部署",
+        "execute",
+        "check",
+        "start",
+        "verify",
+        "run",
+    )
+    completion_cues = ("已完成", "完成了", "已经完成", "done", "finished")
+    if any(cue in stripped.lower() for cue in completion_cues) and not any(cue in stripped for cue in ("接下来", "下一步", "继续", "然后")):
+        return False
+    return any(cue in stripped for cue in future_cues) and any(cue in stripped for cue in action_cues)
 
 
 def plainify_assistant_text(text: str) -> str:

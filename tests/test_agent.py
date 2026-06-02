@@ -6,7 +6,7 @@ import io
 import os
 import re
 
-from deepseek_tulagent.agent import TuLAgent, compact_context_messages, is_question_mark_only, parse_tool_call, plainify_assistant_text
+from deepseek_tulagent.agent import TuLAgent, compact_context_messages, is_question_mark_only, parse_tool_call, plainify_assistant_text, promises_more_work
 from deepseek_tulagent.cli import main
 from deepseek_tulagent.config import Settings, get_settings, resolve_model
 from deepseek_tulagent.policy import ApprovalPolicy, ThinkingMode
@@ -118,6 +118,33 @@ def test_agent_runs_read_tool_loop(tmp_path: Path):
     assert result.answer == "README says hello."
     assert result.rounds == 2
     assert (tmp_path / ".deepseek-tulagent" / "sessions").exists()
+
+
+def test_agent_continues_after_assistant_promises_next_tool(tmp_path: Path):
+    class ContinueClient:
+        def __init__(self):
+            self.calls = 0
+
+        def chat(self, messages):
+            self.calls += 1
+            if self.calls == 1:
+                return '{"tool":"write_file","arguments":{"path":"login.html","content":"ok"}}'
+            if self.calls == 2:
+                return "文件已写入。接下来继续执行后续步骤：检查网络环境、启动服务器、验证运行状态。"
+            if self.calls == 3:
+                assert "you did not request a tool" in messages[-1].content.lower()
+                return '{"tool":"start_service","arguments":{"name":"login","command":"python3 -m http.server 8097"}}'
+            return "服务器已启动。"
+
+    result = TuLAgent(settings(tmp_path), mode="root", client=ContinueClient()).run("写登录 HTML，然后启动服务")
+    assert result.answer == "服务器已启动。"
+    assert result.rounds == 4
+
+
+def test_promises_more_work_detection_is_narrow():
+    assert promises_more_work("接下来继续执行后续步骤：检查网络环境、启动服务器、验证运行状态。")
+    assert not promises_more_work("文件已写入成功。")
+    assert not promises_more_work("已经完成。端口 8097 正在运行。")
 
 
 def test_agent_can_continue_search_after_empty_result(tmp_path: Path):

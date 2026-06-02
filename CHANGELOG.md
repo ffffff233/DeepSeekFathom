@@ -1,5 +1,17 @@
 # 更新记录 / Changelog
 
+## v0.1.19
+
+中文：
+
+- 修复工具执行后模型只说“接下来继续检查/启动/验证”但没有真正继续调用工具，导致对话提前回到输入的问题。
+- Agent 会识别这类未完成承诺，并自动要求模型继续返回下一个工具 JSON 或给出最终结论。
+
+English:
+
+- Fixed turns stopping early after a tool result when the model only said it would continue checking/starting/verifying but did not request the next tool.
+- The agent now detects these unfinished promises and asks the model to continue with the next tool JSON or provide the final answer.
+
 ## v0.1.18
 
 中文：
