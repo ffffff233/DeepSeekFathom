@@ -15,7 +15,7 @@ from deepseek_tulagent.session import SessionStore
 from deepseek_tulagent.skills import SkillStore
 from deepseek_tulagent.tui import ChatTui, TuiState
 from deepseek_tulagent.ui import display_width, filter_slash_items, read_bracketed_paste, read_escape_suffix, read_raw_char, redraw_composer, selected_window_start, tail_for_width, slash_selection_insertion
-from deepseek_tulagent.tools import ToolError, ToolRegistry
+from deepseek_tulagent.tools import ToolError, ToolRegistry, normalize_bing_url
 
 
 class FakeClient:
@@ -105,6 +105,39 @@ def test_agent_runs_read_tool_loop(tmp_path: Path):
     assert result.answer == "README says hello."
     assert result.rounds == 2
     assert (tmp_path / ".deepseek-tulagent" / "sessions").exists()
+
+
+def test_agent_can_continue_search_after_empty_result(tmp_path: Path):
+    class SearchRetryClient:
+        def __init__(self):
+            self.calls = 0
+
+        def chat(self, messages):
+            self.calls += 1
+            if self.calls == 1:
+                return '{"tool":"web_search","arguments":{"query":"美国 近况","max_results":5}}'
+            if self.calls == 2:
+                assert "no web search results parsed" in messages[-1].content
+                return '{"tool":"web_search","arguments":{"query":"美国 最新新闻 2026","max_results":5}}'
+            assert "Reuters" in messages[-1].content
+            return "美国近况总结。"
+
+    class FakeSearchTools:
+        def __init__(self, *_args, **_kwargs):
+            self.calls = 0
+
+        def run(self, name, arguments):
+            self.calls += 1
+            assert name == "web_search"
+            if self.calls == 1:
+                return type("Result", (), {"to_message": lambda _self: '{"ok": false, "output": "no web search results parsed"}'})()
+            return type("Result", (), {"to_message": lambda _self: '{"ok": true, "output": "- Reuters\\n  https://example.com\\n  news"}'})()
+
+    agent = TuLAgent(settings(tmp_path), mode="root", client=SearchRetryClient())
+    agent.tools = FakeSearchTools()
+    result = agent.run("搜索美国近况用必应")
+    assert result.answer == "美国近况总结。"
+    assert result.rounds == 3
 
 
 def test_question_mark_only_goes_to_model_but_ignores_tools(tmp_path: Path):
@@ -307,6 +340,11 @@ def test_trusted_mode_allows_download_tool_when_approved(tmp_path: Path):
     tools = ToolRegistry(tmp_path, policy=ApprovalPolicy.from_mode("trusted"))
     assert "download_url" in tools.names
     assert "web_search" in tools.names
+
+
+def test_normalize_bing_redirect_url():
+    url = "https://www.bing.com/ck/a?u=a1aHR0cHM6Ly9leGFtcGxlLmNvbS9uZXdzP2E9MQ"
+    assert normalize_bing_url(url) == "https://example.com/news?a=1"
 
 
 def test_skill_store_discovers_and_creates_workspace_skills(tmp_path: Path):

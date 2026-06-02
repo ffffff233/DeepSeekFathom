@@ -1,5 +1,21 @@
 # 更新记录 / Changelog
 
+## v0.1.17
+
+中文：
+
+- 修复 `web_search` 用 Bing 搜索中文内容时结果为空、跑偏或只说“换个搜索”但没有继续返回总结的问题。
+- Bing 搜索默认带中文地区和语言参数，并把 Bing 跳转链接清洗成真实目标链接。
+- 搜索结果失败时会把查询词写入工具结果，方便模型继续改写查询并重试。
+- 默认最大输出从 2048 提高到 8192；用户自己的 `DSTUL_MAX_TOKENS` 或配置文件值不会被覆盖。
+
+English:
+
+- Fixed `web_search` Bing searches for Chinese queries returning empty/off-topic results or stopping after saying it would search again.
+- Bing searches now send Chinese market/language parameters and normalize Bing redirect links to real target URLs.
+- Failed search results include the query so the model can retry with a better query.
+- Raised the default max output from 2048 to 8192 without overriding user `DSTUL_MAX_TOKENS` or config values.
+
 ## v0.1.16
 
 中文：

@@ -44,6 +44,7 @@ Rules:
 - If the user message is only `?`, `？`, or repeated question marks, do not infer a task and do not use tools. Ask what they want to ask.
 - To start a long-running/background process, use start_service(name, command). Do not use shell "&" backgrounding.
 - For text search, prefer a narrow path and small max_matches. Broad searches can time out.
+- If a web_search result is empty, irrelevant, or failed and the user asked to search, request one more web_search with a clearer query instead of saying you will search again.
 - If no tool is needed, answer directly.
 - After tool results, continue until the task is complete or clearly blocked.
 """

@@ -261,13 +261,14 @@ class ToolRegistry:
         query = require_str(arguments, "query")
         max_results = int(arguments.get("max_results", 5))
         timeout = int(arguments.get("timeout", 10))
-        url = "https://www.bing.com/search?" + urllib.parse.urlencode({"q": query})
+        params = {"q": query, "mkt": "zh-CN", "setlang": "zh-Hans"}
+        url = "https://www.bing.com/search?" + urllib.parse.urlencode(params)
         request = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 DeepSeekTuL/0.1"})
         with urllib.request.urlopen(request, timeout=timeout) as response:
             html = response.read(1_500_000).decode("utf-8", errors="replace")
         results = parse_bing_results(html, max_results) or parse_duckduckgo_results(html, max_results)
         if not results:
-            return ToolResult(False, "no web search results parsed")
+            return ToolResult(False, f"no web search results parsed for query: {query}")
         return ToolResult(True, "\n\n".join(results))
 
     def start_service(self, arguments: dict[str, Any]) -> ToolResult:
@@ -385,7 +386,7 @@ def parse_bing_results(html: str, max_results: int) -> list[str]:
         title_match = re.search(r'<h2[^>]*>\s*<a[^>]*href="([^"]+)"[^>]*>(.*?)</a>\s*</h2>', block, flags=re.DOTALL)
         if not title_match:
             continue
-        href = unescape(title_match.group(1))
+        href = normalize_bing_url(unescape(title_match.group(1)))
         title = clean_html(title_match.group(2))
         snippet_match = re.search(r'<div class="b_caption"[^>]*>.*?<p[^>]*>(.*?)</p>', block, flags=re.DOTALL)
         snippet = clean_html(snippet_match.group(1)) if snippet_match else ""
@@ -393,6 +394,24 @@ def parse_bing_results(html: str, max_results: int) -> list[str]:
         if len(results) >= max_results:
             break
     return results
+
+
+def normalize_bing_url(url: str) -> str:
+    parsed = urllib.parse.urlparse(url)
+    if parsed.netloc.endswith("bing.com") and parsed.path.startswith("/ck/"):
+        query = urllib.parse.parse_qs(parsed.query)
+        encoded = query.get("u", [""])[0]
+        if encoded.startswith("a1"):
+            try:
+                import base64
+
+                padded = encoded[2:] + "=" * (-len(encoded[2:]) % 4)
+                decoded = base64.urlsafe_b64decode(padded).decode("utf-8", errors="replace")
+                if decoded.startswith(("http://", "https://")):
+                    return decoded
+            except (ValueError, OSError):
+                pass
+    return url
 
 
 def clean_html(text: str) -> str:
