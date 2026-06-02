@@ -63,6 +63,16 @@ def test_parse_text_wrapped_tool_json():
     assert call == ("search_text", {"query": "DeepSeek"})
 
 
+def test_parse_action_bash_block_as_shell_tool():
+    call = parse_tool_call("我现在检查仓库。\n\n```bash\nprintf repo-ok\n```")
+    assert call == ("run_shell", {"command": "printf repo-ok"})
+
+
+def test_parse_ordinary_bash_example_is_not_tool_call():
+    call = parse_tool_call("可以这样手动运行：\n\n```bash\necho hello\n```")
+    assert call is None
+
+
 def test_agent_runs_read_tool_loop(tmp_path: Path):
     (tmp_path / "README.md").write_text("hello", encoding="utf-8")
     client = FakeClient([
@@ -73,6 +83,18 @@ def test_agent_runs_read_tool_loop(tmp_path: Path):
     assert result.answer == "README says hello."
     assert result.rounds == 2
     assert (tmp_path / ".deepseek-tulagent" / "sessions").exists()
+
+
+def test_agent_executes_action_bash_block_instead_of_fake_execution(tmp_path: Path):
+    client = FakeClient([
+        "我现在检查。\n\n```bash\nprintf repo-ok\n```",
+        "工具结果是 repo-ok。",
+    ])
+    result = TuLAgent(settings(tmp_path), mode="root", client=client).run("检查仓库")
+    transcript = next((tmp_path / ".deepseek-tulagent" / "sessions").glob("*.jsonl")).read_text(encoding="utf-8")
+    assert "Tool result from run_shell" in transcript
+    assert "repo-ok" in transcript
+    assert result.answer == "工具结果是 repo-ok。"
 
 
 def test_tool_result_is_sent_as_user_context_not_tool_role(tmp_path: Path):

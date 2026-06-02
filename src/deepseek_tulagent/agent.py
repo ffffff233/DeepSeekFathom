@@ -36,6 +36,9 @@ Available tools:
 Rules:
 - Prefer reading before editing.
 - Keep changes scoped to the user's request.
+- Tool use must be emitted as the JSON object above. Do not put commands in bash/code fences when you want them executed.
+- Never say a command, download, search, or file operation was executed unless it came from a Tool result.
+- If the user asks you to inspect a live URL, GitHub repository, local files, shell state, or service state, use the appropriate tool instead of describing what you would run.
 - To start a long-running/background process, use start_service(name, command). Do not use shell "&" backgrounding.
 - For text search, prefer a narrow path and small max_matches. Broad searches can time out.
 - If no tool is needed, answer directly.
@@ -166,7 +169,75 @@ def parse_tool_call(text: str) -> tuple[str, dict[str, Any]] | None:
         parsed = normalize_tool_call(data)
         if parsed:
             return parsed
-    return None
+    return parse_action_shell_block(stripped)
+
+
+ACTION_SHELL_CUES = (
+    "我现在",
+    "我来",
+    "我会",
+    "开始",
+    "直接",
+    "通过",
+    "执行",
+    "运行",
+    "检查",
+    "获取",
+    "验证",
+    "查询",
+    "拉取",
+    "下载",
+    "搜索",
+    "inspect",
+    "check",
+    "fetch",
+    "get",
+    "run",
+    "execute",
+    "verify",
+)
+
+EXAMPLE_SHELL_CUES = (
+    "可以这样",
+    "手动",
+    "示例",
+    "例子",
+    "例如",
+    "如果",
+    "你可以",
+    "建议",
+    "example",
+    "for example",
+    "manually",
+    "you can",
+)
+
+
+def parse_action_shell_block(text: str) -> tuple[str, dict[str, Any]] | None:
+    blocks = re.findall(r"```(?:bash|sh|shell)\s*\n(.*?)```", text, flags=re.DOTALL | re.IGNORECASE)
+    if len(blocks) != 1:
+        return None
+    prefix = text[: text.find("```")].lower()
+    if any(cue in prefix for cue in EXAMPLE_SHELL_CUES):
+        return None
+    if not any(cue in prefix for cue in ACTION_SHELL_CUES):
+        return None
+    command = normalize_shell_block(blocks[0])
+    if not command:
+        return None
+    return "run_shell", {"command": command}
+
+
+def normalize_shell_block(block: str) -> str:
+    lines: list[str] = []
+    for raw_line in block.strip().splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        if line.startswith("$ "):
+            line = line[2:].strip()
+        lines.append(line)
+    return "\n".join(lines)
 
 
 def normalize_tool_call(data: Any) -> tuple[str, dict[str, Any]] | None:

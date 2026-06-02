@@ -215,6 +215,8 @@ Available tools:
 - `stop_service`: stop a recorded service
 - `service_status`: check a recorded service
 
+If the model says it is about to inspect, fetch, run, or verify something and emits a single `bash` code block, the agent falls back to executing it through `run_shell`. Real execution is always recorded as a tool result, so the assistant cannot silently pretend a command ran.
+
 ## Design Notes
 
 This project does not copy DeepSeek-TUI source. It implements the same broad class of terminal agent from scratch in Python:

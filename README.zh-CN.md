@@ -207,6 +207,8 @@ deepseekTul skills new repo-debug \
 
 普通 JSON 输入不会被当作工具执行，只有 `/tool ...` 会执行。
 
+如果模型输出“我要检查/执行/获取”并给出单个 `bash` 代码块，程序会把它兜底转换成 `run_shell` 工具调用；真正执行过的操作一定会进入工具结果，避免只在对话里假装执行。
+
 ## 安全说明
 
 - 不要提交 `~/.deepseek-tulagent/config.json`，里面可能有 API key。
