@@ -25,6 +25,7 @@ class DeepSeekClient:
             "max_tokens": self.settings.max_tokens,
             "stream": False,
         }
+        apply_thinking_payload(payload, self.settings)
         headers = {
             "Authorization": f"Bearer {self.settings.api_key}",
             "Content-Type": "application/json",
@@ -50,6 +51,7 @@ class DeepSeekClient:
             "max_tokens": self.settings.max_tokens,
             "stream": True,
         }
+        apply_thinking_payload(payload, self.settings)
         headers = {
             "Authorization": f"Bearer {self.settings.api_key}",
             "Content-Type": "application/json",
@@ -100,3 +102,9 @@ def raise_for_status_with_body(response: httpx.Response) -> None:
     except httpx.HTTPStatusError as exc:
         body = response.text[:1000]
         raise RuntimeError(f"DeepSeek API error {response.status_code}: {body}") from exc
+
+
+def apply_thinking_payload(payload: dict, settings: Settings) -> None:
+    payload["thinking"] = {"type": "enabled" if settings.thinking_enabled else "disabled"}
+    if settings.thinking_enabled and settings.reasoning_effort:
+        payload["reasoning_effort"] = settings.reasoning_effort

@@ -97,20 +97,20 @@ root + fast + deepseek-v4-flash
 
 ## 思考模式
 
-| 模式 | 路由 | 适用场景 |
-| --- | --- | --- |
-| `off` | `deepseek-v4-flash` | 最快直接回答 |
-| `instant` | `deepseek-v4-flash` | 极快响应 |
-| `fast` | `deepseek-v4-flash` | 快速工具任务 |
-| `standard` | `deepseek-v4-flash` | 标准任务 |
-| `balanced` | `deepseek-v4-pro` | 普通工程任务 |
-| `careful` | `deepseek-v4-pro` | 更谨慎验证 |
-| `deep` | `deepseek-v4-pro` | 复杂调试和设计 |
-| `deeper` | `deepseek-v4-pro` | 更深层复杂任务 |
-| `max` | `deepseek-v4-pro` | 最复杂任务 |
-| `ultra` | `deepseek-v4-pro` | 最大内部思考预算 |
+| 模式 | 路由 | 最大输出 | API thinking | 内部思考 |
+| --- | --- | ---: | --- | ---: |
+| `off` | `deepseek-v4-flash` | 4K | 关闭 | 0 |
+| `instant` | `deepseek-v4-flash` | 8K | 关闭 | 0 |
+| `fast` | `deepseek-v4-flash` | 32K | high | 0 |
+| `standard` | `deepseek-v4-flash` | 64K | high | 0 |
+| `balanced` | `deepseek-v4-pro` | 128K | high | 1 |
+| `careful` | `deepseek-v4-pro` | 192K | high | 1 |
+| `deep` | `deepseek-v4-pro` | 256K | high | 2 |
+| `deeper` | `deepseek-v4-pro` | 320K | max | 2 |
+| `max` | `deepseek-v4-pro` | 384K | max | 3 |
+| `ultra` | `deepseek-v4-pro` | 384K | max | 4 |
 
-`balanced` 及以上会进行真实内部思考轮次：客户端会先调用模型生成私有规划，再把规划作为本轮回答上下文使用，不靠动画假装思考。
+`fast` 及以上会向 DeepSeek API 发送真实 `thinking` 参数；`balanced` 及以上还会在客户端进行真实内部思考轮次：先调用模型生成私有规划，再把规划作为本轮回答上下文使用，不靠动画假装思考。
 
 ## `/` 命令面板
 

@@ -10,6 +10,7 @@ from deepseek_tulagent.agent import TuLAgent, compact_context_messages, parse_to
 from deepseek_tulagent.cli import main
 from deepseek_tulagent.config import Settings, get_settings, resolve_model
 from deepseek_tulagent.policy import ApprovalPolicy, ThinkingMode
+from deepseek_tulagent.provider import apply_thinking_payload
 from deepseek_tulagent.session import SessionStore
 from deepseek_tulagent.skills import SkillStore
 from deepseek_tulagent.tui import ChatTui, TuiState
@@ -171,10 +172,26 @@ def test_approval_policy_maps_codex_style_modes():
 def test_thinking_mode_resolves_model_and_budget():
     fast = ThinkingMode.resolve("fast")
     deep = ThinkingMode.resolve("deep")
+    ultra = ThinkingMode.resolve("ultra")
     assert fast.model_hint == "deepseek-v4-flash"
     assert fast.max_tokens < deep.max_tokens
+    assert ultra.max_tokens == 384000
+    assert ultra.reasoning_effort == "max"
     assert deep.deliberation_passes > 0
     assert deep.system_hint
+
+
+def test_deepseek_payload_includes_thinking_controls(tmp_path: Path):
+    settings_obj = settings(tmp_path).with_runtime(thinking_enabled=True, reasoning_effort="max")
+    payload = {}
+    apply_thinking_payload(payload, settings_obj)
+    assert payload["thinking"] == {"type": "enabled"}
+    assert payload["reasoning_effort"] == "max"
+
+    payload = {}
+    apply_thinking_payload(payload, settings(tmp_path).with_runtime(thinking_enabled=False))
+    assert payload["thinking"] == {"type": "disabled"}
+    assert "reasoning_effort" not in payload
 
 
 def test_codex_style_workspace_tools(tmp_path: Path):

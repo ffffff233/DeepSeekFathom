@@ -213,20 +213,20 @@ Discovered skill summaries are injected into the agent prompt at startup/run tim
 
 ## Thinking Modes
 
-| Mode | Route | Budget |
-| --- | --- | --- |
-| `off` | `deepseek-v4-flash` | smallest |
-| `instant` | `deepseek-v4-flash` | fastest response |
-| `fast` | `deepseek-v4-flash` | quick tool-driven work |
-| `standard` | `deepseek-v4-flash` | normal tasks |
-| `balanced` | `deepseek-v4-pro` | default engineering work |
-| `careful` | `deepseek-v4-pro` | careful verification |
-| `deep` | `deepseek-v4-pro` | complex debugging/design |
-| `deeper` | `deepseek-v4-pro` | deeper complex work |
-| `max` | `deepseek-v4-pro` | hardest ambiguous tasks |
-| `ultra` | `deepseek-v4-pro` | largest internal thinking budget |
+| Mode | Route | Max output | API thinking | Internal passes |
+| --- | --- | ---: | --- | ---: |
+| `off` | `deepseek-v4-flash` | 4K | disabled | 0 |
+| `instant` | `deepseek-v4-flash` | 8K | disabled | 0 |
+| `fast` | `deepseek-v4-flash` | 32K | high | 0 |
+| `standard` | `deepseek-v4-flash` | 64K | high | 0 |
+| `balanced` | `deepseek-v4-pro` | 128K | high | 1 |
+| `careful` | `deepseek-v4-pro` | 192K | high | 1 |
+| `deep` | `deepseek-v4-pro` | 256K | high | 2 |
+| `deeper` | `deepseek-v4-pro` | 320K | max | 2 |
+| `max` | `deepseek-v4-pro` | 384K | max | 3 |
+| `ultra` | `deepseek-v4-pro` | 384K | max | 4 |
 
-`balanced` and deeper modes perform real internal deliberation passes: the client makes extra model calls for private planning, then uses those notes as context for the final answer.
+`fast` and higher modes send real DeepSeek API `thinking` controls. `balanced` and deeper modes also perform client-side internal deliberation passes: the client makes extra model calls for private planning, then uses those notes as context for the final answer.
 
 ## Configuration
 

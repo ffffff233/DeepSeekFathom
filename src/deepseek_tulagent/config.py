@@ -24,16 +24,27 @@ class Settings:
     request_timeout: float
     default_mode: str
     default_thinking: str
+    thinking_enabled: bool = True
+    reasoning_effort: str | None = None
 
     @property
     def sessions_dir(self) -> Path:
         return self.workspace / ".deepseek-tulagent" / "sessions"
 
-    def with_runtime(self, *, model: str | None = None, max_tokens: int | None = None) -> "Settings":
+    def with_runtime(
+        self,
+        *,
+        model: str | None = None,
+        max_tokens: int | None = None,
+        thinking_enabled: bool | None = None,
+        reasoning_effort: str | None = None,
+    ) -> "Settings":
         return replace(
             self,
             model=resolve_model(model) if model else self.model,
             max_tokens=max_tokens if max_tokens is not None else self.max_tokens,
+            thinking_enabled=self.thinking_enabled if thinking_enabled is None else thinking_enabled,
+            reasoning_effort=reasoning_effort,
         )
 
 

@@ -134,7 +134,12 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.cmd == "run":
         thinking = ThinkingMode.resolve(args.think)
-        runtime_settings = settings.with_runtime(model=thinking.model_hint, max_tokens=thinking.max_tokens)
+        runtime_settings = settings.with_runtime(
+            model=thinking.model_hint,
+            max_tokens=thinking.max_tokens,
+            thinking_enabled=thinking.api_thinking,
+            reasoning_effort=thinking.reasoning_effort,
+        )
 
         def delta(text: str) -> None:
             print(text, end="", flush=True)
@@ -197,7 +202,12 @@ def update_command(check_only: bool = False) -> int:
 
 def interactive(settings, mode: str, thinking_name: str, yes: bool, resume: str | None = None) -> int:
     thinking = ThinkingMode.resolve(thinking_name)
-    settings = settings.with_runtime(model=thinking.model_hint, max_tokens=thinking.max_tokens)
+    settings = settings.with_runtime(
+        model=thinking.model_hint,
+        max_tokens=thinking.max_tokens,
+        thinking_enabled=thinking.api_thinking,
+        reasoning_effort=thinking.reasoning_effort,
+    )
     startup_animation(enabled=resume is None)
     approval_text = "all yes" if yes or mode in {"yolo", "root"} else "manual yes for gated tools"
     if resume:
@@ -277,9 +287,14 @@ def interactive(settings, mode: str, thinking_name: str, yes: bool, resume: str 
                 print("thinking must be one of: " + ", ".join(THINKING))
                 continue
             thinking = ThinkingMode.resolve(requested)
-            settings = settings.with_runtime(model=thinking.model_hint, max_tokens=thinking.max_tokens)
+            settings = settings.with_runtime(
+                model=thinking.model_hint,
+                max_tokens=thinking.max_tokens,
+                thinking_enabled=thinking.api_thinking,
+                reasoning_effort=thinking.reasoning_effort,
+            )
             print_header(str(settings.workspace), settings.base_url, settings.model, current_mode, thinking.name, "all yes" if yes or current_mode in {"yolo", "root"} else "manual yes for gated tools")
-            print(f"thinking set to {thinking.name}; model={settings.model}; max_tokens={settings.max_tokens}; internal_passes={thinking.deliberation_passes}")
+            print(f"thinking set to {thinking.name}; model={settings.model}; max_tokens={settings.max_tokens}; api_thinking={settings.thinking_enabled}; reasoning_effort={settings.reasoning_effort}; internal_passes={thinking.deliberation_passes}")
             continue
         if prompt == "/think":
             rows = [(name, thinking_description(name)) for name in THINKING]
@@ -288,8 +303,13 @@ def interactive(settings, mode: str, thinking_name: str, yes: bool, resume: str 
                 print("thinking unchanged")
                 continue
             thinking = ThinkingMode.resolve(selected_thinking)
-            settings = settings.with_runtime(model=thinking.model_hint, max_tokens=thinking.max_tokens)
-            print(f"thinking set to {thinking.name}; model={settings.model}; max_tokens={settings.max_tokens}; internal_passes={thinking.deliberation_passes}")
+            settings = settings.with_runtime(
+                model=thinking.model_hint,
+                max_tokens=thinking.max_tokens,
+                thinking_enabled=thinking.api_thinking,
+                reasoning_effort=thinking.reasoning_effort,
+            )
+            print(f"thinking set to {thinking.name}; model={settings.model}; max_tokens={settings.max_tokens}; api_thinking={settings.thinking_enabled}; reasoning_effort={settings.reasoning_effort}; internal_passes={thinking.deliberation_passes}")
             continue
         if prompt == "/models":
             for model in DeepSeekClient(settings).models():

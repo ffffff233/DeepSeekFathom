@@ -1,5 +1,21 @@
 # 更新记录 / Changelog
 
+## v0.1.5
+
+中文：
+
+- 取消小输出预算限制，思考模式最大输出提升到 384K。
+- 接入 DeepSeek Chat API 的真实 `thinking` 参数。
+- 接入 `reasoning_effort`，深度模式使用 `high` 或 `max`。
+- 文档标明每个思考模式的最大输出、API thinking 和内部思考轮数。
+
+English:
+
+- Removed small output-budget limits; thinking modes now scale up to 384K max output.
+- Added real DeepSeek Chat API `thinking` controls.
+- Added `reasoning_effort`; deeper modes use `high` or `max`.
+- Documented max output, API thinking, and internal passes for every thinking mode.
+
 ## v0.1.4
 
 中文：
@@ -73,4 +89,3 @@ English:
 
 - Initial open source release.
 - Added DeepSeek config, tools, permission modes, thinking modes, skills, session resume, and bilingual docs.
-
