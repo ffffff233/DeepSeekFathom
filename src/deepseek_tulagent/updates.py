@@ -83,16 +83,33 @@ def update_to(version: str, timeout: int = 180) -> tuple[bool, str]:
             completed = subprocess.run(command, cwd=root, text=True, capture_output=True, timeout=timeout)
             output.append(completed.stdout + completed.stderr)
             if completed.returncode != 0:
-                return False, "".join(output).strip()
+                pip_ok, pip_output = pip_install_archive(target, timeout=timeout)
+                detail = "".join(output).strip()
+                if pip_ok:
+                    return True, (
+                        f"git update failed, but tarball fallback succeeded.\n{pip_output}\n"
+                        "If git failed because of proxy syntax, configure HTTP_PROXY/HTTPS_PROXY or fix git config http.proxy."
+                    )
+                return False, (
+                    f"{detail}\n\n"
+                    f"tarball fallback also failed:\n{pip_output}\n\n"
+                    "Proxy tips: use HTTP_PROXY/HTTPS_PROXY for pip/tarball fallback, or configure git with "
+                    "`git config --global http.proxy http://127.0.0.1:PORT`."
+                ).strip()
         return True, f"updated source tree to {target}. Restart deepseekTul."
 
+    return pip_install_archive(target, timeout=timeout)
+
+
+def pip_install_archive(target: str, timeout: int = 180) -> tuple[bool, str]:
+    archive_url = f"{REPO_URL}/archive/refs/tags/{target}.tar.gz"
     command = [
         "python3",
         "-m",
         "pip",
         "install",
         "--upgrade",
-        f"git+{REPO_URL}.git@{target}",
+        archive_url,
     ]
     env = os.environ.copy()
     env.setdefault("PIP_DISABLE_PIP_VERSION_CHECK", "1")

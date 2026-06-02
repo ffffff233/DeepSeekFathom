@@ -39,6 +39,20 @@ deepseekTul doctor --live
 deepseekTul
 ```
 
+If `git clone` is blocked by local proxy/git configuration, install directly from the tagged source tarball instead:
+
+```bash
+python3 -m pip install --upgrade https://github.com/ffffff233/deepseek-tulagent/archive/refs/tags/v0.1.30.tar.gz
+```
+
+Proxy-compatible examples:
+
+```bash
+export HTTPS_PROXY=http://127.0.0.1:7890
+export HTTP_PROXY=http://127.0.0.1:7890
+python3 -m pip install --upgrade https://github.com/ffffff233/deepseek-tulagent/archive/refs/tags/v0.1.30.tar.gz
+```
+
 One-shot usage:
 
 ```bash
@@ -149,6 +163,13 @@ deepseekTul update
 Interactive startup checks the latest GitHub tag. If a newer version exists, the update picker opens with `update` selected by default; press Enter to update, or press Down then Enter to skip.
 
 The updater does not touch user configuration, API keys, model defaults, sessions, or skill directories. If the source checkout has local uncommitted changes, the update stops instead of overwriting user edits.
+
+If git update fails because git/proxy syntax is unsupported, `deepseekTul update` falls back to installing the GitHub tag tarball with pip. You can also set `HTTP_PROXY` / `HTTPS_PROXY` for the tarball path, or configure git separately:
+
+```bash
+git config --global http.proxy http://127.0.0.1:7890
+git config --global https.proxy http://127.0.0.1:7890
+```
 
 Install an older version:
 

@@ -1,5 +1,19 @@
 # 更新记录 / Changelog
 
+## v0.1.30
+
+中文：
+
+- 更新器不再强依赖 `git+https`：非 git 安装默认使用 GitHub tag tarball。
+- 源码树 git 更新失败时，会尝试 pip 安装 tag tarball 作为 fallback。
+- README 增加无 git / 代理环境安装说明，以及 `HTTP_PROXY` / `HTTPS_PROXY` 和 git proxy 示例。
+
+English:
+
+- The updater no longer depends on `git+https` for non-git installs; it uses the GitHub tag tarball.
+- If a git source-tree update fails, the updater attempts a pip tarball fallback.
+- README now documents no-git/proxy-friendly install commands and `HTTP_PROXY` / `HTTPS_PROXY` plus git proxy examples.
+
 ## v0.1.29
 
 中文：

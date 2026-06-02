@@ -28,6 +28,20 @@ deepseekTul doctor --live
 deepseekTul
 ```
 
+如果用户机器上的 `git clone` 因代理、端口写法或 git 配置失败，可以不依赖 git，直接安装 GitHub tag 源码包：
+
+```bash
+python3 -m pip install --upgrade https://github.com/ffffff233/deepseek-tulagent/archive/refs/tags/v0.1.30.tar.gz
+```
+
+代理环境示例：
+
+```bash
+export HTTPS_PROXY=http://127.0.0.1:7890
+export HTTP_PROXY=http://127.0.0.1:7890
+python3 -m pip install --upgrade https://github.com/ffffff233/deepseek-tulagent/archive/refs/tags/v0.1.30.tar.gz
+```
+
 ## 常用命令
 
 ```bash
@@ -184,6 +198,20 @@ deepseekTul update
 ```
 
 交互启动时也会自动检查 GitHub 最新 tag。如果有新版本，会弹出选择面板：默认第一项是更新，直接回车更新；按下键再回车是不更新。
+
+如果 git 更新因为代理写法、端口或本机 git 配置失败，`deepseekTul update` 会回退到 pip 安装 GitHub tag 源码包，不再强依赖 `git+https`。也可以手动设置代理：
+
+```bash
+export HTTPS_PROXY=http://127.0.0.1:7890
+export HTTP_PROXY=http://127.0.0.1:7890
+```
+
+如果仍要修 git 自己的代理配置：
+
+```bash
+git config --global http.proxy http://127.0.0.1:7890
+git config --global https.proxy http://127.0.0.1:7890
+```
 
 更新不会修改这些用户数据：
 

@@ -835,6 +835,45 @@ def test_update_refuses_dirty_source_tree(monkeypatch, tmp_path: Path):
     assert "avoid overwriting user edits" in output
 
 
+def test_update_non_git_install_uses_tarball_not_git(monkeypatch, tmp_path: Path):
+    import deepseek_tulagent.updates as updates
+
+    captured = {}
+    monkeypatch.setattr(updates, "source_root", lambda: tmp_path)
+
+    def fake_run(command, **kwargs):
+        captured["command"] = command
+        return type("Completed", (), {"returncode": 0, "stdout": "ok", "stderr": ""})()
+
+    monkeypatch.setattr(updates.subprocess, "run", fake_run)
+    ok, output = updates.update_to("0.1.2")
+    assert ok is True
+    assert any("archive/refs/tags/v0.1.2.tar.gz" in str(part) for part in captured["command"])
+    assert not any(str(part).startswith("git+") for part in captured["command"])
+
+
+def test_update_git_failure_falls_back_to_tarball(monkeypatch, tmp_path: Path):
+    import deepseek_tulagent.updates as updates
+
+    (tmp_path / ".git").mkdir()
+    calls = []
+    monkeypatch.setattr(updates, "source_root", lambda: tmp_path)
+
+    def fake_run(command, **kwargs):
+        calls.append(command)
+        if command[:3] == ["git", "status", "--porcelain"]:
+            return type("Completed", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+        if command[:2] == ["git", "fetch"]:
+            return type("Completed", (), {"returncode": 128, "stdout": "", "stderr": "proxy error"})()
+        return type("Completed", (), {"returncode": 0, "stdout": "pip ok", "stderr": ""})()
+
+    monkeypatch.setattr(updates.subprocess, "run", fake_run)
+    ok, output = updates.update_to("0.1.2")
+    assert ok is True
+    assert "tarball fallback succeeded" in output
+    assert any(any("archive/refs/tags/v0.1.2.tar.gz" in str(part) for part in command) for command in calls)
+
+
 def test_update_command_runs_updater(monkeypatch, capsys):
     import deepseek_tulagent.cli as cli
     from deepseek_tulagent.updates import UpdateInfo
