@@ -1,5 +1,23 @@
 # 更新记录 / Changelog
 
+## v0.1.32
+
+中文：
+
+- 增强 Windows 原生兼容：`termios`、`tty`、`curses` 不存在时不再启动崩溃。
+- Windows 下高级 TUI 不可用时自动退回普通行输入交互；`run`、`config`、`update`、`sessions` 保持可用。
+- 更新器改用当前 Python 解释器执行 pip，不再硬编码 `python3`。
+- `clone_repo` 和文件工具兼容用户粘贴的 Windows 风格路径。
+- README 增加 PowerShell、CMD、Windows 代理和 Windows 路径示例。
+
+English:
+
+- Improved native Windows compatibility: missing `termios`, `tty`, or `curses` no longer crashes startup.
+- The CLI falls back to line-mode chat when the full TUI is unavailable on Windows; `run`, `config`, `update`, and `sessions` remain usable.
+- The updater now runs pip through the current Python interpreter instead of hard-coding `python3`.
+- `clone_repo` and file tools accept pasted Windows-style paths.
+- README now includes PowerShell, CMD, Windows proxy, and Windows path examples.
+
 ## v0.1.31
 
 中文：

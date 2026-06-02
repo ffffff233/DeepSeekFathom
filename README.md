@@ -28,6 +28,8 @@ DeepSeek TuLAgent is a terminal coding agent built specifically around DeepSeek'
 
 ## Quickstart
 
+Linux / macOS:
+
 ```bash
 git clone https://github.com/ffffff233/deepseek-tulagent.git
 cd deepseek-tulagent
@@ -39,10 +41,29 @@ deepseekTul doctor --live
 deepseekTul
 ```
 
+Native Windows PowerShell:
+
+```powershell
+py -3 -m pip install --upgrade https://github.com/ffffff233/deepseek-tulagent/archive/refs/tags/v0.1.32.tar.gz
+deepseekTul config set --base-url https://api.deepseek.com --api-key sk-... --model deepseek-v4-flash
+deepseekTul doctor --live
+deepseekTul
+```
+
+Windows CMD:
+
+```bat
+py -3 -m pip install --upgrade https://github.com/ffffff233/deepseek-tulagent/archive/refs/tags/v0.1.32.tar.gz
+deepseekTul version
+deepseekTul
+```
+
+Native Windows supports `deepseekTul run`, `config`, `update`, `sessions`, and line-mode interactive chat. The Unix-style full TUI depends on `curses`; when it is unavailable on Windows, the CLI falls back to line mode instead of crashing at startup.
+
 If `git clone` is blocked by local proxy/git configuration, install directly from the tagged source tarball instead:
 
 ```bash
-python3 -m pip install --upgrade https://github.com/ffffff233/deepseek-tulagent/archive/refs/tags/v0.1.31.tar.gz
+python3 -m pip install --upgrade https://github.com/ffffff233/deepseek-tulagent/archive/refs/tags/v0.1.32.tar.gz
 ```
 
 Proxy-compatible examples:
@@ -50,10 +71,34 @@ Proxy-compatible examples:
 ```bash
 export HTTPS_PROXY=http://127.0.0.1:7890
 export HTTP_PROXY=http://127.0.0.1:7890
-python3 -m pip install --upgrade https://github.com/ffffff233/deepseek-tulagent/archive/refs/tags/v0.1.31.tar.gz
+python3 -m pip install --upgrade https://github.com/ffffff233/deepseek-tulagent/archive/refs/tags/v0.1.32.tar.gz
+```
+
+Windows PowerShell proxy example:
+
+```powershell
+$env:HTTPS_PROXY="http://127.0.0.1:7890"
+$env:HTTP_PROXY="http://127.0.0.1:7890"
+py -3 -m pip install --upgrade https://github.com/ffffff233/deepseek-tulagent/archive/refs/tags/v0.1.32.tar.gz
+```
+
+Windows CMD proxy example:
+
+```bat
+set HTTPS_PROXY=http://127.0.0.1:7890
+set HTTP_PROXY=http://127.0.0.1:7890
+py -3 -m pip install --upgrade https://github.com/ffffff233/deepseek-tulagent/archive/refs/tags/v0.1.32.tar.gz
 ```
 
 When asking the agent to fetch another GitHub repository, say something like `clone owner/repo into path`. The agent should use `clone_repo`, which tries direct git, mirror URLs, and GitHub archive download before asking you to configure `HTTP_PROXY`, `HTTPS_PROXY`, or git proxy settings.
+
+Windows paths are accepted, for example:
+
+```text
+clone nexu-io/open-design into D:\deepseek-projects\open-design
+```
+
+The tool maps Windows-style paths into the configured workspace to avoid writing to an unexpected location. Set `DSTUL_WORKSPACE` first if you want a specific workspace root.
 
 One-shot usage:
 
@@ -265,7 +310,7 @@ Environment variables:
 | `DEEPSEEK_MODEL` | `deepseek-v4-flash` | Model name or alias |
 | `DSTUL_WORKSPACE` | current directory | Workspace root |
 | `DSTUL_MAX_TOOL_ROUNDS` | `256` | Max tool loop iterations |
-| `DSTUL_MAX_TOKENS` | `2048` | Max model output tokens |
+| `DSTUL_MAX_TOKENS` | `8192` | Max model output tokens |
 | `DSTUL_REQUEST_TIMEOUT` | `180` | DeepSeek request timeout seconds |
 
 Model aliases:

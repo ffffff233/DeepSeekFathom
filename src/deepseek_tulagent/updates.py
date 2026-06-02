@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 import urllib.request
 
 
@@ -104,7 +105,7 @@ def update_to(version: str, timeout: int = 180) -> tuple[bool, str]:
 def pip_install_archive(target: str, timeout: int = 180) -> tuple[bool, str]:
     archive_url = f"{REPO_URL}/archive/refs/tags/{target}.tar.gz"
     command = [
-        "python3",
+        sys.executable,
         "-m",
         "pip",
         "install",

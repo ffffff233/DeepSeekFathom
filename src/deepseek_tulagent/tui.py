@@ -1,9 +1,13 @@
 from __future__ import annotations
 
-import curses
 import textwrap
 from dataclasses import dataclass, field
 from typing import Callable
+
+try:
+    import curses
+except ImportError:  # Windows stdlib does not ship curses.
+    curses = None  # type: ignore[assignment]
 
 
 @dataclass
@@ -24,9 +28,13 @@ class ChatTui:
         self.on_command = on_command
 
     def run(self) -> None:
+        if curses is None:
+            raise RuntimeError("curses TUI is unavailable on this platform")
         curses.wrapper(self._main)
 
     def _main(self, stdscr) -> None:
+        if curses is None:
+            raise RuntimeError("curses TUI is unavailable on this platform")
         curses.curs_set(1)
         stdscr.keypad(True)
         curses.start_color()
@@ -53,7 +61,9 @@ class ChatTui:
                 return False
             self.state.status = "exit"
             return True
-        if key in (curses.KEY_ENTER, 10, 13):
+        enter_key = curses.KEY_ENTER if curses is not None else 10
+        backspace_key = curses.KEY_BACKSPACE if curses is not None else 127
+        if key in (enter_key, 10, 13):
             text = self.state.input_text.strip()
             self.state.input_text = ""
             if not text:
@@ -68,7 +78,7 @@ class ChatTui:
             except KeyboardInterrupt:
                 self.state.status = "cancelled"
             return False
-        if key in (curses.KEY_BACKSPACE, 127, 8):
+        if key in (backspace_key, 127, 8):
             self.state.input_text = self.state.input_text[:-1]
             return False
         if 0 <= key < 256 and chr(key).isprintable():
@@ -76,6 +86,8 @@ class ChatTui:
         return False
 
     def _draw(self, stdscr) -> None:
+        if curses is None:
+            raise RuntimeError("curses TUI is unavailable on this platform")
         stdscr.erase()
         height, width = stdscr.getmaxyx()
         if height < 10 or width < 40:
@@ -146,7 +158,7 @@ def safe_addnstr(stdscr, y: int, x: int, text: str, n: int, attr: int = 0) -> No
             stdscr.addnstr(y, x, text, limit, attr)
         else:
             stdscr.addnstr(y, x, text, limit)
-    except curses.error:
+    except Exception:
         return
 
 
@@ -154,5 +166,5 @@ def safe_move(stdscr, y: int, x: int) -> None:
     try:
         height, width = stdscr.getmaxyx()
         stdscr.move(max(0, min(y, height - 1)), max(0, min(x, width - 2)))
-    except curses.error:
+    except Exception:
         return

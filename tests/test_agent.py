@@ -525,6 +525,13 @@ def test_clone_repo_rejects_non_empty_target(tmp_path: Path):
     assert (target / "keep.txt").read_text(encoding="utf-8") == "keep"
 
 
+def test_windows_style_workspace_path_is_normalized_on_posix(tmp_path: Path):
+    tools = ToolRegistry(tmp_path, policy=ApprovalPolicy.from_mode("root"))
+    result = tools.run("write_file", {"path": r"D:\deepseek项目\open-design\README.md", "content": "ok"})
+    assert result.ok is True
+    assert (tmp_path / "deepseek项目" / "open-design" / "README.md").read_text(encoding="utf-8") == "ok"
+
+
 def test_clone_repo_uses_github_archive_fallback(monkeypatch, tmp_path: Path):
     archive_bytes = io.BytesIO()
     with zipfile.ZipFile(archive_bytes, "w") as archive:
@@ -568,6 +575,7 @@ def test_system_prompt_mentions_clone_repo(tmp_path: Path):
     prompt = TuLAgent(settings(tmp_path), client=FakeClient(["ok"]))._system_prompt()
     assert "clone_repo(repo/url, path, branch?, timeout?)" in prompt
     assert "prefer clone_repo over manual git clone" in prompt
+    assert "Windows paths" in prompt
 
 
 def test_normalize_bing_redirect_url():
@@ -895,6 +903,7 @@ def test_update_refuses_dirty_source_tree(monkeypatch, tmp_path: Path):
 
 def test_update_non_git_install_uses_tarball_not_git(monkeypatch, tmp_path: Path):
     import deepseek_tulagent.updates as updates
+    import sys
 
     captured = {}
     monkeypatch.setattr(updates, "source_root", lambda: tmp_path)
@@ -906,8 +915,21 @@ def test_update_non_git_install_uses_tarball_not_git(monkeypatch, tmp_path: Path
     monkeypatch.setattr(updates.subprocess, "run", fake_run)
     ok, output = updates.update_to("0.1.2")
     assert ok is True
+    assert captured["command"][0] == sys.executable
     assert any("archive/refs/tags/v0.1.2.tar.gz" in str(part) for part in captured["command"])
     assert not any(str(part).startswith("git+") for part in captured["command"])
+
+
+def test_windows_terminal_module_fallbacks(monkeypatch):
+    import builtins
+    import deepseek_tulagent.ui as ui
+
+    monkeypatch.setattr(ui, "termios", None)
+    monkeypatch.setattr(ui, "tty", None)
+    monkeypatch.setattr(builtins, "input", lambda prompt: prompt + "hello")
+
+    assert ui.read_composer("p> ") == "p> hello"
+    assert ui.choose_palette([("/model", "choose model")]) is None
 
 
 def test_update_git_failure_falls_back_to_tarball(monkeypatch, tmp_path: Path):

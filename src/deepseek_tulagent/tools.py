@@ -100,6 +100,7 @@ class ToolRegistry:
         return self._tools[name](arguments)
 
     def resolve_workspace_path(self, raw_path: str) -> Path:
+        raw_path = normalize_user_path(raw_path)
         path = (self.workspace / raw_path).resolve()
         try:
             path.relative_to(self.workspace)
@@ -368,6 +369,14 @@ def require_str(arguments: dict[str, Any], key: str) -> str:
     if not isinstance(value, str) or not value:
         raise ToolError(f"Missing string argument: {key}")
     return value
+
+
+def normalize_user_path(raw_path: str) -> str:
+    path = raw_path.strip()
+    if os.name != "nt" and re.match(r"^[A-Za-z]:[\\/]", path):
+        path = re.sub(r"^[A-Za-z]:[\\/]+", "", path)
+    path = path.replace("\\", "/")
+    return path
 
 
 def should_skip(path: Path) -> bool:

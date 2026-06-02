@@ -15,7 +15,6 @@ from .provider import DeepSeekClient
 from .session import SessionStore
 from .skills import SkillStore
 from .tools import ToolRegistry
-from .tui import ChatTui, TuiState
 from .updates import check_for_update, update_to
 from .ui import ThinkingSpinner, assistant_prefix, choose_palette, composer_prompt, confirm_tool, format_agent_event, install_terminal_safety, print_box, print_header, print_slash_palette, print_tool_palette, read_composer, startup_animation
 
@@ -478,6 +477,12 @@ def maybe_prompt_update() -> None:
 
 
 def interactive_tui(settings, mode: str, thinking: ThinkingMode, yes: bool, session) -> int:
+    try:
+        from .tui import ChatTui, TuiState
+    except Exception as exc:
+        print(f"tui      : unavailable on this platform ({exc}); using line mode")
+        return interactive(settings, mode, thinking.name, yes, session.session_id if session else None)
+
     state = TuiState(model=settings.model, mode=mode, thinking=thinking.name, session_id=session.session_id if session else None)
     if session:
         for message in session.messages[-12:]:

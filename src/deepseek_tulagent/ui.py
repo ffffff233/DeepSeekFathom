@@ -6,11 +6,16 @@ import shutil
 import os
 import select
 import subprocess
-import termios
-import tty
 import atexit
 from threading import Event, Thread
 from collections.abc import Callable
+
+try:
+    import termios
+    import tty
+except ImportError:  # Windows has no Unix raw-terminal modules.
+    termios = None  # type: ignore[assignment]
+    tty = None  # type: ignore[assignment]
 
 
 RESET = "\033[0m"
@@ -42,7 +47,7 @@ def force_terminal_sane() -> None:
             sys.stdout.flush()
         except OSError:
             pass
-    if sys.stdin.isatty():
+    if sys.stdin.isatty() and os.name != "nt":
         try:
             subprocess.run(["stty", "sane"], stdin=sys.stdin, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=1)
         except Exception:
@@ -253,7 +258,7 @@ def composer_prompt(model: str, mode: str, thinking: str, session_id: str | None
 
 
 def read_composer(prompt: str, slash_items: list[tuple[str, str]] | None = None) -> str:
-    if not sys.stdin.isatty() or not sys.stdout.isatty():
+    if not sys.stdin.isatty() or not sys.stdout.isatty() or termios is None or tty is None:
         return input(prompt)
 
     fd = sys.stdin.fileno()
@@ -362,7 +367,7 @@ def char_display_width(char: str) -> int:
 
 
 def choose_palette(items: list[tuple[str, str]], title: str = "commands") -> str | None:
-    if not sys.stdin.isatty() or not sys.stdout.isatty():
+    if not sys.stdin.isatty() or not sys.stdout.isatty() or termios is None or tty is None:
         return None
     fd = sys.stdin.fileno()
     old = termios.tcgetattr(fd)

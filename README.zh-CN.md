@@ -17,6 +17,8 @@ DeepSeek TuLAgent 是一个专门适配 DeepSeek OpenAI 兼容接口的终端编
 
 ## 快速开始
 
+Linux / macOS：
+
 ```bash
 git clone https://github.com/ffffff233/deepseek-tulagent.git
 cd deepseek-tulagent
@@ -28,10 +30,29 @@ deepseekTul doctor --live
 deepseekTul
 ```
 
+Windows PowerShell 原生安装：
+
+```powershell
+py -3 -m pip install --upgrade https://github.com/ffffff233/deepseek-tulagent/archive/refs/tags/v0.1.32.tar.gz
+deepseekTul config set --base-url https://api.deepseek.com --api-key sk-你的key --model deepseek-v4-flash
+deepseekTul doctor --live
+deepseekTul
+```
+
+Windows CMD：
+
+```bat
+py -3 -m pip install --upgrade https://github.com/ffffff233/deepseek-tulagent/archive/refs/tags/v0.1.32.tar.gz
+deepseekTul version
+deepseekTul
+```
+
+Windows 原生可以使用 `deepseekTul run`、`config`、`update`、`sessions` 和普通行输入交互。高级 Unix TUI 依赖 `curses`；Windows 没有该模块时会自动退回普通行输入，不再启动就崩。
+
 如果用户机器上的 `git clone` 因代理、端口写法或 git 配置失败，可以不依赖 git，直接安装 GitHub tag 源码包：
 
 ```bash
-python3 -m pip install --upgrade https://github.com/ffffff233/deepseek-tulagent/archive/refs/tags/v0.1.31.tar.gz
+python3 -m pip install --upgrade https://github.com/ffffff233/deepseek-tulagent/archive/refs/tags/v0.1.32.tar.gz
 ```
 
 代理环境示例：
@@ -39,10 +60,34 @@ python3 -m pip install --upgrade https://github.com/ffffff233/deepseek-tulagent/
 ```bash
 export HTTPS_PROXY=http://127.0.0.1:7890
 export HTTP_PROXY=http://127.0.0.1:7890
-python3 -m pip install --upgrade https://github.com/ffffff233/deepseek-tulagent/archive/refs/tags/v0.1.31.tar.gz
+python3 -m pip install --upgrade https://github.com/ffffff233/deepseek-tulagent/archive/refs/tags/v0.1.32.tar.gz
+```
+
+Windows PowerShell 代理示例：
+
+```powershell
+$env:HTTPS_PROXY="http://127.0.0.1:7890"
+$env:HTTP_PROXY="http://127.0.0.1:7890"
+py -3 -m pip install --upgrade https://github.com/ffffff233/deepseek-tulagent/archive/refs/tags/v0.1.32.tar.gz
+```
+
+Windows CMD 代理示例：
+
+```bat
+set HTTPS_PROXY=http://127.0.0.1:7890
+set HTTP_PROXY=http://127.0.0.1:7890
+py -3 -m pip install --upgrade https://github.com/ffffff233/deepseek-tulagent/archive/refs/tags/v0.1.32.tar.gz
 ```
 
 让 agent 拉取其他 GitHub 仓库时，可以直接说“把 `owner/repo` 拉到 `path`”。它会优先使用 `clone_repo` 工具，自动尝试直连、镜像和 GitHub archive 下载，不会反复手写同一批失败的 `git clone` 命令。全部失败后才会提示你配置 `HTTP_PROXY` / `HTTPS_PROXY` 或 git proxy。
+
+Windows 路径也兼容，例如：
+
+```text
+把 nexu-io/open-design 拉到 D:\deepseek项目\open-design
+```
+
+工具会把 Windows 风格路径映射到当前工作区内，避免误写到未知位置。要指定工作区可以先设置 `DSTUL_WORKSPACE`。
 
 ## 常用命令
 
@@ -91,7 +136,7 @@ deepseekTul config show
 | `DEEPSEEK_MODEL` | `deepseek-v4-flash` | 模型名或别名 |
 | `DSTUL_WORKSPACE` | 当前目录 | 工作目录 |
 | `DSTUL_MAX_TOOL_ROUNDS` | `256` | 最大工具循环次数 |
-| `DSTUL_MAX_TOKENS` | `2048` | 最大输出 token |
+| `DSTUL_MAX_TOKENS` | `8192` | 最大输出 token |
 | `DSTUL_REQUEST_TIMEOUT` | `180` | 请求超时时间 |
 
 ## 权限模式
