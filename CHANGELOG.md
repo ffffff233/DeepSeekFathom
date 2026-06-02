@@ -1,5 +1,19 @@
 # 更新记录 / Changelog
 
+## v0.1.14
+
+中文：
+
+- 输入太长时改成固定单行窗口，只显示末尾内容，左侧用 `…` 表示前面还有文本。
+- 修复长输入换行后整行重画导致历史内容重复很多次的问题。
+- 单行窗口按显示宽度处理中文宽字符。
+
+English:
+
+- Long composer input now uses a fixed single-line viewport, showing the tail with `…` for hidden prefix text.
+- Fixed repeated visual echoes caused by full-line redraw after long input wrapped.
+- The viewport accounts for wide CJK characters.
+
 ## v0.1.13
 
 中文：

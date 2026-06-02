@@ -14,7 +14,7 @@ from deepseek_tulagent.provider import apply_thinking_payload
 from deepseek_tulagent.session import SessionStore
 from deepseek_tulagent.skills import SkillStore
 from deepseek_tulagent.tui import ChatTui, TuiState
-from deepseek_tulagent.ui import filter_slash_items, read_escape_suffix, read_raw_char, redraw_composer, selected_window_start, slash_selection_insertion
+from deepseek_tulagent.ui import display_width, filter_slash_items, read_escape_suffix, read_raw_char, redraw_composer, selected_window_start, tail_for_width, slash_selection_insertion
 from deepseek_tulagent.tools import ToolError, ToolRegistry
 
 
@@ -682,6 +682,13 @@ def test_redraw_composer_handles_wide_chinese_text(monkeypatch):
     text = output.getvalue()
     assert text.count("\r\033[2K") == 2
     assert text.endswith("prompt> 画")
+
+
+def test_tail_for_width_keeps_single_line_window():
+    assert tail_for_width("abcdef", 4) == "…def"
+    chinese = tail_for_width("画画画画", 5)
+    assert chinese.startswith("…")
+    assert display_width(chinese) <= 5
 
 
 def test_slash_select_draw_clips_to_terminal_width(monkeypatch):

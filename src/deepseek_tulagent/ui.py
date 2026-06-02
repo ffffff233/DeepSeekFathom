@@ -244,9 +244,53 @@ def read_composer(prompt: str, slash_items: list[tuple[str, str]] | None = None)
 
 
 def redraw_composer(prompt: str, buffer: list[str]) -> None:
+    width = max(shutil.get_terminal_size((88, 24)).columns, 20)
+    available = max(width - visible_len(prompt) - 1, 4)
+    text = "".join(buffer)
+    display = tail_for_width(text, available)
     sys.stdout.write("\033[?25h\r\033[2K")
-    sys.stdout.write(prompt + "".join(buffer))
+    sys.stdout.write(prompt + display)
     sys.stdout.flush()
+
+
+def tail_for_width(text: str, width: int) -> str:
+    if display_width(text) <= width:
+        return text
+    prefix = "…"
+    remaining = max(width - display_width(prefix), 1)
+    chars: list[str] = []
+    used = 0
+    for char in reversed(text):
+        char_width = char_display_width(char)
+        if used + char_width > remaining:
+            break
+        chars.append(char)
+        used += char_width
+    return prefix + "".join(reversed(chars))
+
+
+def display_width(text: str) -> int:
+    return sum(char_display_width(char) for char in text)
+
+
+def char_display_width(char: str) -> int:
+    code = ord(char)
+    if code == 0:
+        return 0
+    if code < 32 or 0x7F <= code < 0xA0:
+        return 0
+    if (
+        0x1100 <= code <= 0x115F
+        or 0x2E80 <= code <= 0xA4CF
+        or 0xAC00 <= code <= 0xD7A3
+        or 0xF900 <= code <= 0xFAFF
+        or 0xFE10 <= code <= 0xFE19
+        or 0xFE30 <= code <= 0xFE6F
+        or 0xFF00 <= code <= 0xFF60
+        or 0xFFE0 <= code <= 0xFFE6
+    ):
+        return 2
+    return 1
 
 
 def choose_palette(items: list[tuple[str, str]], title: str = "commands") -> str | None:
