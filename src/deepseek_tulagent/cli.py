@@ -17,7 +17,7 @@ from .skills import SkillStore
 from .tools import ToolRegistry
 from .tui import ChatTui, TuiState
 from .updates import check_for_update, update_to
-from .ui import ThinkingSpinner, assistant_prefix, choose_palette, composer_prompt, confirm_tool, install_terminal_safety, print_box, print_header, print_slash_palette, print_tool_palette, read_composer, startup_animation
+from .ui import ThinkingSpinner, assistant_prefix, choose_palette, composer_prompt, confirm_tool, format_agent_event, install_terminal_safety, print_box, print_header, print_slash_palette, print_tool_palette, read_composer, startup_animation
 
 
 BANNER = r"""
@@ -146,7 +146,7 @@ def main(argv: list[str] | None = None) -> int:
             print(text, end="", flush=True)
 
         def event(text: str) -> None:
-            print(f"\n[{text}]", file=sys.stderr)
+            print("\n" + format_agent_event(text), file=sys.stderr)
 
         approver = (lambda _name, _args: True) if args.yes or args.mode in {"yolo", "root"} else None
         if thinking.name == "auto":
@@ -389,7 +389,7 @@ def interactive(settings, mode: str, thinking_name: str, yes: bool, resume: str 
             continue
 
         def event(text: str) -> None:
-            print(f"  {text}", flush=True)
+            print(format_agent_event(text), flush=True)
 
         approver = (lambda _name, _args: True) if yes or current_mode in {"yolo", "root"} else confirm_tool
         run_thinking = thinking

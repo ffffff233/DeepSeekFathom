@@ -14,7 +14,7 @@ from deepseek_tulagent.provider import apply_thinking_payload
 from deepseek_tulagent.session import SessionStore
 from deepseek_tulagent.skills import SkillStore
 from deepseek_tulagent.tui import ChatTui, TuiState
-from deepseek_tulagent.ui import display_width, filter_slash_items, read_bracketed_paste, read_escape_suffix, read_raw_char, redraw_composer, selected_window_start, tail_for_width, slash_selection_insertion
+from deepseek_tulagent.ui import display_width, filter_slash_items, format_agent_event, read_bracketed_paste, read_escape_suffix, read_raw_char, redraw_composer, selected_window_start, should_submit_newline, tail_for_width, slash_selection_insertion
 from deepseek_tulagent.tools import ToolError, ToolRegistry, normalize_bing_url
 
 
@@ -126,6 +126,7 @@ def test_initial_messages_keep_large_system_prompt_cacheable(tmp_path: Path):
     initial = agent._initial_messages()
     assert [message.role for message in initial] == ["system", "system"]
     assert "Available tools:" in initial[0].content
+    assert "cf题" in initial[0].content
     assert "repo-debug" not in initial[0].content
     assert "repo-debug" in initial[1].content
 
@@ -795,6 +796,11 @@ def test_slash_skill_selection_inserts_agent_prompt():
     assert slash_selection_insertion("/model") is None
 
 
+def test_agent_event_formatter_labels_tools():
+    assert "run_shell" in format_agent_event("tool run_shell command=ls")
+    assert "done" in format_agent_event("done run_shell")
+
+
 def test_slash_selected_window_scrolls_with_selection():
     assert selected_window_start(total=12, selected=0, window_size=6) == 0
     assert selected_window_start(total=12, selected=5, window_size=6) == 0
@@ -879,6 +885,25 @@ def test_bracketed_paste_keeps_newlines_in_buffer():
         buffer: list[str] = []
         read_bracketed_paste(read_fd, buffer)
         assert "".join(buffer) == "第一行\n第二行"
+    finally:
+        os.close(read_fd)
+        os.close(write_fd)
+
+
+def test_newline_with_pending_input_is_treated_as_paste_not_submit():
+    read_fd, write_fd = os.pipe()
+    try:
+        os.write(write_fd, b"next")
+        assert should_submit_newline(read_fd) is False
+    finally:
+        os.close(read_fd)
+        os.close(write_fd)
+
+
+def test_newline_without_pending_input_submits():
+    read_fd, write_fd = os.pipe()
+    try:
+        assert should_submit_newline(read_fd) is True
     finally:
         os.close(read_fd)
         os.close(write_fd)

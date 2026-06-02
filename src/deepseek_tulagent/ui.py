@@ -81,7 +81,20 @@ def startup_animation(enabled: bool = True) -> None:
         bar = color("█" * filled, stage_color(index)) + color("░" * (bar_width - filled), GRAY)
         line = " " + color(f"{name:<8}", stage_color(index) + BOLD) + " " + bar + " " + color(detail, DIM + WHITE)
         print(color("│", BRIGHT_CYAN) + pad_ansi(line, width - 2) + color("│", BRIGHT_CYAN), flush=True)
-        time.sleep(0.09)
+        time.sleep(0.055)
+    stream = " ".join(
+        [
+            color("model", BRIGHT_GREEN),
+            color("tools", YELLOW),
+            color("skills", BRIGHT_MAGENTA),
+            color("cache", BRIGHT_CYAN),
+            color("root", GREEN),
+        ]
+    )
+    for offset in range(3):
+        tracer = color("  signal ", GRAY) + color("═" * (8 + offset * 4) + "▶ ", CYAN) + stream
+        print(color("│", BRIGHT_CYAN) + pad_ansi(tracer, width - 2) + color("│", BRIGHT_CYAN), flush=True)
+        time.sleep(0.045)
     print(color("├" + "─" * (width - 2) + "┤", BRIGHT_CYAN))
     print(center_line(color("capability matrix", YELLOW + BOLD), width))
     for left, right in zip(capabilities[::2], capabilities[1::2] + [("", "")]):
@@ -125,12 +138,37 @@ class ThinkingSpinner:
             print("\r" + " " * 60 + "\r", end="", file=sys.stderr, flush=True)
 
     def _spin(self) -> None:
-        frames = ["thinking  ◐", "thinking  ◓", "thinking  ◑", "thinking  ◒"]
+        frames = [
+            color("thinking", BRIGHT_MAGENTA + BOLD) + color("  ◐ ", CYAN) + color("reasoning", GRAY),
+            color("thinking", BRIGHT_MAGENTA + BOLD) + color("  ◓ ", CYAN) + color("planning", GRAY),
+            color("thinking", BRIGHT_MAGENTA + BOLD) + color("  ◑ ", CYAN) + color("routing", GRAY),
+            color("thinking", BRIGHT_MAGENTA + BOLD) + color("  ◒ ", CYAN) + color("checking", GRAY),
+        ]
         index = 0
         while not self.stop_event.is_set():
             print("\r" + frames[index % len(frames)], end="", file=sys.stderr, flush=True)
             index += 1
             time.sleep(0.12)
+
+
+def format_agent_event(text: str) -> str:
+    if text.startswith("tool "):
+        rest = text.removeprefix("tool ").strip()
+        name, _, args = rest.partition(" ")
+        return (
+            color("  ╭─", CYAN)
+            + color(" tool ", YELLOW + BOLD)
+            + color(name, BRIGHT_CYAN + BOLD)
+            + (color(" · ", GRAY) + color(args, WHITE) if args else "")
+        )
+    if text.startswith("done "):
+        name = text.removeprefix("done ").strip()
+        return color("  ╰─", CYAN) + color(" done ", GREEN + BOLD) + color(name, BRIGHT_GREEN)
+    if text.startswith("thinking pass "):
+        return color("  ◇ ", BRIGHT_MAGENTA) + color(text, GRAY)
+    if text.startswith("context compacted"):
+        return color("  ◈ ", YELLOW) + color(text, GRAY)
+    return color("  • ", CYAN) + color(text, GRAY)
 
 
 def print_slash_palette(commands: list[tuple[str, str]], skills: list[tuple[str, str]]) -> None:
@@ -217,6 +255,10 @@ def read_composer(prompt: str, slash_items: list[tuple[str, str]] | None = None)
                     redraw_composer(prompt, buffer)
                 continue
             if char in {"\r", "\n"}:
+                if buffer and not should_submit_newline(fd):
+                    buffer.append("\n")
+                    redraw_composer(prompt, buffer)
+                    continue
                 sys.stdout.write("\r\n")
                 sys.stdout.flush()
                 return "".join(buffer)
@@ -490,6 +532,11 @@ def read_bracketed_paste(fd: int, buffer: list[str]) -> None:
         if len(tail) > len("\x1b[201~"):
             buffer.append(tail[0])
             tail = tail[1:]
+
+
+def should_submit_newline(fd: int) -> bool:
+    ready, _, _ = select.select([fd], [], [], 0.015)
+    return not ready
 
 
 def read_escape_suffix(fd: int) -> str:
