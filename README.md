@@ -1,0 +1,222 @@
+# DeepSeek TuLAgent
+
+DeepSeek TuLAgent is a terminal coding agent built specifically around DeepSeek's OpenAI-compatible chat API. It provides local tools, session resume, slash commands, permission modes, thinking modes, and installable skills while keeping the implementation independent and compact.
+
+## Features
+
+- DeepSeek-first provider config: `DEEPSEEK_API_KEY`, `DEEPSEEK_BASE_URL`, `DEEPSEEK_MODEL`
+- Native DeepSeek V4 aliases: `pro`, `v4-pro`, `flash`, `v4-flash`
+- Live model discovery through `deepseekTul models` and `deepseekTul doctor --live`
+- Global `deepseekTul` command for interactive use
+- Tool registry: files, local search, web search, git status, shell, patch, downloads, background services
+- Six permission modes: `plan`, `review`, `agent`, `trusted`, `yolo`, `root`
+- Five thinking modes: `off`, `fast`, `balanced`, `deep`, `max`
+- Local skill directories with `SKILL.md` discovery and skill creation
+- JSONL session transcript under `.deepseek-tulagent/sessions`
+- One-shot and interactive CLI suitable for automation and later full TUI wrapping
+- Doctor command for local config checks
+
+## Quickstart
+
+```bash
+git clone https://github.com/ffffff233/deepseek-tulagent.git
+cd deepseek-tulagent
+python3 -m venv .venv
+. .venv/bin/activate
+pip install -e .
+deepseekTul config set --base-url https://api.deepseek.com --api-key sk-... --model deepseek-v4-flash
+deepseekTul doctor --live
+deepseekTul
+```
+
+One-shot usage:
+
+```bash
+deepseekTul run --mode root --think fast "inspect this repo"
+```
+
+Startup commands:
+
+```bash
+deepseekTul                                    # default: root + fast + flash
+deepseekTul start --mode agent --think balanced
+deepseekTul start --mode trusted --think deep --yes
+deepseekTul start --mode root --think max
+deepseekTul run --mode agent --think fast --yes "run tests and fix failures"
+```
+
+## Conversations
+
+Each conversation is saved under:
+
+```text
+<workspace>/.deepseek-tulagent/sessions/<SESSION_ID>.jsonl
+```
+
+When you actively leave an interactive conversation with `/exit`, `/quit`, Ctrl-D, or Ctrl-C, the CLI prints the conversation id and ready-to-run commands:
+
+```text
+[session] <SESSION_ID>
+[resume]  deepseekTul start --resume <SESSION_ID>
+```
+
+Session commands:
+
+```bash
+deepseekTul sessions list
+deepseekTul sessions show <SESSION_ID>
+deepseekTul sessions resume <SESSION_ID>
+deepseekTul start --resume <SESSION_ID>
+```
+
+Resume example:
+
+```bash
+deepseekTul start --resume 022a00cb-e1cf-49af-9e11-0cbc6b2e3ab8
+```
+
+Current local default config lives at `~/.deepseek-tulagent/config.json`. Environment variables still override it.
+
+## Slash Palette
+
+Inside `deepseekTul`, press `/` to open the command palette immediately:
+
+- type letters to filter, for example `m` matches `/model` and `/mode`
+- use `↑` / `↓` to select
+- press `Enter` to execute the selected command
+- press `Esc` to cancel
+
+Common commands:
+
+- `/model`
+- `/mode root`
+- `/think fast`
+- `/doctor`
+- `/skills`
+- `/skill <name>`
+- `/tool <json>`
+- `/exit`
+
+Discovered skills are shown in the same palette as `/skill <name>` entries.
+
+## Permission Modes
+
+| Mode | Behavior |
+| --- | --- |
+| `plan` | Read-only investigation. No shell, writes, or patches. |
+| `review` | Read and run non-mutating diagnostics with confirmation-oriented prompts. |
+| `agent` | Default coding mode. Reads, shell, writes, and patches inside the workspace. |
+| `trusted` | Like agent, with network-capable policy metadata for future tools. |
+| `yolo` | Auto-approved trusted workspace mode. |
+| `root` | Highest authority mode. No confirmation prompts; tools execute directly. |
+
+Confirmation rules:
+
+- Read-only tools run directly when the mode allows reading.
+- Gated tools are `write_file`, `run_shell`, `apply_patch`, `download_url`, `start_service`, `stop_service`.
+- `--yes` approves all gated tools for that run/session.
+- Without `--yes`, interactive mode asks you to type `yes` for each gated tool.
+- `yolo` and `root` behave like all-gated-tools-approved.
+
+## Skills
+
+TuLAgent discovers skills from these directories, in order:
+
+- `<workspace>/.deepseek-tulagent/skills`
+- `<workspace>/.agents/skills`
+- `<workspace>/skills`
+- `~/.deepseek-tulagent/skills`
+- `~/.agents/skills`
+
+Each skill is a directory containing `SKILL.md`:
+
+```markdown
+---
+name: repo-debug
+description: Use when debugging this repository.
+---
+
+# repo-debug
+
+Run tests first, inspect failures, then patch narrowly.
+```
+
+Skill commands:
+
+```bash
+deepseekTul skills list
+deepseekTul skills show repo-debug
+deepseekTul skills new repo-debug --description "Use when debugging this repository." --body "Run tests first."
+```
+
+Discovered skill summaries are injected into the agent prompt at startup/run time. The implementation is independent from Codex; it only follows the same useful convention of local `SKILL.md` instruction packs.
+
+## Thinking Modes
+
+| Mode | Route | Budget |
+| --- | --- | --- |
+| `off` | `deepseek-v4-flash` | smallest |
+| `fast` | `deepseek-v4-flash` | quick tool-driven work |
+| `balanced` | `deepseek-v4-pro` | default engineering work |
+| `deep` | `deepseek-v4-pro` | complex debugging/design |
+| `max` | `deepseek-v4-pro` | hardest ambiguous tasks |
+
+## Configuration
+
+Environment variables:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `DEEPSEEK_API_KEY` | required for live calls | DeepSeek API key |
+| `DEEPSEEK_BASE_URL` | `https://api.deepseek.com` | API base URL |
+| `DEEPSEEK_MODEL` | `deepseek-v4-flash` | Model name or alias |
+| `DSTUL_WORKSPACE` | current directory | Workspace root |
+| `DSTUL_MAX_TOOL_ROUNDS` | `8` | Max tool loop iterations |
+| `DSTUL_MAX_TOKENS` | `2048` | Max model output tokens |
+| `DSTUL_REQUEST_TIMEOUT` | `180` | DeepSeek request timeout seconds |
+
+Model aliases:
+
+| Alias | Resolved model |
+| --- | --- |
+| `pro`, `v4-pro` | `deepseek-v4-pro` |
+| `flash`, `v4-flash` | `deepseek-v4-flash` |
+
+## Tool Protocol
+
+The model is asked to return normal text or a tool request block:
+
+```json
+{"tool":"read_file","arguments":{"path":"README.md","max_bytes":12000}}
+```
+
+Available tools:
+
+- `list_files`: list workspace files with noisy directories skipped
+- `search_text`: search text inside workspace files
+- `web_search`: search the web and return result snippets
+- `git_status`: show short git status
+- `run_shell`: run a command in the workspace
+- `read_file`: read a UTF-8 text file
+- `write_file`: create or overwrite a file
+- `apply_patch`: apply a unified diff through `git apply`
+- `download_url`: download a URL into the workspace when network policy allows it
+- `start_service`: launch a background service and store pid/log under `.deepseek-tulagent/services`
+- `stop_service`: stop a recorded service
+- `service_status`: check a recorded service
+
+## Design Notes
+
+This project does not copy DeepSeek-TUI source. It implements the same broad class of terminal agent from scratch in Python:
+
+- provider layer is DeepSeek-specific but OpenAI-compatible;
+- tool layer is an explicit registry with workspace path checks;
+- session state is append-only JSONL;
+- approval behavior is mode-driven;
+- startup checks verify that the configured DeepSeek model is actually available before interactive use.
+
+## Security Notes
+
+- Do not commit `~/.deepseek-tulagent/config.json`; it may contain your API key.
+- Local session logs can contain prompts, tool results, paths, and command output.
+- `root` and `yolo` modes execute gated tools without confirmation. Use them only in trusted workspaces.

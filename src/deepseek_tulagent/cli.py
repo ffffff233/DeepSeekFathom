@@ -1,0 +1,524 @@
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+
+from .agent import TuLAgent, parse_tool_call
+from .config import get_settings, load_file_config, save_file_config
+from .messages import Message
+from .policy import ApprovalPolicy, ThinkingMode
+from .provider import DeepSeekClient
+from .session import SessionStore
+from .skills import SkillStore
+from .tools import ToolRegistry
+from .tui import ChatTui, TuiState
+from .ui import ThinkingSpinner, assistant_prefix, composer_prompt, confirm_tool, print_box, print_header, print_slash_palette, print_tool_palette, read_composer, startup_animation
+
+
+BANNER = r"""
+DeepSeek TuLAgent
+V4 Pro native terminal agent
+tools: shell | read | write | patch
+"""
+
+MODES = ["plan", "review", "agent", "trusted", "yolo", "root"]
+THINKING = ["off", "fast", "balanced", "deep", "max"]
+
+
+def main(argv: list[str] | None = None) -> int:
+    if argv is None:
+        argv = sys.argv[1:]
+    if not argv:
+        settings = get_settings()
+        argv = ["start", "--mode", settings.default_mode, "--think", settings.default_thinking]
+    parser = argparse.ArgumentParser(prog="dstul")
+    sub = parser.add_subparsers(dest="cmd", required=True)
+
+    run_parser = sub.add_parser("run", help="run a one-shot DeepSeek TuLAgent task")
+    run_parser.add_argument("prompt")
+    run_parser.add_argument("--mode", choices=MODES, default="agent")
+    run_parser.add_argument("--think", choices=THINKING, default="balanced")
+    run_parser.add_argument("--json", action="store_true", help="print machine-readable result")
+    run_parser.add_argument("--stream", action="store_true", help="stream assistant text")
+    run_parser.add_argument("--yes", action="store_true", help="approve every confirmation-gated tool")
+
+    start_parser = sub.add_parser("start", help="start an interactive DeepSeek TuLAgent session")
+    start_parser.add_argument("--mode", choices=MODES)
+    start_parser.add_argument("--think", choices=THINKING)
+    start_parser.add_argument("--yes", action="store_true", help="approve every confirmation-gated tool")
+    start_parser.add_argument("--resume", help="resume a previous session id")
+
+    doctor_parser = sub.add_parser("doctor", help="check local configuration")
+    doctor_parser.add_argument("--live", action="store_true", help="also call DeepSeek API")
+
+    sub.add_parser("models", help="list live DeepSeek models")
+
+    auth_parser = sub.add_parser("config", help="manage default local config")
+    auth_sub = auth_parser.add_subparsers(dest="config_cmd", required=True)
+    set_parser = auth_sub.add_parser("set", help="save DeepSeek defaults locally")
+    set_parser.add_argument("--api-key")
+    set_parser.add_argument("--base-url")
+    set_parser.add_argument("--model")
+    auth_sub.add_parser("show", help="show local config with API key redacted")
+
+    skills_parser = sub.add_parser("skills", help="manage local skill directories")
+    skills_sub = skills_parser.add_subparsers(dest="skills_cmd", required=True)
+    skills_sub.add_parser("list", help="list discovered skills")
+    show_parser = skills_sub.add_parser("show", help="show one skill")
+    show_parser.add_argument("name")
+    new_parser = skills_sub.add_parser("new", help="create a workspace skill")
+    new_parser.add_argument("name")
+    new_parser.add_argument("--description", required=True)
+    new_parser.add_argument("--body", default="")
+
+    sessions_parser = sub.add_parser("sessions", help="list, show, or resume conversations")
+    sessions_sub = sessions_parser.add_subparsers(dest="sessions_cmd", required=True)
+    sessions_sub.add_parser("list", help="list conversation sessions")
+    session_show = sessions_sub.add_parser("show", help="show a session transcript")
+    session_show.add_argument("session_id")
+    session_resume = sessions_sub.add_parser("resume", help="resume a session interactively")
+    session_resume.add_argument("session_id")
+    session_resume.add_argument("--mode", choices=MODES, default="root")
+    session_resume.add_argument("--think", choices=THINKING, default="fast")
+
+    args = parser.parse_args(argv)
+    settings = get_settings()
+
+    if args.cmd == "doctor":
+        status = {
+            "workspace": str(settings.workspace),
+            "base_url": settings.base_url,
+            "model": settings.model,
+            "api_key": "set" if settings.api_key else "missing",
+            "max_tool_rounds": settings.max_tool_rounds,
+            "max_tokens": settings.max_tokens,
+            "request_timeout": settings.request_timeout,
+        }
+        if args.live and settings.api_key:
+            try:
+                status["live"] = DeepSeekClient(settings).ping()
+            except Exception as exc:
+                status["live"] = {"ok": False, "error": str(exc)}
+        print(json.dumps(status, ensure_ascii=False, indent=2))
+        return 0 if settings.api_key else 2
+
+    if args.cmd == "models":
+        models = DeepSeekClient(settings).models()
+        for model in models:
+            marker = " *" if model == settings.model else ""
+            print(f"{model}{marker}")
+        return 0
+
+    if args.cmd == "config":
+        return config_command(args)
+
+    if args.cmd == "skills":
+        return skills_command(settings, args)
+
+    if args.cmd == "sessions":
+        return sessions_command(settings, args)
+
+    if args.cmd == "run":
+        thinking = ThinkingMode.resolve(args.think)
+        runtime_settings = settings.with_runtime(model=thinking.model_hint, max_tokens=min(settings.max_tokens, thinking.max_tokens))
+
+        def delta(text: str) -> None:
+            print(text, end="", flush=True)
+
+        def event(text: str) -> None:
+            print(f"\n[{text}]", file=sys.stderr)
+
+        approver = (lambda _name, _args: True) if args.yes or args.mode in {"yolo", "root"} else None
+        if args.stream:
+            result = TuLAgent(runtime_settings, mode=args.mode, thinking=args.think, approve=approver).run(
+                args.prompt,
+                stream=True,
+                on_delta=delta if not args.json else None,
+                on_event=event if not args.json else None,
+            )
+        else:
+            with ThinkingSpinner(f"thinking:{args.think}"):
+                result = TuLAgent(runtime_settings, mode=args.mode, thinking=args.think, approve=approver).run(
+                    args.prompt,
+                    stream=False,
+                    on_event=event if not args.json else None,
+                )
+        if args.json:
+            print(json.dumps(result.__dict__, ensure_ascii=False, indent=2))
+        else:
+            if not args.stream:
+                print(result.answer)
+            print(f"\n[session] {result.session_id}", file=sys.stderr)
+        return 0
+
+    if args.cmd == "start":
+        return interactive(
+            settings,
+            args.mode or settings.default_mode,
+            args.think or settings.default_thinking,
+            args.yes,
+            args.resume,
+        )
+
+    return 1
+
+
+def interactive(settings, mode: str, thinking_name: str, yes: bool, resume: str | None = None) -> int:
+    thinking = ThinkingMode.resolve(thinking_name)
+    settings = settings.with_runtime(model=thinking.model_hint, max_tokens=min(settings.max_tokens, thinking.max_tokens))
+    startup_animation(enabled=resume is None)
+    approval_text = "all yes" if yes or mode in {"yolo", "root"} else "manual yes for gated tools"
+    if resume:
+        print(f"DeepSeek TuLAgent · {settings.model} · {mode}/{thinking.name} · {settings.workspace}")
+    else:
+        print_header(str(settings.workspace), settings.base_url, settings.model, mode, thinking.name, approval_text)
+    print(f"limits   : {settings.max_tool_rounds} tool rounds, {settings.max_tokens} max tokens, {settings.request_timeout:g}s timeout")
+    toolkit = ToolRegistry(settings.workspace)
+    print(f"toolkit  : {len(toolkit.names)} tools loaded; type / to inspect")
+    session = None
+    if resume:
+        try:
+            session = SessionStore(settings.workspace).load(resume)
+            session.messages.append(Message(role="system", content="Resume note: preserve this conversation. If older tool history shows a background shell command timed out, do not assume the service failed; verify with service_status, ss, or curl. Prefer start_service for new background processes."))
+            print(f"resumed  : {session.session_id[:8]} · {len(session.messages)} messages")
+            print_recent_session_messages(session)
+        except FileNotFoundError as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+    if not settings.api_key:
+        print("api key  : missing DEEPSEEK_API_KEY", file=sys.stderr)
+        return 2
+    try:
+        live = DeepSeekClient(settings).ping()
+        available = "yes" if live["model_available"] else "no"
+        print(f"live     : ok, model available: {available}")
+    except Exception as exc:
+        print(f"live     : failed: {exc}", file=sys.stderr)
+        return 2
+    skills = SkillStore(settings.workspace)
+    discovered_skills = skills.list()
+    if discovered_skills:
+        print("skills   : " + ", ".join(skill.name for skill in discovered_skills))
+    else:
+        print("skills   : none")
+    print("skilldir : " + str(skills.writable_dir))
+    print("commands : type / for command palette")
+    print()
+
+    current_mode = mode
+    last_session_id = session.session_id if session else None
+    while True:
+        try:
+            prompt = read_composer(
+                composer_prompt(settings.model, current_mode, thinking.name, last_session_id),
+                slash_items=slash_items(settings),
+            ).strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            if last_session_id:
+                print_session_handoff(last_session_id)
+            return 0
+        if not prompt:
+            continue
+        if prompt in {"/exit", "/quit"}:
+            if last_session_id:
+                print_session_handoff(last_session_id)
+            return 0
+        if prompt == "/":
+            print()
+            print_palette(settings)
+            print()
+            continue
+        if prompt.startswith("/mode "):
+            requested = prompt.split(maxsplit=1)[1].strip()
+            if requested not in set(MODES):
+                print("mode must be one of: " + ", ".join(MODES))
+                continue
+            current_mode = requested
+            print_header(str(settings.workspace), settings.base_url, settings.model, current_mode, thinking.name, "all yes" if yes or current_mode in {"yolo", "root"} else "manual yes for gated tools")
+            print(f"mode set to {current_mode}")
+            continue
+        if prompt.startswith("/think "):
+            requested = prompt.split(maxsplit=1)[1].strip()
+            if requested not in set(THINKING):
+                print("thinking must be one of: " + ", ".join(THINKING))
+                continue
+            thinking = ThinkingMode.resolve(requested)
+            settings = settings.with_runtime(model=thinking.model_hint, max_tokens=thinking.max_tokens)
+            print_header(str(settings.workspace), settings.base_url, settings.model, current_mode, thinking.name, "all yes" if yes or current_mode in {"yolo", "root"} else "manual yes for gated tools")
+            print(f"thinking set to {thinking.name}; model={settings.model}; max_tokens={settings.max_tokens}")
+            continue
+        if prompt in {"/models", "/model"}:
+            for model in DeepSeekClient(settings).models():
+                marker = " *" if model == settings.model else ""
+                print(f"{model}{marker}")
+            continue
+        if prompt == "/skills":
+            discovered = SkillStore(settings.workspace).list()
+            if not discovered:
+                print("no skills discovered")
+            for skill in discovered:
+                print(skill.summary())
+            continue
+        if prompt.startswith("/skill "):
+            name = prompt.split(maxsplit=1)[1].strip()
+            skill = SkillStore(settings.workspace).get(name)
+            if not skill:
+                print(f"skill not found: {name}")
+            else:
+                print(skill.path)
+                print(skill.body)
+            continue
+        if prompt == "/doctor":
+            print(json.dumps(DeepSeekClient(settings).ping(), ensure_ascii=False, indent=2))
+            continue
+        if prompt.startswith("/tool "):
+            tool_text = prompt.split(maxsplit=1)[1]
+            direct_tool = parse_tool_call(tool_text)
+            if not direct_tool:
+                print("tool: could not parse tool JSON")
+                continue
+            name, arguments = direct_tool
+            try:
+                result = ToolRegistry(settings.workspace, policy=ApprovalPolicy.from_mode(current_mode)).run(name, arguments)
+                print(f"tool {name}: {'ok' if result.ok else 'failed'}")
+                if result.output:
+                    print(result.output[:4000])
+            except Exception as exc:
+                print(f"tool {name}: error: {exc}")
+            continue
+
+        def event(text: str) -> None:
+            print(f"  {text}", flush=True)
+
+        approver = (lambda _name, _args: True) if yes or current_mode in {"yolo", "root"} else confirm_tool
+        try:
+            with ThinkingSpinner(f"thinking:{thinking.name}"):
+                result = TuLAgent(settings, mode=current_mode, thinking=thinking.name, approve=approver).run(
+                    prompt,
+                    stream=False,
+                    on_event=event,
+                    session=session,
+                )
+        except KeyboardInterrupt:
+            print("\ninterrupted")
+            continue
+        except Exception as exc:
+            print(f"error: {exc}")
+            continue
+        if result.answer:
+            print(assistant_prefix() + result.answer)
+        if session is None:
+            session = SessionStore(settings.workspace).load(result.session_id)
+        last_session_id = result.session_id
+        print()
+
+
+def interactive_tui(settings, mode: str, thinking: ThinkingMode, yes: bool, session) -> int:
+    state = TuiState(model=settings.model, mode=mode, thinking=thinking.name, session_id=session.session_id if session else None)
+    if session:
+        for message in session.messages[-12:]:
+            if message.role in {"user", "assistant", "tool"}:
+                state.messages.append((message.role, message.content[:2000]))
+
+    current = {"mode": mode, "thinking": thinking, "settings": settings, "session": session}
+
+    def on_command(command: str, tui_state: TuiState) -> bool:
+        if command == "/":
+            skills = SkillStore(current["settings"].workspace).list()
+            body = "/exit /mode <name> /think <name> /models /doctor /skills"
+            if skills:
+                body += "\n" + "\n".join(f"/skill {skill.name} - {skill.description}" for skill in skills)
+            tui_state.messages.append(("system", body))
+            return False
+        if command.startswith("/mode "):
+            requested = command.split(maxsplit=1)[1].strip()
+            if requested in set(MODES):
+                current["mode"] = requested
+                tui_state.mode = requested
+                tui_state.status = "mode changed"
+            return False
+        if command.startswith("/think "):
+            requested = command.split(maxsplit=1)[1].strip()
+            if requested in set(THINKING):
+                resolved = ThinkingMode.resolve(requested)
+                current["thinking"] = resolved
+                current["settings"] = current["settings"].with_runtime(model=resolved.model_hint, max_tokens=resolved.max_tokens)
+                tui_state.thinking = resolved.name
+                tui_state.model = current["settings"].model
+                tui_state.status = "thinking changed"
+            return False
+        if command == "/exit" or command == "/quit":
+            return True
+        tui_state.messages.append(("system", f"unknown command: {command}"))
+        return False
+
+    def on_submit(text: str, tui_state: TuiState) -> None:
+        tui_state.messages.append(("user", text))
+        tui_state.status = "thinking"
+
+        def collect(delta: str) -> None:
+            if not tui_state.messages or tui_state.messages[-1][0] != "assistant":
+                tui_state.messages.append(("assistant", ""))
+            role, content = tui_state.messages[-1]
+            tui_state.messages[-1] = (role, content + delta)
+
+        approver = (lambda _name, _args: True) if yes or current["mode"] in {"yolo", "root"} else confirm_tool
+        result = TuLAgent(current["settings"], mode=current["mode"], thinking=current["thinking"].name, approve=approver).run(
+            text,
+            stream=True,
+            on_delta=collect,
+            session=current["session"],
+        )
+        if current["session"] is None:
+            current["session"] = SessionStore(current["settings"].workspace).load(result.session_id)
+        tui_state.session_id = result.session_id
+        tui_state.status = "ready"
+
+    try:
+        ChatTui(state, on_submit, on_command).run()
+    finally:
+        if state.session_id:
+            print_session_handoff(state.session_id)
+    return 0
+
+
+def skills_command(settings, args) -> int:
+    store = SkillStore(settings.workspace)
+    if args.skills_cmd == "list":
+        for skill in store.list():
+            print(f"{skill.name}\t{skill.description}\t{skill.path}")
+        return 0
+    if args.skills_cmd == "show":
+        skill = store.get(args.name)
+        if not skill:
+            print(f"skill not found: {args.name}", file=sys.stderr)
+            return 1
+        print(skill.path)
+        print()
+        print(skill.body)
+        return 0
+    if args.skills_cmd == "new":
+        skill = store.create(args.name, args.description, args.body)
+        print(f"created {skill.name}: {skill.path}")
+        return 0
+    return 1
+
+
+def sessions_command(settings, args) -> int:
+    store = SessionStore(settings.workspace)
+    if args.sessions_cmd == "list":
+        rows = store.list()
+        if not rows:
+            print("no sessions")
+            return 0
+        for row in rows:
+            print(f"{row['session_id']}\t{row['messages']} messages\t{row['title']}\t{row['path']}")
+        return 0
+    if args.sessions_cmd == "show":
+        session = store.load(args.session_id)
+        for message in session.messages:
+            name = f":{message.name}" if message.name else ""
+            print(f"[{message.role}{name}]")
+            print(message.content)
+            print()
+        return 0
+    if args.sessions_cmd == "resume":
+        return interactive(settings, args.mode, args.think, yes=args.mode in {"yolo", "root"}, resume=args.session_id)
+    return 1
+
+
+def config_command(args) -> int:
+    data = load_file_config()
+    if args.config_cmd == "show":
+        redacted = dict(data)
+        if redacted.get("api_key"):
+            redacted["api_key"] = "set"
+        print(json.dumps(redacted, ensure_ascii=False, indent=2))
+        return 0
+    if args.config_cmd == "set":
+        if args.api_key:
+            data["api_key"] = args.api_key
+        if args.base_url:
+            data["base_url"] = args.base_url.rstrip("/")
+        if args.model:
+            data["model"] = args.model
+        path = save_file_config(data)
+        print(f"saved {path}")
+        return 0
+    return 1
+
+
+def print_palette(settings) -> None:
+    commands = [
+        ("/exit", "leave the session"),
+        ("/mode <name>", "switch permission mode"),
+        ("/think <name>", "switch thinking mode"),
+        ("/models", "list live DeepSeek models"),
+        ("/doctor", "check live DeepSeek config"),
+        ("/skills", "list discovered skills"),
+        ("/skill <name>", "show a skill body"),
+        ("/tool <json>", "execute a tool JSON object directly"),
+    ]
+    skill_rows = [(skill.name, skill.description) for skill in SkillStore(settings.workspace).list()]
+    print_slash_palette(commands, skill_rows)
+    print_tool_palette(ToolRegistry(settings.workspace).describe())
+
+
+def slash_items(settings) -> list[tuple[str, str]]:
+    items = [
+        ("/model", "choose model / show live DeepSeek models"),
+        ("/mode root", "highest permission, all tools approved"),
+        ("/mode agent", "agent mode with manual gated approvals"),
+        ("/mode plan", "read-only planning mode"),
+        ("/think fast", "fast thinking with flash model"),
+        ("/think balanced", "balanced thinking"),
+        ("/think deep", "deep thinking with pro model"),
+        ("/doctor", "check live DeepSeek config"),
+        ("/skills", "list discovered skills"),
+        ("/exit", "leave and print resume command"),
+    ]
+    for skill in SkillStore(settings.workspace).list():
+        items.append((f"/skill {skill.name}", skill.description))
+    return items
+
+
+def print_session_handoff(session_id: str) -> None:
+    print(f"\n[session] {session_id}", file=sys.stderr)
+    print(f"[resume] deepseekTul start --resume {session_id}", file=sys.stderr)
+
+
+def print_recent_session_messages(session, limit: int = 3) -> None:
+    visible = [
+        message for message in session.messages
+        if message.role in {"user", "assistant"} and is_human_visible_history(message.content)
+    ][-limit:]
+    if not visible:
+        print("recent   : none")
+        return
+    print("recent   :")
+    for message in visible:
+        text = compact_history_text(message.content)
+        role = "you" if message.role == "user" else "assistant"
+        print(f"  {role:<9} {text}")
+
+
+def is_human_visible_history(text: str) -> bool:
+    stripped = text.strip()
+    if stripped.startswith("Tool result from "):
+        return False
+    if stripped.startswith('{"tool"') or stripped.startswith("```json"):
+        return False
+    return True
+
+
+def compact_history_text(text: str) -> str:
+    cleaned = " ".join(text.split())
+    if len(cleaned) > 72:
+        return cleaned[:69] + "..."
+    return cleaned
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

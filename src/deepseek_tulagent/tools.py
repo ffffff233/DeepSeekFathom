@@ -1,0 +1,401 @@
+from __future__ import annotations
+
+from collections.abc import Callable
+from dataclasses import dataclass
+import json
+import os
+from pathlib import Path
+import shutil
+import subprocess
+from typing import Any
+from html import unescape
+import re
+import urllib.parse
+import urllib.request
+
+from .policy import ApprovalPolicy
+
+
+class ToolError(RuntimeError):
+    pass
+
+
+@dataclass(frozen=True)
+class ToolResult:
+    ok: bool
+    output: str
+
+    def to_message(self) -> str:
+        return json.dumps({"ok": self.ok, "output": self.output}, ensure_ascii=False)
+
+
+ToolHandler = Callable[[dict[str, Any]], ToolResult]
+
+
+TOOL_DESCRIPTIONS = {
+    "list_files": "read: list files in the workspace",
+    "search_text": "read: search text in workspace files",
+    "git_status": "read: show git short status",
+    "read_file": "read: read UTF-8 text from a workspace file",
+    "write_file": "gated write: create or overwrite a workspace file",
+    "run_shell": "gated shell: run a shell command in the workspace",
+    "apply_patch": "gated write: apply a unified diff with git apply",
+    "download_url": "gated network+write: download URL into workspace",
+    "web_search": "network: search the web and return result snippets",
+    "start_service": "gated shell: start background service with pid/log tracking",
+    "stop_service": "gated shell: stop a tracked background service",
+    "service_status": "read: inspect a tracked background service",
+}
+
+
+class ToolRegistry:
+    def __init__(
+        self,
+        workspace: Path,
+        allow_write: bool | None = None,
+        allow_shell: bool | None = None,
+        policy: ApprovalPolicy | None = None,
+    ):
+        self.workspace = workspace.resolve()
+        self.policy = policy or ApprovalPolicy(
+            "custom",
+            True,
+            bool(allow_write),
+            bool(allow_shell),
+            False,
+            True,
+        )
+        self.allow_write = self.policy.allow_write
+        self.allow_shell = self.policy.allow_shell
+        self._tools: dict[str, ToolHandler] = {
+            "list_files": self.list_files,
+            "search_text": self.search_text,
+            "git_status": self.git_status,
+            "read_file": self.read_file,
+            "write_file": self.write_file,
+            "run_shell": self.run_shell,
+            "apply_patch": self.apply_patch,
+            "download_url": self.download_url,
+            "web_search": self.web_search,
+            "start_service": self.start_service,
+            "stop_service": self.stop_service,
+            "service_status": self.service_status,
+        }
+
+    @property
+    def names(self) -> list[str]:
+        return sorted(self._tools)
+
+    def describe(self) -> dict[str, str]:
+        return {name: TOOL_DESCRIPTIONS.get(name, "tool") for name in self.names}
+
+    def run(self, name: str, arguments: dict[str, Any]) -> ToolResult:
+        if name not in self._tools:
+            raise ToolError(f"Unknown tool: {name}")
+        return self._tools[name](arguments)
+
+    def resolve_workspace_path(self, raw_path: str) -> Path:
+        path = (self.workspace / raw_path).resolve()
+        try:
+            path.relative_to(self.workspace)
+        except ValueError as exc:
+            raise ToolError(f"Path escapes workspace: {raw_path}") from exc
+        return path
+
+    def read_file(self, arguments: dict[str, Any]) -> ToolResult:
+        path = self.resolve_workspace_path(require_str(arguments, "path"))
+        max_bytes = int(arguments.get("max_bytes", 20000))
+        data = path.read_bytes()[:max_bytes]
+        return ToolResult(True, data.decode("utf-8", errors="replace"))
+
+    def list_files(self, arguments: dict[str, Any]) -> ToolResult:
+        root = self.resolve_workspace_path(str(arguments.get("path", ".")))
+        max_entries = int(arguments.get("max_entries", 300))
+        if root.is_file():
+            return ToolResult(True, str(root.relative_to(self.workspace)))
+        entries: list[str] = []
+        for path in sorted(root.rglob("*")):
+            if len(entries) >= max_entries:
+                entries.append("...")
+                break
+            if should_skip(path):
+                continue
+            entries.append(str(path.relative_to(self.workspace)) + ("/" if path.is_dir() else ""))
+        return ToolResult(True, "\n".join(entries))
+
+    def search_text(self, arguments: dict[str, Any]) -> ToolResult:
+        query = require_str(arguments, "query")
+        path = self.resolve_workspace_path(str(arguments.get("path", ".")))
+        max_matches = int(arguments.get("max_matches", 100))
+        timeout = int(arguments.get("timeout", 5))
+        rg = find_rg()
+        if rg:
+            command = [
+                rg,
+                "--line-number",
+                "--color=never",
+                "--hidden",
+                "--glob", "!.git",
+                "--glob", "!node_modules",
+                "--glob", "!__pycache__",
+                "--glob", "!.venv",
+                "--glob", "!target",
+                "--glob", "!dist",
+                "--glob", "!build",
+                "--max-filesize", str(arguments.get("max_filesize", "1M")),
+                "--max-count", "1",
+                "--fixed-strings",
+                query,
+                str(path),
+            ]
+            try:
+                completed = subprocess.run(command, cwd=self.workspace, text=True, capture_output=True, timeout=timeout)
+            except subprocess.TimeoutExpired:
+                return ToolResult(False, f"search timed out after {timeout}s")
+            lines = completed.stdout.splitlines()[:max_matches]
+            if len(completed.stdout.splitlines()) > max_matches:
+                lines.append("...")
+            if completed.returncode not in {0, 1}:
+                return ToolResult(False, completed.stderr.strip() or "search failed")
+            return ToolResult(True, "\n".join(lines))
+        matches: list[str] = []
+        files = [path] if path.is_file() else sorted(p for p in path.rglob("*") if p.is_file())
+        for file_path in files:
+            if len(matches) >= max_matches:
+                matches.append("...")
+                break
+            if should_skip(file_path):
+                continue
+            try:
+                for line_no, line in enumerate(file_path.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
+                    if query in line:
+                        rel = file_path.relative_to(self.workspace)
+                        matches.append(f"{rel}:{line_no}: {line[:240]}")
+                        if len(matches) >= max_matches:
+                            break
+            except OSError:
+                continue
+        return ToolResult(True, "\n".join(matches))
+
+    def git_status(self, arguments: dict[str, Any]) -> ToolResult:
+        completed = subprocess.run(
+            ["git", "status", "--short"],
+            cwd=self.workspace,
+            text=True,
+            capture_output=True,
+            timeout=int(arguments.get("timeout", 30)),
+        )
+        output = completed.stdout
+        if completed.stderr:
+            output += "\n[stderr]\n" + completed.stderr
+        return ToolResult(completed.returncode == 0, output.strip() or "clean")
+
+    def write_file(self, arguments: dict[str, Any]) -> ToolResult:
+        if not self.allow_write:
+            raise ToolError("write_file is disabled in this mode")
+        path = self.resolve_workspace_path(require_str(arguments, "path"))
+        content = require_str(arguments, "content")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = path.with_name(f".{path.name}.tmp-{os.getpid()}")
+        with tmp_path.open("w", encoding="utf-8") as handle:
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp_path, path)
+        return ToolResult(True, f"Wrote {path.relative_to(self.workspace)}")
+
+    def run_shell(self, arguments: dict[str, Any]) -> ToolResult:
+        if not self.allow_shell:
+            raise ToolError("run_shell is disabled in this mode")
+        command = require_str(arguments, "command")
+        if is_background_command(command):
+            return self.start_service({"name": arguments.get("name", "shell-bg"), "command": strip_background(command)})
+        completed = subprocess.run(
+            command,
+            cwd=self.workspace,
+            shell=True,
+            text=True,
+            capture_output=True,
+            timeout=int(arguments.get("timeout", 60)),
+        )
+        output = completed.stdout
+        if completed.stderr:
+            output += "\n[stderr]\n" + completed.stderr
+        return ToolResult(completed.returncode == 0, output[-30000:])
+
+    def apply_patch(self, arguments: dict[str, Any]) -> ToolResult:
+        if not self.allow_write:
+            raise ToolError("apply_patch is disabled in this mode")
+        patch = require_str(arguments, "patch")
+        completed = subprocess.run(
+            ["git", "apply", "--whitespace=nowarn", "-"],
+            cwd=self.workspace,
+            input=patch,
+            text=True,
+            capture_output=True,
+            timeout=int(arguments.get("timeout", 60)),
+        )
+        output = completed.stdout
+        if completed.stderr:
+            output += "\n[stderr]\n" + completed.stderr
+        return ToolResult(completed.returncode == 0, output.strip() or "patch applied")
+
+    def download_url(self, arguments: dict[str, Any]) -> ToolResult:
+        if not self.policy.allow_network:
+            raise ToolError("download_url is disabled in this mode")
+        url = require_str(arguments, "url")
+        raw_dest = require_str(arguments, "path")
+        path = self.resolve_workspace_path(raw_dest)
+        max_bytes = int(arguments.get("max_bytes", 20_000_000))
+        with urllib.request.urlopen(url, timeout=int(arguments.get("timeout", 60))) as response:
+            data = response.read(max_bytes + 1)
+        if len(data) > max_bytes:
+            raise ToolError(f"download exceeded max_bytes={max_bytes}")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+        return ToolResult(True, f"Downloaded {len(data)} bytes to {path.relative_to(self.workspace)}")
+
+    def web_search(self, arguments: dict[str, Any]) -> ToolResult:
+        if not self.policy.allow_network:
+            raise ToolError("web_search is disabled in this mode")
+        query = require_str(arguments, "query")
+        max_results = int(arguments.get("max_results", 5))
+        timeout = int(arguments.get("timeout", 10))
+        url = "https://www.bing.com/search?" + urllib.parse.urlencode({"q": query})
+        request = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 DeepSeekTuL/0.1"})
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            html = response.read(1_500_000).decode("utf-8", errors="replace")
+        results = parse_bing_results(html, max_results) or parse_duckduckgo_results(html, max_results)
+        if not results:
+            return ToolResult(False, "no web search results parsed")
+        return ToolResult(True, "\n\n".join(results))
+
+    def start_service(self, arguments: dict[str, Any]) -> ToolResult:
+        if not self.allow_shell:
+            raise ToolError("start_service is disabled in this mode")
+        name = require_str(arguments, "name")
+        command = require_str(arguments, "command")
+        services_dir = self.workspace / ".deepseek-tulagent" / "services"
+        services_dir.mkdir(parents=True, exist_ok=True)
+        log_path = services_dir / f"{safe_name(name)}.log"
+        pid_path = services_dir / f"{safe_name(name)}.pid"
+        if pid_path.exists() and process_alive(pid_path):
+            return ToolResult(True, f"Service {name} already running with pid {pid_path.read_text().strip()}")
+        log = log_path.open("ab")
+        process = subprocess.Popen(command, cwd=self.workspace, shell=True, stdout=log, stderr=subprocess.STDOUT)
+        pid_path.write_text(str(process.pid), encoding="utf-8")
+        return ToolResult(True, f"Started {name} pid={process.pid} log={log_path.relative_to(self.workspace)}")
+
+    def stop_service(self, arguments: dict[str, Any]) -> ToolResult:
+        if not self.allow_shell:
+            raise ToolError("stop_service is disabled in this mode")
+        name = require_str(arguments, "name")
+        pid_path = self.workspace / ".deepseek-tulagent" / "services" / f"{safe_name(name)}.pid"
+        if not pid_path.exists():
+            return ToolResult(True, f"Service {name} is not recorded")
+        pid = int(pid_path.read_text(encoding="utf-8").strip())
+        subprocess.run(["kill", str(pid)], capture_output=True, text=True)
+        pid_path.unlink(missing_ok=True)
+        return ToolResult(True, f"Stopped {name} pid={pid}")
+
+    def service_status(self, arguments: dict[str, Any]) -> ToolResult:
+        name = require_str(arguments, "name")
+        pid_path = self.workspace / ".deepseek-tulagent" / "services" / f"{safe_name(name)}.pid"
+        if not pid_path.exists():
+            return ToolResult(True, f"{name}: stopped")
+        alive = process_alive(pid_path)
+        return ToolResult(True, f"{name}: {'running' if alive else 'dead'} pid={pid_path.read_text().strip()}")
+
+
+def require_str(arguments: dict[str, Any], key: str) -> str:
+    value = arguments.get(key)
+    if not isinstance(value, str) or not value:
+        raise ToolError(f"Missing string argument: {key}")
+    return value
+
+
+def should_skip(path: Path) -> bool:
+    ignored = {".git", ".venv", "__pycache__", ".pytest_cache", "node_modules", "target", "dist", "build"}
+    return any(part in ignored for part in path.parts)
+
+
+def safe_name(name: str) -> str:
+    return "".join(ch if ch.isalnum() or ch in {"-", "_"} else "_" for ch in name)[:80] or "service"
+
+
+def process_alive(pid_path: Path) -> bool:
+    try:
+        pid = int(pid_path.read_text(encoding="utf-8").strip())
+        return subprocess.run(["kill", "-0", str(pid)], capture_output=True).returncode == 0
+    except (OSError, ValueError):
+        return False
+
+
+def find_rg() -> str | None:
+    found = shutil.which("rg")
+    if found:
+        return found
+    candidates = [
+        "/usr/bin/rg",
+        "/usr/local/bin/rg",
+        "/usr/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-path/rg",
+    ]
+    for candidate in candidates:
+        if Path(candidate).exists():
+            return candidate
+    return None
+
+
+def is_background_command(command: str) -> bool:
+    stripped = command.strip()
+    return stripped.endswith("&") or "&>/dev/null &" in stripped or ">/dev/null 2>&1 &" in stripped
+
+
+def strip_background(command: str) -> str:
+    stripped = command.strip()
+    for suffix in ("&>/dev/null &", ">/dev/null 2>&1 &", "&"):
+        if stripped.endswith(suffix):
+            return stripped[: -len(suffix)].strip()
+    return stripped
+
+
+def parse_duckduckgo_results(html: str, max_results: int) -> list[str]:
+    results: list[str] = []
+    blocks = re.findall(r'<div class="result__body">(.*?)</div>\s*</div>', html, flags=re.DOTALL)
+    if not blocks:
+        blocks = re.findall(r'<a rel="nofollow" class="result__a".*?</a>.*?(?=<a rel="nofollow" class="result__a"|$)', html, flags=re.DOTALL)
+    for block in blocks:
+        title_match = re.search(r'class="result__a"[^>]*href="([^"]+)"[^>]*>(.*?)</a>', block, flags=re.DOTALL)
+        if not title_match:
+            continue
+        href = unescape(title_match.group(1))
+        title = clean_html(title_match.group(2))
+        snippet_match = re.search(r'class="result__snippet"[^>]*>(.*?)</a>|class="result__snippet"[^>]*>(.*?)</div>', block, flags=re.DOTALL)
+        snippet = clean_html(next((group for group in (snippet_match.groups() if snippet_match else []) if group), ""))
+        results.append(f"- {title}\n  {href}\n  {snippet}".strip())
+        if len(results) >= max_results:
+            break
+    return results
+
+
+def parse_bing_results(html: str, max_results: int) -> list[str]:
+    results: list[str] = []
+    blocks = re.findall(r'<li class="b_algo".*?</li>', html, flags=re.DOTALL)
+    for block in blocks:
+        title_match = re.search(r'<h2[^>]*>\s*<a[^>]*href="([^"]+)"[^>]*>(.*?)</a>\s*</h2>', block, flags=re.DOTALL)
+        if not title_match:
+            continue
+        href = unescape(title_match.group(1))
+        title = clean_html(title_match.group(2))
+        snippet_match = re.search(r'<div class="b_caption"[^>]*>.*?<p[^>]*>(.*?)</p>', block, flags=re.DOTALL)
+        snippet = clean_html(snippet_match.group(1)) if snippet_match else ""
+        results.append(f"- {title}\n  {href}\n  {snippet}".strip())
+        if len(results) >= max_results:
+            break
+    return results
+
+
+def clean_html(text: str) -> str:
+    text = re.sub(r"<.*?>", "", text, flags=re.DOTALL)
+    text = unescape(text)
+    return re.sub(r"\s+", " ", text).strip()

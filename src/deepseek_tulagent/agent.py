@@ -1,0 +1,242 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+import json
+import re
+import subprocess
+from typing import Any, Callable
+
+from .config import Settings
+from .messages import Message
+from .policy import ApprovalPolicy, ThinkingMode
+from .provider import DeepSeekClient
+from .session import Session
+from .skills import SkillStore
+from .tools import ToolError, ToolRegistry
+
+
+SYSTEM_PROMPT = """You are DeepSeek TuLAgent, a concise coding agent running in a local workspace.
+You can answer normally or request exactly one tool call by returning a single JSON object:
+{"tool":"read_file","arguments":{"path":"README.md","max_bytes":12000}}
+
+Available tools:
+- list_files(path?, max_entries?)
+- search_text(query, path?, max_matches?)
+- git_status(timeout?)
+- read_file(path, max_bytes?)
+- write_file(path, content)
+- run_shell(command, timeout?)
+- apply_patch(patch, timeout?)
+- download_url(url, path, max_bytes?, timeout?)
+- web_search(query, max_results?, timeout?)
+- start_service(name, command)
+- stop_service(name)
+- service_status(name)
+
+Rules:
+- Prefer reading before editing.
+- Keep changes scoped to the user's request.
+- To start a long-running/background process, use start_service(name, command). Do not use shell "&" backgrounding.
+- For text search, prefer a narrow path and small max_matches. Broad searches can time out.
+- If no tool is needed, answer directly.
+- After tool results, continue until the task is complete or clearly blocked.
+"""
+
+
+@dataclass(frozen=True)
+class AgentResult:
+    session_id: str
+    answer: str
+    rounds: int
+
+
+class TuLAgent:
+    def __init__(
+        self,
+        settings: Settings,
+        mode: str = "agent",
+        thinking: str = "balanced",
+        client: DeepSeekClient | None = None,
+        approve: Callable[[str, dict[str, Any]], bool] | None = None,
+    ):
+        self.settings = settings
+        self.mode = mode
+        self.policy = ApprovalPolicy.from_mode(mode)
+        self.thinking = ThinkingMode.resolve(thinking)
+        self.client = client or DeepSeekClient(settings)
+        self.tools = ToolRegistry(settings.workspace, policy=self.policy)
+        self.approve = approve
+
+    def run(
+        self,
+        prompt: str,
+        *,
+        stream: bool = False,
+        on_delta: Callable[[str], None] | None = None,
+        on_event: Callable[[str], None] | None = None,
+        session: Session | None = None,
+        max_tool_rounds: int | None = None,
+        stop_after_tool: bool = False,
+    ) -> AgentResult:
+        session = session or Session(self.settings.workspace)
+        if not session.messages:
+            session.append(Message("system", self._system_prompt()))
+        session.append(Message("user", prompt))
+
+        final_answer = ""
+        rounds = 0
+        round_limit = max_tool_rounds or self.settings.max_tool_rounds
+        for rounds in range(1, round_limit + 1):
+            if stream:
+                parts: list[str] = []
+                for delta in self.client.stream_chat(session.messages):
+                    parts.append(delta)
+                    if on_delta:
+                        on_delta(delta)
+                assistant_text = "".join(parts)
+            else:
+                assistant_text = self.client.chat(session.messages)
+            session.append(Message("assistant", assistant_text))
+            tool_call = parse_tool_call(assistant_text)
+            if not tool_call:
+                final_answer = assistant_text
+                break
+            name, arguments = tool_call
+            if on_event:
+                on_event(f"tool {name} {summarize_arguments(arguments)}")
+            try:
+                if self._needs_confirmation(name) and not self._approved(name, arguments):
+                    raise ToolError(f"confirmation required for tool: {name}")
+                result = self.tools.run(name, arguments)
+                content = result.to_message()
+            except (ToolError, OSError, subprocess.SubprocessError) as exc:  # type: ignore[name-defined]
+                content = json.dumps({"ok": False, "output": str(exc)}, ensure_ascii=False)
+            if on_event:
+                on_event(f"done {name}")
+            session.append(Message("user", f"Tool result from {name}:\n{content}"))
+            if stop_after_tool:
+                return AgentResult(session.session_id, "", rounds)
+        else:
+            final_answer = "Paused after tool execution. Review the result above, then send the next instruction if needed."
+
+        return AgentResult(session.session_id, final_answer, rounds)
+
+    def _system_prompt(self) -> str:
+        mode_hint = {
+            "plan": "Current mode: plan. Read-only investigation only; do not request write_file, run_shell, or apply_patch.",
+            "review": "Current mode: review. Read files, inspect git state, and run non-mutating diagnostics only.",
+            "agent": "Current mode: agent. You may use tools when needed; destructive steps require a careful explanation.",
+            "trusted": "Current mode: trusted. You may use workspace and network-capable tools, but preserve reversible changes.",
+            "yolo": "Current mode: yolo. You may use tools without asking for confirmation.",
+            "root": "Current mode: root. Highest authority mode; execute needed tools directly without confirmation.",
+        }[self.mode]
+        policy_hint = (
+            f"Policy: write={self.policy.allow_write}, shell={self.policy.allow_shell}, "
+            f"network={self.policy.allow_network}, confirmation={self.policy.require_confirmation}."
+        )
+        return (
+            f"{SYSTEM_PROMPT}\nWorkspace: {self.settings.workspace}\n{mode_hint}\n"
+            f"Thinking mode: {self.thinking.name}. {self.thinking.system_hint}\n{policy_hint}\n"
+            f"{SkillStore(self.settings.workspace).prompt_context()}\n"
+        )
+
+    def _needs_confirmation(self, name: str) -> bool:
+        dangerous = {"write_file", "run_shell", "apply_patch", "download_url", "start_service", "stop_service"}
+        return name in dangerous and self.policy.require_confirmation
+
+    def _approved(self, name: str, arguments: dict[str, Any]) -> bool:
+        if self.mode in {"yolo", "root"}:
+            return True
+        if self.approve:
+            return self.approve(name, arguments)
+        return False
+
+
+def parse_tool_call(text: str) -> tuple[str, dict[str, Any]] | None:
+    stripped = text.strip()
+    candidates = [stripped]
+    fenced = re.findall(r"```(?:json)?\s*(\{.*?\})\s*```", stripped, flags=re.DOTALL)
+    candidates.extend(fenced)
+    candidates.extend(extract_json_objects(stripped))
+    for candidate in candidates:
+        try:
+            data = json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+        parsed = normalize_tool_call(data)
+        if parsed:
+            return parsed
+    return None
+
+
+def normalize_tool_call(data: Any) -> tuple[str, dict[str, Any]] | None:
+    if not isinstance(data, dict):
+        return None
+    if isinstance(data.get("tool"), str):
+        return data["tool"], normalize_arguments(data.get("arguments", {}))
+    if isinstance(data.get("name"), str) and ("input" in data or "arguments" in data):
+        return data["name"], normalize_arguments(data.get("input", data.get("arguments", {})))
+    function_call = data.get("function_call")
+    if isinstance(function_call, dict) and isinstance(function_call.get("name"), str):
+        return function_call["name"], normalize_arguments(function_call.get("arguments", {}))
+    tool_calls = data.get("tool_calls")
+    if isinstance(tool_calls, list) and tool_calls:
+        first = tool_calls[0]
+        if isinstance(first, dict):
+            function = first.get("function")
+            if isinstance(function, dict) and isinstance(function.get("name"), str):
+                return function["name"], normalize_arguments(function.get("arguments", {}))
+            if isinstance(first.get("name"), str):
+                return first["name"], normalize_arguments(first.get("arguments", first.get("input", {})))
+    return None
+
+
+def normalize_arguments(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        try:
+            decoded = json.loads(value)
+        except json.JSONDecodeError:
+            return {}
+        return decoded if isinstance(decoded, dict) else {}
+    return {}
+
+
+def extract_json_objects(text: str) -> list[str]:
+    objects: list[str] = []
+    starts = [index for index, char in enumerate(text) if char == "{"]
+    for start in starts:
+        depth = 0
+        in_string = False
+        escaped = False
+        for index in range(start, len(text)):
+            char = text[index]
+            if in_string:
+                if escaped:
+                    escaped = False
+                elif char == "\\":
+                    escaped = True
+                elif char == '"':
+                    in_string = False
+                continue
+            if char == '"':
+                in_string = True
+            elif char == "{":
+                depth += 1
+            elif char == "}":
+                depth -= 1
+                if depth == 0:
+                    objects.append(text[start : index + 1])
+                    break
+    return objects
+
+
+def summarize_arguments(arguments: dict[str, Any]) -> str:
+    parts: list[str] = []
+    for key, value in arguments.items():
+        text = str(value).replace("\n", "\\n")
+        if len(text) > 80:
+            text = text[:77] + "..."
+        parts.append(f"{key}={text}")
+    return " ".join(parts)
