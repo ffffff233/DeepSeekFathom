@@ -1,5 +1,15 @@
 # 更新记录 / Changelog
 
+## v0.1.12
+
+中文：
+
+- `/models` 当前模型标记改成 `(current)`，不再使用星号。
+
+English:
+
+- `/models` now marks the current model with `(current)` instead of an asterisk.
+
 ## v0.1.11
 
 中文：

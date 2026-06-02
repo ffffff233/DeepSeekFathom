@@ -113,7 +113,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "models":
         models = DeepSeekClient(settings).models()
         for model in models:
-            marker = " *" if model == settings.model else ""
+            marker = " (current)" if model == settings.model else ""
             print(f"{model}{marker}")
         return 0
 
@@ -320,7 +320,7 @@ def interactive(settings, mode: str, thinking_name: str, yes: bool, resume: str 
             continue
         if prompt == "/models":
             for model in DeepSeekClient(settings).models():
-                marker = " *" if model == settings.model else ""
+                marker = " (current)" if model == settings.model else ""
                 print(f"{model}{marker}")
             continue
         if prompt == "/model":
