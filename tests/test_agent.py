@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 import json
+import io
+import os
+import re
 
 from deepseek_tulagent.agent import TuLAgent, parse_tool_call
 from deepseek_tulagent.cli import main
@@ -427,3 +430,26 @@ def test_slash_filter_matches_command_initial():
     assert filter_slash_items(items, "m")[0][0] == "/model"
     assert filter_slash_items(items, "mo")[0][0] == "/model"
     assert filter_slash_items(items, "t")[0][0] == "/think fast"
+
+
+def test_slash_select_draw_clips_to_terminal_width(monkeypatch):
+    from deepseek_tulagent.ui import draw_slash_select
+
+    output = io.StringIO()
+    monkeypatch.setattr("sys.stdout", output)
+    monkeypatch.setattr("shutil.get_terminal_size", lambda _fallback: os.terminal_size((42, 20)))
+    lines = draw_slash_select(
+        [
+            ("/model", "choose model / show live DeepSeek models with a very long tail"),
+            ("/mode root", "highest permission, all tools approved with a very long tail"),
+        ],
+        "",
+        0,
+    )
+    text = re.sub(r"\033\[[0-9;]*[A-Za-z]", "", output.getvalue()).replace("\r", "")
+    visible_lines = [line for line in text.splitlines() if line.strip()]
+    assert lines == 5
+    assert visible_lines
+    assert all(len(line) <= 42 for line in visible_lines)
+    assert sum("/model" in line for line in visible_lines) == 1
+    assert sum("/mode root" in line for line in visible_lines) == 1

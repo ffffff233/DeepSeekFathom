@@ -110,6 +110,7 @@ root + fast + deepseek-v4-flash
 - 使用 `↑` / `↓` 选择
 - 回车执行选中项
 - `Esc` 取消
+- 没有输入过滤词时按 `Backspace` 会关闭面板并删除 `/`
 
 常见命令：
 

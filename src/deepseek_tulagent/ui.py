@@ -4,6 +4,7 @@ import sys
 import time
 import shutil
 import os
+import select
 import termios
 import tty
 from threading import Event, Thread
@@ -245,7 +246,7 @@ def slash_select(items: list[tuple[str, str]]) -> str | None:
                 return command
             return command
         if char == "\x1b":
-            next_chars = sys.stdin.read(2)
+            next_chars = read_escape_suffix()
             if next_chars == "[A":
                 selected = max(0, selected - 1)
                 continue
@@ -255,6 +256,9 @@ def slash_select(items: list[tuple[str, str]]) -> str | None:
             clear_slash_select(last_lines)
             return None
         if char in {"\x7f", "\b"}:
+            if not query:
+                clear_slash_select(last_lines)
+                return None
             query = query[:-1]
             selected = 0
             continue
@@ -287,21 +291,35 @@ def draw_slash_select(items: list[tuple[str, str]], query: str, selected: int, p
         for _ in range(previous_lines):
             sys.stdout.write("\033[2K\r\033[1E")
         sys.stdout.write(f"\033[{previous_lines}F")
+    width = max(shutil.get_terminal_size((88, 24)).columns, 24)
+    box_width = min(width, 76)
+    inner_width = max(box_width - 4, 20)
     sys.stdout.write("\033[2K\r")
-    visible = items[:7]
+    visible = items[:6]
+    title = f" /{query}" if query else " / commands"
+    sys.stdout.write(color("╭─", CYAN) + color(clip_visible(title, inner_width), BOLD + WHITE))
+    title_fill = max(box_width - visible_len(title) - 3, 0)
+    sys.stdout.write(color("─" * title_fill + "╮", CYAN) + "\n")
+    command_width = min(max(max((len(item[0]) for item in visible), default=8), 12), 22)
     for index, (command, description) in enumerate(visible):
-        desc = description[:62] + ("..." if len(description) > 62 else "")
-        line = f"{command:<15} {desc}"
+        marker = "›" if index == selected else " "
+        desc_width = max(inner_width - command_width - 3, 8)
+        desc = clip_visible(description, desc_width)
+        line = f"{marker} {command:<{command_width}} {desc}"
+        line = clip_visible(line, inner_width)
+        line = pad_ansi(line, inner_width)
         if index == selected:
             line = color(line, BOLD + WHITE)
         else:
             line = color(line, GRAY)
-        sys.stdout.write("  " + line + "\n")
+        sys.stdout.write(color("│ ", CYAN) + line + color(" │", CYAN) + "\n")
     if not visible:
-        sys.stdout.write("  " + color("no matches", GRAY) + "\n")
-    sys.stdout.write("  " + color("enter run · ↑/↓ select · esc cancel", GRAY) + "\n")
+        sys.stdout.write(color("│ ", CYAN) + color(pad_ansi("no matches", inner_width), GRAY) + color(" │", CYAN) + "\n")
+    footer = clip_visible("enter run · ↑/↓ select · esc cancel · backspace closes", inner_width)
+    sys.stdout.write(color("│ ", CYAN) + color(pad_ansi(footer, inner_width), GRAY) + color(" │", CYAN) + "\n")
+    sys.stdout.write(color("╰" + "─" * (box_width - 2) + "╯", CYAN) + "\n")
     sys.stdout.flush()
-    return 1 + max(len(visible), 1)
+    return 3 + max(len(visible), 1)
 
 
 def clear_slash_select(lines: int) -> None:
@@ -312,6 +330,17 @@ def clear_slash_select(lines: int) -> None:
         sys.stdout.write("\033[2K\r\033[1E")
     sys.stdout.write(f"\033[{lines}F")
     sys.stdout.flush()
+
+
+def read_escape_suffix() -> str:
+    ready, _, _ = select.select([sys.stdin], [], [], 0.03)
+    if not ready:
+        return ""
+    first = sys.stdin.read(1)
+    ready, _, _ = select.select([sys.stdin], [], [], 0.03)
+    if not ready:
+        return first
+    return first + sys.stdin.read(1)
 
 
 def assistant_prefix() -> str:
@@ -347,6 +376,15 @@ def stage_color(index: int) -> str:
 
 def visible_len(text: str) -> int:
     return len(strip_ansi(text))
+
+
+def clip_visible(text: str, width: int) -> str:
+    plain = strip_ansi(text)
+    if len(plain) <= width:
+        return text
+    if width <= 1:
+        return plain[:width]
+    return plain[: width - 1] + "…"
 
 
 def strip_ansi(text: str) -> str:

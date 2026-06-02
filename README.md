@@ -95,6 +95,7 @@ Inside `deepseekTul`, press `/` to open the command palette immediately:
 - use `↑` / `↓` to select
 - press `Enter` to execute the selected command
 - press `Esc` to cancel
+- press `Backspace` with an empty filter to close the palette and remove `/`
 
 Common commands:
 
