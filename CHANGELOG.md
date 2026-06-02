@@ -1,5 +1,31 @@
 # 更新记录 / Changelog
 
+## v0.1.11
+
+中文：
+
+- 纯问号消息仍交给模型理解，但禁止把它解释成“继续执行任务”并触发工具调用。
+- 增加规则：`?`、`？`、连续问号只应询问用户具体想问什么。
+
+English:
+
+- Question-mark-only messages still go to the model, but tool calls are ignored so they cannot be treated as “continue the task”.
+- Added rules for `?`, `？`, and repeated question marks to ask for clarification instead of inferring work.
+
+## v0.1.10
+
+中文：
+
+- 最终回答显示前会清理装饰性星号：`**加粗**` 会去掉星号，`* 列表` 会改成 `- 列表`。
+- 代码块里的星号不处理，避免破坏 shell glob、正则、代码。
+- `/models` 当前模型标记从 `*` 改成 `(current)`。
+
+English:
+
+- Final answers now strip decorative asterisks: `**bold**` loses the markers, `* bullets` become `- bullets`.
+- Code blocks are preserved so shell globs, regex, and code stay intact.
+- `/models` now marks the current model with `(current)` instead of `*`.
+
 ## v0.1.9
 
 中文：

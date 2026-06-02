@@ -40,6 +40,7 @@ Rules:
 - Never say a command, download, search, or file operation was executed unless it came from a Tool result.
 - If the user asks you to inspect a live URL, GitHub repository, local files, shell state, or service state, use the appropriate tool instead of describing what you would run.
 - Keep final replies visually plain. Avoid decorative Markdown, bold markers, and asterisk bullets unless code syntax or shell globbing requires `*`.
+- If the user message is only `?`, `？`, or repeated question marks, do not infer a task and do not use tools. Ask what they want to ask.
 - To start a long-running/background process, use start_service(name, command). Do not use shell "&" backgrounding.
 - For text search, prefer a narrow path and small max_matches. Broad searches can time out.
 - If no tool is needed, answer directly.
@@ -102,11 +103,13 @@ class TuLAgent:
                 assistant_text = "".join(parts)
             else:
                 assistant_text = self.client.chat(model_messages)
-            session.append(Message("assistant", assistant_text))
-            tool_call = parse_tool_call(assistant_text)
+            tool_call = None if is_question_mark_only(prompt) else parse_tool_call(assistant_text)
             if not tool_call:
+                assistant_text = plainify_assistant_text(assistant_text)
+                session.append(Message("assistant", assistant_text))
                 final_answer = assistant_text
                 break
+            session.append(Message("assistant", assistant_text))
             name, arguments = tool_call
             if on_event:
                 on_event(f"tool {name} {summarize_arguments(arguments)}")
@@ -195,6 +198,24 @@ def parse_tool_call(text: str) -> tuple[str, dict[str, Any]] | None:
         if parsed:
             return parsed
     return parse_action_shell_block(stripped)
+
+
+def is_question_mark_only(text: str) -> bool:
+    stripped = text.strip()
+    return bool(stripped) and all(char in {"?", "？"} for char in stripped)
+
+
+def plainify_assistant_text(text: str) -> str:
+    parts = re.split(r"(```.*?```)", text, flags=re.DOTALL)
+    cleaned: list[str] = []
+    for part in parts:
+        if part.startswith("```"):
+            cleaned.append(part)
+            continue
+        part = part.replace("**", "")
+        part = re.sub(r"(?m)^(\s*)\*\s+", r"\1- ", part)
+        cleaned.append(part)
+    return "".join(cleaned)
 
 
 def compact_context_messages(

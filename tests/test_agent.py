@@ -6,7 +6,7 @@ import io
 import os
 import re
 
-from deepseek_tulagent.agent import TuLAgent, compact_context_messages, parse_tool_call
+from deepseek_tulagent.agent import TuLAgent, compact_context_messages, is_question_mark_only, parse_tool_call, plainify_assistant_text
 from deepseek_tulagent.cli import main
 from deepseek_tulagent.config import Settings, get_settings, resolve_model
 from deepseek_tulagent.policy import ApprovalPolicy, ThinkingMode
@@ -67,6 +67,14 @@ def test_parse_text_wrapped_tool_json():
     assert call == ("search_text", {"query": "DeepSeek"})
 
 
+def test_plainify_assistant_text_removes_decorative_stars():
+    text = "**标题**\n* 项目\n```bash\necho *.py\n```"
+    cleaned = plainify_assistant_text(text)
+    assert "**" not in cleaned
+    assert "- 项目" in cleaned
+    assert "echo *.py" in cleaned
+
+
 def test_parse_action_bash_block_as_shell_tool():
     call = parse_tool_call("我现在检查仓库。\n\n```bash\nprintf repo-ok\n```")
     assert call == ("run_shell", {"command": "printf repo-ok"})
@@ -97,6 +105,25 @@ def test_agent_runs_read_tool_loop(tmp_path: Path):
     assert result.answer == "README says hello."
     assert result.rounds == 2
     assert (tmp_path / ".deepseek-tulagent" / "sessions").exists()
+
+
+def test_question_mark_only_goes_to_model_but_ignores_tools(tmp_path: Path):
+    class QuestionClient:
+        def __init__(self):
+            self.calls = 0
+
+        def chat(self, _messages):
+            self.calls += 1
+            return '{"tool":"list_files","arguments":{"path":"."}}'
+
+    client = QuestionClient()
+    result = TuLAgent(settings(tmp_path), client=client).run("？")
+    assert client.calls == 1
+    assert result.rounds == 1
+    assert result.answer == '{"tool":"list_files","arguments":{"path":"."}}'
+    transcript = next((tmp_path / ".deepseek-tulagent" / "sessions").glob("*.jsonl")).read_text(encoding="utf-8")
+    assert "Tool result from" not in transcript
+    assert is_question_mark_only("???") is True
 
 
 def test_agent_executes_action_bash_block_instead_of_fake_execution(tmp_path: Path):
