@@ -202,15 +202,12 @@ def read_composer(prompt: str, slash_items: list[tuple[str, str]] | None = None)
                     sys.stdout.flush()
                 continue
             if char == "/" and not buffer and slash_items:
-                sys.stdout.write("/\n")
-                sys.stdout.flush()
                 selected = slash_select(slash_items)
                 if selected:
-                    sys.stdout.write("\033[1F\033[2K\r")
                     sys.stdout.write(prompt + selected + "\n")
                     sys.stdout.flush()
                     return selected
-                sys.stdout.write("\033[1F\033[2K\r")
+                sys.stdout.write("\r\033[2K")
                 sys.stdout.write(prompt)
                 sys.stdout.flush()
                 continue
@@ -226,47 +223,47 @@ def slash_select(items: list[tuple[str, str]]) -> str | None:
     query = ""
     selected = 0
     last_lines = 0
-    while True:
-        filtered = filter_slash_items(items, query)
-        if selected >= len(filtered):
-            selected = 0
-        last_lines = draw_slash_select(filtered, query, selected, last_lines)
-        char = sys.stdin.read(1)
-        if char in {"\r", "\n"}:
-            if not filtered:
-                clear_slash_select(last_lines)
+    enter_palette_screen()
+    try:
+        while True:
+            filtered = filter_slash_items(items, query)
+            if selected >= len(filtered):
+                selected = 0
+            last_lines = draw_slash_select(filtered, query, selected, last_lines)
+            char = sys.stdin.read(1)
+            if char in {"\r", "\n"}:
+                if not filtered:
+                    return None
+                command = filtered[selected][0]
+                if command.startswith("/mode "):
+                    return command
+                if command.startswith("/think "):
+                    return command
+                if command in {"/models", "/doctor", "/skills", "/exit"}:
+                    return command
+                return command
+            if char == "\x1b":
+                next_chars = read_escape_suffix()
+                if next_chars == "[A":
+                    selected = max(0, selected - 1)
+                    continue
+                if next_chars == "[B":
+                    selected = min(max(len(filtered) - 1, 0), selected + 1)
+                    continue
                 return None
-            command = filtered[selected][0]
-            clear_slash_select(last_lines)
-            if command.startswith("/mode "):
-                return command
-            if command.startswith("/think "):
-                return command
-            if command in {"/models", "/doctor", "/skills", "/exit"}:
-                return command
-            return command
-        if char == "\x1b":
-            next_chars = read_escape_suffix()
-            if next_chars == "[A":
-                selected = max(0, selected - 1)
+            if char in {"\x7f", "\b"}:
+                if not query:
+                    return None
+                query = query[:-1]
+                selected = 0
                 continue
-            if next_chars == "[B":
-                selected = min(max(len(filtered) - 1, 0), selected + 1)
-                continue
-            clear_slash_select(last_lines)
-            return None
-        if char in {"\x7f", "\b"}:
-            if not query:
-                clear_slash_select(last_lines)
-                return None
-            query = query[:-1]
-            selected = 0
-            continue
-        if char == "\x03":
-            raise KeyboardInterrupt
-        if char.isprintable():
-            query += char
-            selected = 0
+            if char == "\x03":
+                raise KeyboardInterrupt
+            if char.isprintable():
+                query += char
+                selected = 0
+    finally:
+        exit_palette_screen()
 
 
 def filter_slash_items(items: list[tuple[str, str]], query: str) -> list[tuple[str, str]]:
@@ -286,18 +283,19 @@ def filter_slash_items(items: list[tuple[str, str]], query: str) -> list[tuple[s
 
 
 def draw_slash_select(items: list[tuple[str, str]], query: str, selected: int, previous_lines: int = 0) -> int:
-    if previous_lines:
-        sys.stdout.write(f"\033[{previous_lines}F")
-        for _ in range(previous_lines):
-            sys.stdout.write("\033[2K\r\033[1E")
-        sys.stdout.write(f"\033[{previous_lines}F")
-    width = max(shutil.get_terminal_size((88, 24)).columns, 24)
-    box_width = min(width, 76)
+    width, height = shutil.get_terminal_size((88, 24))
+    width = max(width, 24)
+    height = max(height, 12)
+    box_width = min(width - 2, 76)
     inner_width = max(box_width - 4, 20)
-    sys.stdout.write("\033[2K\r")
     visible = items[:6]
+    total_lines = 3 + max(len(visible), 1)
+    top = max((height - total_lines) // 3, 1)
+    left = " " * max((width - box_width) // 2, 0)
+    sys.stdout.write("\033[H\033[2J")
+    sys.stdout.write("\n" * top)
     title = f" /{query}" if query else " / commands"
-    sys.stdout.write(color("╭─", CYAN) + color(clip_visible(title, inner_width), BOLD + WHITE))
+    sys.stdout.write(left + color("╭─", CYAN) + color(clip_visible(title, inner_width), BOLD + WHITE))
     title_fill = max(box_width - visible_len(title) - 3, 0)
     sys.stdout.write(color("─" * title_fill + "╮", CYAN) + "\n")
     command_width = min(max(max((len(item[0]) for item in visible), default=8), 12), 22)
@@ -312,14 +310,14 @@ def draw_slash_select(items: list[tuple[str, str]], query: str, selected: int, p
             line = color(line, BOLD + WHITE)
         else:
             line = color(line, GRAY)
-        sys.stdout.write(color("│ ", CYAN) + line + color(" │", CYAN) + "\n")
+        sys.stdout.write(left + color("│ ", CYAN) + line + color(" │", CYAN) + "\n")
     if not visible:
-        sys.stdout.write(color("│ ", CYAN) + color(pad_ansi("no matches", inner_width), GRAY) + color(" │", CYAN) + "\n")
+        sys.stdout.write(left + color("│ ", CYAN) + color(pad_ansi("no matches", inner_width), GRAY) + color(" │", CYAN) + "\n")
     footer = clip_visible("enter run · ↑/↓ select · esc cancel · backspace closes", inner_width)
-    sys.stdout.write(color("│ ", CYAN) + color(pad_ansi(footer, inner_width), GRAY) + color(" │", CYAN) + "\n")
-    sys.stdout.write(color("╰" + "─" * (box_width - 2) + "╯", CYAN) + "\n")
+    sys.stdout.write(left + color("│ ", CYAN) + color(pad_ansi(footer, inner_width), GRAY) + color(" │", CYAN) + "\n")
+    sys.stdout.write(left + color("╰" + "─" * (box_width - 2) + "╯", CYAN) + "\n")
     sys.stdout.flush()
-    return 3 + max(len(visible), 1)
+    return total_lines
 
 
 def clear_slash_select(lines: int) -> None:
@@ -329,6 +327,16 @@ def clear_slash_select(lines: int) -> None:
     for _ in range(lines):
         sys.stdout.write("\033[2K\r\033[1E")
     sys.stdout.write(f"\033[{lines}F")
+    sys.stdout.flush()
+
+
+def enter_palette_screen() -> None:
+    sys.stdout.write("\033[?1049h\033[?25l\033[H\033[2J")
+    sys.stdout.flush()
+
+
+def exit_palette_screen() -> None:
+    sys.stdout.write("\033[?25h\033[?1049l")
     sys.stdout.flush()
 
 
