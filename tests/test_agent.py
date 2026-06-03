@@ -964,6 +964,47 @@ def test_interactive_goal_command_passes_goal_to_agent(monkeypatch, tmp_path: Pa
     assert captured["goal"] == "完成部署"
 
 
+def test_interactive_line_mode_streams_agent_output(monkeypatch, tmp_path: Path, capsys):
+    import deepseek_tulagent.cli as cli
+
+    prompts = iter(["检查", "/exit"])
+    captured = {}
+
+    class FakeDeepSeekClient:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def ping(self):
+            return {"model_available": True}
+
+    class FakeAgent:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def run(self, *_args, **kwargs):
+            from deepseek_tulagent.agent import AgentResult
+            from deepseek_tulagent.messages import Message
+            from deepseek_tulagent.session import Session
+
+            captured["stream"] = kwargs.get("stream")
+            kwargs["on_delta"]("流")
+            kwargs["on_delta"]("式")
+            session = Session(tmp_path, session_id="abc-123")
+            session.append(Message("assistant", "流式"))
+            return AgentResult(session.session_id, "流式", 1)
+
+    monkeypatch.setattr(cli, "startup_animation", lambda enabled=True: None)
+    monkeypatch.setattr(cli, "read_composer", lambda *_args, **_kwargs: next(prompts))
+    monkeypatch.setattr(cli, "DeepSeekClient", FakeDeepSeekClient)
+    monkeypatch.setattr(cli, "TuLAgent", FakeAgent)
+
+    code = cli.interactive(settings(tmp_path), "root", "fast", True)
+    out = capsys.readouterr().out
+    assert code == 0
+    assert captured["stream"] is True
+    assert "流式" in out
+
+
 def test_interactive_startup_prints_version(monkeypatch, tmp_path: Path, capsys):
     import deepseek_tulagent.cli as cli
 

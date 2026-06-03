@@ -1,5 +1,19 @@
 # 更新记录 / Changelog
 
+## v0.1.39
+
+中文：
+
+- 普通 `deepseekTul start` 行输入模式改为默认流式输出，不再等整段模型回复结束才显示。
+- `deepseekTul run` 现在默认流式输出；`--json` 仍保持非流式，保证机器可读 JSON 完整。
+- 流式输出增加兜底：如果后端没有发 delta，会打印最终 answer，避免空输出。
+
+English:
+
+- Plain `deepseekTul start` line-mode chat now streams assistant output by default instead of waiting for the full response.
+- `deepseekTul run` now streams by default; `--json` remains non-streaming to keep machine-readable JSON intact.
+- Added a streaming fallback: if no delta arrives, the final answer is printed instead of producing empty output.
+
 ## v0.1.38
 
 中文：

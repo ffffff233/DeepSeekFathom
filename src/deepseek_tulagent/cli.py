@@ -44,7 +44,7 @@ def main(argv: list[str] | None = None) -> int:
     run_parser.add_argument("--mode", choices=MODES, default="agent")
     run_parser.add_argument("--think", choices=THINKING, default="balanced")
     run_parser.add_argument("--json", action="store_true", help="print machine-readable result")
-    run_parser.add_argument("--stream", action="store_true", help="stream assistant text")
+    run_parser.add_argument("--stream", action="store_true", default=True, help="stream assistant text (default)")
     run_parser.add_argument("--yes", action="store_true", help="approve every confirmation-gated tool")
 
     start_parser = sub.add_parser("start", help="start an interactive DeepSeek TuLAgent session")
@@ -149,6 +149,7 @@ def main(argv: list[str] | None = None) -> int:
         )
 
         def delta(text: str) -> None:
+            streamed_parts.append(text)
             print(text, end="", flush=True)
 
         def event(text: str) -> None:
@@ -163,12 +164,14 @@ def main(argv: list[str] | None = None) -> int:
                 thinking_enabled=thinking.api_thinking,
                 reasoning_effort=thinking.reasoning_effort,
             )
-        if args.stream:
+        streamed_parts: list[str] = []
+        should_stream = bool(args.stream and not args.json)
+        if should_stream:
             result = TuLAgent(runtime_settings, mode=args.mode, thinking=thinking.name, approve=approver).run(
                 args.prompt,
                 stream=True,
-                on_delta=delta if not args.json else None,
-                on_event=event if not args.json else None,
+                on_delta=delta,
+                on_event=event,
             )
         else:
             with ThinkingSpinner(f"thinking:{thinking.name}"):
@@ -180,7 +183,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.json:
             print(json.dumps(result.__dict__, ensure_ascii=False, indent=2))
         else:
-            if not args.stream:
+            if not should_stream or (should_stream and not streamed_parts):
                 print(result.answer)
             print(f"\n[session] {result.session_id}", file=sys.stderr)
         return 0
@@ -419,6 +422,10 @@ def interactive(settings, mode: str, thinking_name: str, yes: bool, resume: str 
             ThinkingSpinner.clear_active_line()
             print(format_agent_event(text), flush=True)
 
+        def delta(text: str) -> None:
+            ThinkingSpinner.clear_active_line()
+            print(text, end="", flush=True)
+
         approver = (lambda _name, _args: True) if yes or current_mode in {"yolo", "root"} else confirm_tool
         run_thinking = thinking
         run_settings = settings
@@ -431,14 +438,14 @@ def interactive(settings, mode: str, thinking_name: str, yes: bool, resume: str 
             )
             print(f"auto think -> {run_thinking.name}; model={run_settings.model}; max_tokens={run_settings.max_tokens}")
         try:
-            with ThinkingSpinner(f"thinking:{run_thinking.name}"):
-                result = TuLAgent(run_settings, mode=current_mode, thinking=run_thinking.name, approve=approver).run(
-                    prompt,
-                    stream=False,
-                    on_event=event,
-                    session=session,
-                    goal=active_goal,
-                )
+            result = TuLAgent(run_settings, mode=current_mode, thinking=run_thinking.name, approve=approver).run(
+                prompt,
+                stream=True,
+                on_delta=delta,
+                on_event=event,
+                session=session,
+                goal=active_goal,
+            )
         except KeyboardInterrupt:
             print("\ninterrupted")
             continue
@@ -446,7 +453,7 @@ def interactive(settings, mode: str, thinking_name: str, yes: bool, resume: str 
             print(f"error: {exc}")
             continue
         if result.answer:
-            print(assistant_prefix() + result.answer)
+            print()
         if session is None:
             session = SessionStore(settings.workspace).load(result.session_id)
         last_session_id = result.session_id
