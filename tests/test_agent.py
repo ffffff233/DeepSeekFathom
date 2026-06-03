@@ -1005,6 +1005,62 @@ def test_interactive_line_mode_streams_agent_output(monkeypatch, tmp_path: Path,
     assert "流式" in out
 
 
+def test_interactive_line_mode_uses_spinner_until_first_delta(monkeypatch, tmp_path: Path):
+    import deepseek_tulagent.cli as cli
+
+    prompts = iter(["检查", "/exit"])
+    events: list[str] = []
+
+    class FakeDeepSeekClient:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def ping(self):
+            return {"model_available": True}
+
+    class FakeSpinner:
+        def __init__(self, label):
+            self.label = label
+
+        def __enter__(self):
+            events.append(f"enter:{self.label}")
+            return self
+
+        def __exit__(self, *_args):
+            events.append("exit")
+
+        def stop(self):
+            events.append("stop")
+
+        @classmethod
+        def clear_active_line(cls):
+            events.append("clear")
+
+    class FakeAgent:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def run(self, *_args, **kwargs):
+            from deepseek_tulagent.agent import AgentResult
+            from deepseek_tulagent.messages import Message
+            from deepseek_tulagent.session import Session
+
+            events.append("run")
+            kwargs["on_delta"]("ok")
+            session = Session(tmp_path, session_id="abc-123")
+            session.append(Message("assistant", "ok"))
+            return AgentResult(session.session_id, "ok", 1)
+
+    monkeypatch.setattr(cli, "startup_animation", lambda enabled=True: None)
+    monkeypatch.setattr(cli, "read_composer", lambda *_args, **_kwargs: next(prompts))
+    monkeypatch.setattr(cli, "DeepSeekClient", FakeDeepSeekClient)
+    monkeypatch.setattr(cli, "ThinkingSpinner", FakeSpinner)
+    monkeypatch.setattr(cli, "TuLAgent", FakeAgent)
+
+    assert cli.interactive(settings(tmp_path), "root", "fast", True) == 0
+    assert events[:3] == ["enter:thinking:fast", "run", "stop"]
+
+
 def test_interactive_startup_prints_version(monkeypatch, tmp_path: Path, capsys):
     import deepseek_tulagent.cli as cli
 

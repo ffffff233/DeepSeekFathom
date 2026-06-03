@@ -1,5 +1,19 @@
 # 更新记录 / Changelog
 
+## v0.1.40
+
+中文：
+
+- 恢复流式模式下的思考动画：等待首个模型 token 时显示 spinner。
+- 首个流式 token 到来后自动清除动画，避免动画覆盖正文。
+- `ThinkingSpinner` 增加显式 `start()` / `stop()`，便于流式路径精确控制动画生命周期。
+
+English:
+
+- Restored the thinking spinner for streaming mode while waiting for the first model token.
+- The spinner now clears as soon as the first streamed token arrives so it does not cover assistant text.
+- Added explicit `start()` / `stop()` controls to `ThinkingSpinner` for precise streaming lifecycle handling.
+
 ## v0.1.39
 
 中文：

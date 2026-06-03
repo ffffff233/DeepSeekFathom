@@ -167,12 +167,19 @@ def main(argv: list[str] | None = None) -> int:
         streamed_parts: list[str] = []
         should_stream = bool(args.stream and not args.json)
         if should_stream:
-            result = TuLAgent(runtime_settings, mode=args.mode, thinking=thinking.name, approve=approver).run(
-                args.prompt,
-                stream=True,
-                on_delta=delta,
-                on_event=event,
-            )
+            with ThinkingSpinner(f"thinking:{thinking.name}") as spinner:
+                raw_delta = delta
+
+                def streaming_delta(text: str) -> None:
+                    spinner.stop()
+                    raw_delta(text)
+
+                result = TuLAgent(runtime_settings, mode=args.mode, thinking=thinking.name, approve=approver).run(
+                    args.prompt,
+                    stream=True,
+                    on_delta=streaming_delta,
+                    on_event=event,
+                )
         else:
             with ThinkingSpinner(f"thinking:{thinking.name}"):
                 result = TuLAgent(runtime_settings, mode=args.mode, thinking=thinking.name, approve=approver).run(
@@ -438,14 +445,21 @@ def interactive(settings, mode: str, thinking_name: str, yes: bool, resume: str 
             )
             print(f"auto think -> {run_thinking.name}; model={run_settings.model}; max_tokens={run_settings.max_tokens}")
         try:
-            result = TuLAgent(run_settings, mode=current_mode, thinking=run_thinking.name, approve=approver).run(
-                prompt,
-                stream=True,
-                on_delta=delta,
-                on_event=event,
-                session=session,
-                goal=active_goal,
-            )
+            with ThinkingSpinner(f"thinking:{run_thinking.name}") as spinner:
+                raw_delta = delta
+
+                def streaming_delta(text: str) -> None:
+                    spinner.stop()
+                    raw_delta(text)
+
+                result = TuLAgent(run_settings, mode=current_mode, thinking=run_thinking.name, approve=approver).run(
+                    prompt,
+                    stream=True,
+                    on_delta=streaming_delta,
+                    on_event=event,
+                    session=session,
+                    goal=active_goal,
+                )
         except KeyboardInterrupt:
             print("\ninterrupted")
             continue

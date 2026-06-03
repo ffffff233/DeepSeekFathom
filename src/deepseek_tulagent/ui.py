@@ -134,15 +134,25 @@ class ThinkingSpinner:
     def __enter__(self):
         if not sys.stderr.isatty():
             return self
-        ThinkingSpinner.active = self
-        self.thread = Thread(target=self._spin, daemon=True)
-        self.thread.start()
+        self.start()
         return self
 
     def __exit__(self, exc_type, exc, tb):
+        self.stop()
+
+    def start(self) -> None:
+        if not sys.stderr.isatty() or self.thread is not None:
+            return
+        self.stop_event.clear()
+        ThinkingSpinner.active = self
+        self.thread = Thread(target=self._spin, daemon=True)
+        self.thread.start()
+
+    def stop(self) -> None:
         self.stop_event.set()
         if self.thread:
             self.thread.join(timeout=0.2)
+            self.thread = None
         if ThinkingSpinner.active is self:
             ThinkingSpinner.active = None
         self.clear_line()
