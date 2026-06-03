@@ -149,13 +149,15 @@ class ThinkingSpinner:
         self.thread.start()
 
     def stop(self) -> None:
+        was_running = self.thread is not None or ThinkingSpinner.active is self
         self.stop_event.set()
         if self.thread:
             self.thread.join(timeout=0.2)
             self.thread = None
         if ThinkingSpinner.active is self:
             ThinkingSpinner.active = None
-        self.clear_line()
+        if was_running:
+            self.clear_line()
 
     def clear_line(self) -> None:
         if sys.stderr.isatty():

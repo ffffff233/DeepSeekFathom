@@ -1,5 +1,15 @@
 # 更新记录 / Changelog
 
+## v0.1.42
+
+中文：
+
+- 修复 `ThinkingSpinner.stop()` 非幂等导致流式回复结束时再次清行，从而吞掉最后一行/部分回复的问题。
+
+English:
+
+- Fixed non-idempotent `ThinkingSpinner.stop()` clearing the terminal again at the end of streaming, which could erase the last line or part of the response.
+
 ## v0.1.41
 
 中文：

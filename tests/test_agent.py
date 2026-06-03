@@ -1338,6 +1338,24 @@ def test_spinner_clear_active_line_is_safe_without_active_spinner():
     ThinkingSpinner.clear_active_line()
 
 
+def test_spinner_stop_is_idempotent(monkeypatch):
+    spinner = ThinkingSpinner("thinking:test")
+    cleared = []
+    spinner.thread = object()  # type: ignore[assignment]
+    ThinkingSpinner.active = spinner
+    monkeypatch.setattr(spinner.stop_event, "set", lambda: None)
+    monkeypatch.setattr(spinner, "clear_line", lambda: cleared.append("clear"))
+
+    class FakeThread:
+        def join(self, timeout=None):
+            return None
+
+    spinner.thread = FakeThread()  # type: ignore[assignment]
+    spinner.stop()
+    spinner.stop()
+    assert cleared == ["clear"]
+
+
 def test_slash_selected_window_scrolls_with_selection():
     assert selected_window_start(total=12, selected=0, window_size=6) == 0
     assert selected_window_start(total=12, selected=5, window_size=6) == 0
