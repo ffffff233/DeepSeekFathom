@@ -1,5 +1,19 @@
 # 更新记录 / Changelog
 
+## v0.1.43
+
+中文：
+
+- 新增 `ask_user` 交互工具：模型可以返回结构化问题和选项，由终端渲染为可选择列表，并支持手动填写自定义答案。
+- 修复 `/` 命令面板中选择 `/goal` 时直接提交的问题；现在会回填 `/goal ` 到输入框，方便继续输入目标。
+- 同步 README 安装链接到 `v0.1.43`。
+
+English:
+
+- Added the `ask_user` interaction tool so the model can return structured questions/options, rendered by the terminal as a selectable list with manual custom input support.
+- Fixed selecting `/goal` from the `/` command palette submitting immediately; it now inserts `/goal ` into the composer for continued typing.
+- Updated README install links to `v0.1.43`.
+
 ## v0.1.42
 
 中文：
