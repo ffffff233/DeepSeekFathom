@@ -551,6 +551,14 @@ def test_windows_style_workspace_path_is_normalized_on_posix(tmp_path: Path):
     assert (tmp_path / "deepseek项目" / "open-design" / "README.md").read_text(encoding="utf-8") == "ok"
 
 
+def test_workspace_absolute_path_inside_workspace_is_allowed(tmp_path: Path):
+    tools = ToolRegistry(tmp_path, policy=ApprovalPolicy.from_mode("root"))
+    target = tmp_path / "absolute.txt"
+    result = tools.run("write_file", {"path": str(target), "content": "ok"})
+    assert result.ok is True
+    assert target.read_text(encoding="utf-8") == "ok"
+
+
 def test_clone_repo_uses_github_archive_fallback(monkeypatch, tmp_path: Path):
     archive_bytes = io.BytesIO()
     with zipfile.ZipFile(archive_bytes, "w") as archive:
@@ -590,9 +598,23 @@ def test_clone_repo_uses_github_archive_fallback(monkeypatch, tmp_path: Path):
     assert "archive fallback" in result.output
 
 
+def test_clone_repo_accepts_repo_url_argument_alias(monkeypatch, tmp_path: Path):
+    clone_commands: list[list[str]] = []
+
+    def fake_run(command, **_kwargs):
+        clone_commands.append(command)
+        return subprocess.CompletedProcess(command, 0, "ok", "")
+
+    monkeypatch.setattr("deepseek_tulagent.tools.subprocess.run", fake_run)
+    tools = ToolRegistry(tmp_path, policy=ApprovalPolicy.from_mode("root"))
+    result = tools.run("clone_repo", {"repo/url": "https://github.com/esengine/DeepSeek-Reasonix", "path": str(tmp_path / "Reasonix")})
+    assert result.ok is True
+    assert clone_commands[0][-2] == "https://github.com/esengine/DeepSeek-Reasonix.git"
+
+
 def test_system_prompt_mentions_clone_repo(tmp_path: Path):
     prompt = TuLAgent(settings(tmp_path), client=FakeClient(["ok"]))._system_prompt()
-    assert "clone_repo(repo/url, path, branch?, timeout?)" in prompt
+    assert "clone_repo(repo or url, path, branch?, timeout?)" in prompt
     assert "prefer clone_repo over manual git clone" in prompt
     assert "Windows paths" in prompt
 

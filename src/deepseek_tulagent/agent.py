@@ -30,7 +30,7 @@ Available tools:
 - run_shell(command, timeout?)
 - apply_patch(patch, timeout?)
 - download_url(url, path, max_bytes?, timeout?)
-- clone_repo(repo/url, path, branch?, timeout?)
+- clone_repo(repo or url, path, branch?, timeout?)
 - web_search(query, max_results?, timeout?)
 - start_service(name, command)
 - stop_service(name)

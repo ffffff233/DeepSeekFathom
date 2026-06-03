@@ -1,5 +1,21 @@
 # 更新记录 / Changelog
 
+## v0.1.37
+
+中文：
+
+- 修复 `clone_repo` 对模型输出的兼容性：支持错误键名 `repo/url` 和 `repository`。
+- `clone_repo` 现在允许 workspace 内的绝对路径，避免 `/root/...` 这类路径误判为逃逸。
+- GitHub 仓库 URL 会规范化为 `.git` 形式，工具调用日志更稳定。
+- 更新提示词，避免诱导模型把参数名写成 `repo/url`。
+
+English:
+
+- Made `clone_repo` more tolerant of model output: accepts `repo/url` and `repository` aliases.
+- `clone_repo` now accepts absolute paths that are still inside the configured workspace.
+- GitHub repository URLs are normalized to `.git` form for stable tool logs.
+- Updated prompting to avoid suggesting `repo/url` as a literal argument name.
+
 ## v0.1.36
 
 中文：

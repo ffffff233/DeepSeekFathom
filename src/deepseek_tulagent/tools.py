@@ -101,7 +101,8 @@ class ToolRegistry:
 
     def resolve_workspace_path(self, raw_path: str) -> Path:
         raw_path = normalize_user_path(raw_path)
-        path = (self.workspace / raw_path).resolve()
+        candidate = Path(raw_path).expanduser()
+        path = candidate.resolve() if candidate.is_absolute() else (self.workspace / raw_path).resolve()
         try:
             path.relative_to(self.workspace)
         except ValueError as exc:
@@ -264,7 +265,7 @@ class ToolRegistry:
     def clone_repo(self, arguments: dict[str, Any]) -> ToolResult:
         if not self.policy.allow_network or not self.allow_write:
             raise ToolError("clone_repo is disabled in this mode")
-        repo = str(arguments.get("repo") or arguments.get("url") or "").strip()
+        repo = str(arguments.get("repo") or arguments.get("url") or arguments.get("repo/url") or arguments.get("repository") or "").strip()
         if not repo:
             raise ToolError("Missing string argument: repo")
         dest = self.resolve_workspace_path(require_str(arguments, "path"))
@@ -451,11 +452,18 @@ def normalize_git_url(repo: str) -> str:
     if repo.startswith("git@github.com:"):
         slug = repo.removeprefix("git@github.com:").removesuffix(".git")
         return f"https://github.com/{slug}.git"
+    github_repo = parse_github_repo_without_normalize(repo)
+    if github_repo and not repo.rstrip("/").endswith(".git"):
+        return repo.rstrip("/") + ".git"
     return repo
 
 
 def parse_github_repo(repo: str) -> tuple[str, str] | None:
     repo = normalize_git_url(repo)
+    return parse_github_repo_without_normalize(repo)
+
+
+def parse_github_repo_without_normalize(repo: str) -> tuple[str, str] | None:
     if repo.startswith("git@github.com:"):
         repo = "https://github.com/" + repo.removeprefix("git@github.com:")
     parsed = urllib.parse.urlparse(repo)
