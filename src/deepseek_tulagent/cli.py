@@ -16,7 +16,7 @@ from .session import SessionStore
 from .skills import SkillStore
 from .tools import ToolRegistry
 from .updates import check_for_update, update_to
-from .ui import ThinkingSpinner, assistant_prefix, choose_palette, composer_prompt, confirm_tool, format_agent_event, install_terminal_safety, print_box, print_header, print_slash_palette, print_tool_palette, read_composer, startup_animation
+from .ui import ThinkingSpinner, ask_user_choice, assistant_prefix, choose_palette, composer_prompt, confirm_tool, format_agent_event, install_terminal_safety, print_box, print_header, print_slash_palette, print_tool_palette, read_composer, startup_animation
 
 
 BANNER = r"""
@@ -174,7 +174,7 @@ def main(argv: list[str] | None = None) -> int:
                     spinner.stop()
                     raw_delta(text)
 
-                result = TuLAgent(runtime_settings, mode=args.mode, thinking=thinking.name, approve=approver).run(
+                result = TuLAgent(runtime_settings, mode=args.mode, thinking=thinking.name, approve=approver, ask_user=ask_user_choice).run(
                     args.prompt,
                     stream=True,
                     on_delta=streaming_delta,
@@ -182,7 +182,7 @@ def main(argv: list[str] | None = None) -> int:
                 )
         else:
             with ThinkingSpinner(f"thinking:{thinking.name}"):
-                result = TuLAgent(runtime_settings, mode=args.mode, thinking=thinking.name, approve=approver).run(
+                result = TuLAgent(runtime_settings, mode=args.mode, thinking=thinking.name, approve=approver, ask_user=ask_user_choice).run(
                     args.prompt,
                     stream=False,
                     on_event=event if not args.json else None,
@@ -451,7 +451,7 @@ def interactive(settings, mode: str, thinking_name: str, yes: bool, resume: str 
                     spinner.stop()
                     raw_delta(text)
 
-                result = TuLAgent(run_settings, mode=current_mode, thinking=run_thinking.name, approve=approver).run(
+                result = TuLAgent(run_settings, mode=current_mode, thinking=run_thinking.name, approve=approver, ask_user=ask_user_choice).run(
                     prompt,
                     stream=True,
                     on_delta=streaming_delta,
@@ -563,7 +563,7 @@ def interactive_tui(settings, mode: str, thinking: ThinkingMode, yes: bool, sess
             tui_state.messages[-1] = (role, content + delta)
 
         approver = (lambda _name, _args: True) if yes or current["mode"] in {"yolo", "root"} else confirm_tool
-        result = TuLAgent(current["settings"], mode=current["mode"], thinking=current["thinking"].name, approve=approver).run(
+        result = TuLAgent(current["settings"], mode=current["mode"], thinking=current["thinking"].name, approve=approver, ask_user=ask_user_choice).run(
             text,
             stream=True,
             on_delta=collect,

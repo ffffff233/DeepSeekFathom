@@ -21,6 +21,7 @@ You can answer normally or request exactly one tool call by returning a single J
 {"tool":"read_file","arguments":{"path":"README.md","max_bytes":12000}}
 
 Available tools:
+- ask_user(question, options?, allow_manual?, placeholder?): ask the user to choose from structured options or type a custom answer; use this when the next step needs the user's preference
 - delegate_agent(name, task, mode?, think?, max_rounds?): run an isolated subagent and return its summary
 - list_files(path?, max_entries?)
 - search_text(query, path?, max_matches?)
@@ -74,6 +75,7 @@ class TuLAgent:
         thinking: str = "fast",
         client: DeepSeekClient | None = None,
         approve: Callable[[str, dict[str, Any]], bool] | None = None,
+        ask_user: Callable[[dict[str, Any]], dict[str, Any] | str | None] | None = None,
     ):
         self.settings = settings
         self.mode = mode
@@ -82,6 +84,7 @@ class TuLAgent:
         self.client = client or DeepSeekClient(settings)
         self.tools = ToolRegistry(settings.workspace, policy=self.policy)
         self.approve = approve
+        self.ask_user = ask_user
 
     def run(
         self,
@@ -157,7 +160,9 @@ class TuLAgent:
             if on_event:
                 on_event(f"tool {name} {summarize_arguments(arguments)}")
             try:
-                if name == "delegate_agent":
+                if name == "ask_user":
+                    content = self._ask_user(arguments)
+                elif name == "delegate_agent":
                     content = self._run_subagent(arguments, on_event=on_event)
                 elif self._needs_confirmation(name) and not self._approved(name, arguments):
                     raise ToolError(f"confirmation required for tool: {name}")
@@ -248,7 +253,7 @@ class TuLAgent:
         max_rounds = min(max(int(arguments.get("max_rounds", 4)), 1), 16)
         if on_event:
             on_event(f"subagent {name} mode={mode} rounds={max_rounds}")
-        subagent = TuLAgent(self.settings, mode=mode, thinking=thinking, client=self.client, approve=self.approve)
+        subagent = TuLAgent(self.settings, mode=mode, thinking=thinking, client=self.client, approve=self.approve, ask_user=self.ask_user)
         sub_prompt = (
             f"You are subagent `{name}`. Work in an isolated context.\n"
             f"Task: {task}\n"
@@ -264,6 +269,29 @@ class TuLAgent:
             "rounds": result.rounds,
         }
         return json.dumps(payload, ensure_ascii=False)
+
+    def _ask_user(self, arguments: dict[str, Any]) -> str:
+        question = str(arguments.get("question") or "").strip()
+        if not question:
+            raise ToolError("ask_user requires question")
+        payload = normalize_user_question(arguments)
+        if not self.ask_user:
+            return json.dumps(
+                {
+                    "ok": False,
+                    "error": "ask_user is only available in an interactive session",
+                    "question": question,
+                },
+                ensure_ascii=False,
+            )
+        answer = self.ask_user(payload)
+        if isinstance(answer, dict):
+            result = {"ok": True, **answer}
+        elif answer is None:
+            result = {"ok": False, "cancelled": True}
+        else:
+            result = {"ok": True, "answer": str(answer)}
+        return json.dumps(result, ensure_ascii=False)
 
     def _approved(self, name: str, arguments: dict[str, Any]) -> bool:
         if self.mode in {"yolo", "root"}:
@@ -350,7 +378,36 @@ def tool_result_message(name: str, content: str) -> str:
         except json.JSONDecodeError:
             pass
         return f"SUBAGENT_RESULT name={subagent_name}\n{content}"
+    if name == "ask_user":
+        return f"USER_ANSWER\n{content}"
     return f"TOOL_RESULT name={name}\n{content}"
+
+
+def normalize_user_question(arguments: dict[str, Any]) -> dict[str, Any]:
+    options: list[dict[str, str]] = []
+    raw_options = arguments.get("options", [])
+    if isinstance(raw_options, list):
+        for index, raw in enumerate(raw_options):
+            if isinstance(raw, str):
+                label = raw.strip()
+                value = label
+                description = ""
+            elif isinstance(raw, dict):
+                label = str(raw.get("label") or raw.get("title") or raw.get("value") or "").strip()
+                value = str(raw.get("value") or label).strip()
+                description = str(raw.get("description") or raw.get("detail") or "").strip()
+            else:
+                continue
+            if not label:
+                continue
+            options.append({"label": label, "value": value or label, "description": description, "id": str(index)})
+    allow_manual = arguments.get("allow_manual", arguments.get("manual", True))
+    return {
+        "question": str(arguments.get("question") or "").strip(),
+        "options": options,
+        "allow_manual": bool(allow_manual),
+        "placeholder": str(arguments.get("placeholder") or "手动输入").strip(),
+    }
 
 
 def trim_tool_content(content: str, max_chars: int = 24000) -> str:

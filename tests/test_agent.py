@@ -8,7 +8,7 @@ import re
 import subprocess
 import zipfile
 
-from deepseek_tulagent.agent import TuLAgent, compact_context_messages, is_question_mark_only, parse_tool_call, plainify_assistant_text, promises_more_work, trim_tool_content, tool_result_message
+from deepseek_tulagent.agent import TuLAgent, compact_context_messages, is_question_mark_only, normalize_user_question, parse_tool_call, plainify_assistant_text, promises_more_work, trim_tool_content, tool_result_message
 from deepseek_tulagent.cli import main
 from deepseek_tulagent.config import Settings, get_settings, merge_file_config, resolve_model
 from deepseek_tulagent.policy import ApprovalPolicy, ThinkingMode
@@ -120,6 +120,33 @@ def test_parse_labelled_tool_arguments():
     )
 
 
+def test_parse_ask_user_tool_call():
+    call = parse_tool_call(
+        '{"tool":"ask_user","arguments":{"question":"用什么语言开发？","options":["Python","Go"],"allow_manual":true}}'
+    )
+    assert call == ("ask_user", {"question": "用什么语言开发？", "options": ["Python", "Go"], "allow_manual": True})
+
+
+def test_normalize_user_question_options():
+    question = normalize_user_question(
+        {
+            "question": "选择语言",
+            "options": [
+                "Python",
+                {"label": "Go", "value": "go", "description": "单二进制"},
+                {"value": "Rust"},
+            ],
+        }
+    )
+    assert question["question"] == "选择语言"
+    assert question["options"] == [
+        {"label": "Python", "value": "Python", "description": "", "id": "0"},
+        {"label": "Go", "value": "go", "description": "单二进制", "id": "1"},
+        {"label": "Rust", "value": "Rust", "description": "", "id": "2"},
+    ]
+    assert question["allow_manual"] is True
+
+
 def test_agent_runs_read_tool_loop(tmp_path: Path):
     (tmp_path / "README.md").write_text("hello", encoding="utf-8")
     client = FakeClient([
@@ -154,6 +181,31 @@ def test_agent_delegates_to_subagent_with_isolated_context(tmp_path: Path):
     result = TuLAgent(settings(tmp_path), mode="root", client=client).run("主任务秘密：委派检查")
     assert result.answer == "主代理总结：已收到子代理结果。"
     assert client.subagent_saw_parent_prompt is False
+
+
+def test_agent_ask_user_feeds_answer_back_to_model(tmp_path: Path):
+    class AskClient:
+        def __init__(self):
+            self.calls = 0
+
+        def chat(self, messages):
+            self.calls += 1
+            if self.calls == 1:
+                return '{"tool":"ask_user","arguments":{"question":"用什么语言开发？","options":[{"label":"Python","value":"python"},{"label":"Go","value":"go"}]}}'
+            assert "USER_ANSWER" in messages[-1].content
+            assert '"answer": "python"' in messages[-1].content
+            return "已选择 Python。"
+
+    answers = []
+
+    def ask_user(question):
+        answers.append(question)
+        return {"answer": "python", "label": "Python"}
+
+    result = TuLAgent(settings(tmp_path), mode="root", client=AskClient(), ask_user=ask_user).run("创建程序")
+    assert result.answer == "已选择 Python。"
+    assert answers[0]["question"] == "用什么语言开发？"
+    assert answers[0]["options"][0]["label"] == "Python"
 
 
 def test_initial_messages_keep_large_system_prompt_cacheable(tmp_path: Path):
@@ -1324,6 +1376,7 @@ def test_slash_items_include_manual_compact(tmp_path: Path):
 def test_slash_skill_selection_inserts_agent_prompt():
     assert slash_selection_insertion("/skill repo-debug") == "Use skill repo-debug: "
     assert slash_selection_insertion("/goal ") == "/goal "
+    assert slash_selection_insertion("/goal") == "/goal "
     assert slash_selection_insertion("/model") is None
 
 

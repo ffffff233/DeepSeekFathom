@@ -390,7 +390,42 @@ def choose_palette(items: list[tuple[str, str]], title: str = "commands") -> str
         termios.tcsetattr(fd, termios.TCSANOW, old)
 
 
+def ask_user_choice(question: dict) -> dict[str, str] | None:
+    text = str(question.get("question") or "").strip()
+    options = question.get("options") if isinstance(question.get("options"), list) else []
+    allow_manual = bool(question.get("allow_manual", True))
+    placeholder = str(question.get("placeholder") or "手动输入").strip()
+    if text:
+        print(color("? ", YELLOW + BOLD) + color(text, WHITE))
+    rows: list[tuple[str, str]] = []
+    value_by_label: dict[str, dict[str, str]] = {}
+    for option in options:
+        if not isinstance(option, dict):
+            continue
+        label_text = str(option.get("label") or option.get("value") or "").strip()
+        if not label_text:
+            continue
+        value = str(option.get("value") or label_text)
+        description = str(option.get("description") or "")
+        rows.append((label_text, description))
+        value_by_label[label_text] = {"answer": value, "label": label_text}
+    manual_label = placeholder or "手动输入"
+    if allow_manual:
+        rows.append((manual_label, "输入自定义答案"))
+    selected = choose_palette(rows, title="question") if rows else None
+    if selected and selected != manual_label:
+        return value_by_label.get(selected, {"answer": selected, "label": selected})
+    if selected is None and rows and not allow_manual:
+        return None
+    answer = input(f"{manual_label}> ").strip()
+    if not answer:
+        return None
+    return {"answer": answer, "label": manual_label, "manual": "true"}
+
+
 def slash_selection_insertion(selection: str) -> str | None:
+    if selection == "/goal":
+        return "/goal "
     if selection.startswith("/") and selection.endswith(" "):
         return selection
     if selection.startswith("/skill "):
