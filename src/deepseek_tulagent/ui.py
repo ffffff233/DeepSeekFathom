@@ -332,10 +332,21 @@ def redraw_composer(prompt: str, buffer: list[str]) -> None:
     width = max(shutil.get_terminal_size((88, 24)).columns, 20)
     available = max(width - visible_len(prompt) - 1, 4)
     text = "".join(buffer)
-    display = tail_for_width(text, available)
+    display = composer_display_text(text, available)
     sys.stdout.write("\033[?25h\r\033[2K")
     sys.stdout.write(prompt + display)
     sys.stdout.flush()
+
+
+def composer_display_text(text: str, width: int) -> str:
+    if "\n" not in text and "\r" not in text:
+        return tail_for_width(text, width)
+    normalized = text.replace("\r\n", "\n").replace("\r", "\n")
+    lines = normalized.split("\n")
+    suffix = lines[-1] if lines else ""
+    prefix = f"[pasted {len(lines)} lines] "
+    available = max(width - display_width(prefix), 1)
+    return prefix + tail_for_width(suffix, available)
 
 
 def tail_for_width(text: str, width: int) -> str:

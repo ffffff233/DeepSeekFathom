@@ -1,5 +1,21 @@
 # 更新记录 / Changelog
 
+## v0.1.46
+
+中文：
+
+- 修复终端 composer 粘贴大量多行内容时，换行逐行刷屏导致输入区显示混乱的问题。
+- 多行粘贴现在会在输入区压缩显示为单行摘要，例如 `[pasted 3 lines] ...`，实际提交内容仍保留完整换行。
+- 增加回归测试覆盖 bracketed paste、多行显示摘要和长尾截断。
+- 同步 README 安装链接到 `v0.1.46`。
+
+English:
+
+- Fixed terminal composer redraw noise when pasting large multi-line clipboard content.
+- Multi-line pasted input is now rendered as a single-line summary such as `[pasted 3 lines] ...`, while preserving the full submitted newlines.
+- Added regression tests for bracketed paste, multi-line display summaries, and long-tail clipping.
+- Updated README install links to `v0.1.46`.
+
 ## v0.1.45
 
 中文：

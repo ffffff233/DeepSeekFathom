@@ -16,7 +16,7 @@ from deepseek_tulagent.provider import apply_thinking_payload
 from deepseek_tulagent.session import SessionStore
 from deepseek_tulagent.skills import SkillStore
 from deepseek_tulagent.tui import ChatTui, TuiState
-from deepseek_tulagent.ui import ThinkingSpinner, display_width, filter_slash_items, format_agent_event, read_bracketed_paste, read_escape_suffix, read_raw_char, redraw_composer, selected_window_start, should_submit_newline, tail_for_width, slash_selection_insertion
+from deepseek_tulagent.ui import ThinkingSpinner, composer_display_text, display_width, filter_slash_items, format_agent_event, read_bracketed_paste, read_escape_suffix, read_raw_char, redraw_composer, selected_window_start, should_submit_newline, tail_for_width, slash_selection_insertion
 from deepseek_tulagent.tools import ToolError, ToolRegistry, normalize_bing_url
 
 
@@ -1607,6 +1607,19 @@ def test_bracketed_paste_keeps_newlines_in_buffer():
     finally:
         os.close(read_fd)
         os.close(write_fd)
+
+
+def test_composer_display_collapses_multiline_paste_to_single_line():
+    display = composer_display_text("第一行\n第二行\n第三行", 80)
+    assert display == "[pasted 3 lines] 第三行"
+    assert "\n" not in display
+
+
+def test_composer_display_tails_long_multiline_paste():
+    display = composer_display_text("a\n" + "x" * 80, 24)
+    assert display.startswith("[pasted 2 lines] ")
+    assert display_width(display) <= 24
+    assert "\n" not in display
 
 
 def test_newline_with_pending_input_is_treated_as_paste_not_submit():
