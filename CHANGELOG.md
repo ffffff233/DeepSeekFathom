@@ -1,5 +1,23 @@
 # 更新记录 / Changelog
 
+## v0.1.47
+
+中文：
+
+- 改进 Windows 终端适配：Windows 默认使用 ASCII/plain UI，避免 Unicode 线框、特殊符号和宽度计算差异导致乱码、重叠或排版错乱。
+- 启动动画、工具事件、信息框、输入提示和截断符在 plain UI 下改为保守单行文本。
+- `DSTUL_PLAIN_UI=1` 可在任意平台强制启用 Windows 同款保守排版。
+- 增加回归测试覆盖 plain UI 的 box、事件、prompt 和截断显示。
+- 同步 README 安装链接到 `v0.1.47`。
+
+English:
+
+- Improved Windows terminal compatibility: Windows now defaults to an ASCII/plain UI to avoid garbled box drawing, symbol width mismatches, overlap, and layout drift.
+- Startup output, tool events, boxes, prompts, and clipping markers use conservative single-line text in plain UI mode.
+- `DSTUL_PLAIN_UI=1` can force the same conservative layout on any platform.
+- Added regression tests for plain UI boxes, events, prompts, and clipping.
+- Updated README install links to `v0.1.47`.
+
 ## v0.1.46
 
 中文：

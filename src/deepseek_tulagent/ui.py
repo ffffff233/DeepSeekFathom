@@ -33,6 +33,10 @@ WHITE = "\033[97m"
 GRAY = "\033[90m"
 
 
+def plain_terminal() -> bool:
+    return os.name == "nt" or bool(os.getenv("DSTUL_PLAIN_UI"))
+
+
 def install_terminal_safety() -> None:
     if not sys.stdin.isatty() or not sys.stdout.isatty():
         return
@@ -56,6 +60,9 @@ def force_terminal_sane() -> None:
 
 def startup_animation(enabled: bool = True) -> None:
     if not enabled or not sys.stdout.isatty():
+        print("DeepSeek TuLAgent")
+        return
+    if plain_terminal():
         print("DeepSeek TuLAgent")
         return
     width = min(shutil.get_terminal_size((88, 24)).columns, 96)
@@ -169,12 +176,15 @@ class ThinkingSpinner:
             cls.active.clear_line()
 
     def _spin(self) -> None:
-        frames = [
-            stream_color("thinking", BRIGHT_MAGENTA + BOLD, sys.stderr) + stream_color("  ◐ ", CYAN, sys.stderr) + stream_color("reasoning", GRAY, sys.stderr),
-            stream_color("thinking", BRIGHT_MAGENTA + BOLD, sys.stderr) + stream_color("  ◓ ", CYAN, sys.stderr) + stream_color("planning", GRAY, sys.stderr),
-            stream_color("thinking", BRIGHT_MAGENTA + BOLD, sys.stderr) + stream_color("  ◑ ", CYAN, sys.stderr) + stream_color("routing", GRAY, sys.stderr),
-            stream_color("thinking", BRIGHT_MAGENTA + BOLD, sys.stderr) + stream_color("  ◒ ", CYAN, sys.stderr) + stream_color("checking", GRAY, sys.stderr),
-        ]
+        if plain_terminal():
+            frames = [f"thinking {label}" for label in ("reasoning", "planning", "routing", "checking")]
+        else:
+            frames = [
+                stream_color("thinking", BRIGHT_MAGENTA + BOLD, sys.stderr) + stream_color("  ◐ ", CYAN, sys.stderr) + stream_color("reasoning", GRAY, sys.stderr),
+                stream_color("thinking", BRIGHT_MAGENTA + BOLD, sys.stderr) + stream_color("  ◓ ", CYAN, sys.stderr) + stream_color("planning", GRAY, sys.stderr),
+                stream_color("thinking", BRIGHT_MAGENTA + BOLD, sys.stderr) + stream_color("  ◑ ", CYAN, sys.stderr) + stream_color("routing", GRAY, sys.stderr),
+                stream_color("thinking", BRIGHT_MAGENTA + BOLD, sys.stderr) + stream_color("  ◒ ", CYAN, sys.stderr) + stream_color("checking", GRAY, sys.stderr),
+            ]
         index = 0
         while not self.stop_event.is_set():
             self.clear_line()
@@ -184,6 +194,20 @@ class ThinkingSpinner:
 
 
 def format_agent_event(text: str) -> str:
+    if plain_terminal():
+        if text.startswith("tool "):
+            rest = text.removeprefix("tool ").strip()
+            name, _, args = rest.partition(" ")
+            return f"  [tool] {name}" + (f" | {args}" if args else "")
+        if text.startswith("done "):
+            return f"  [done] {text.removeprefix('done ').strip()}"
+        if text.startswith("subagent "):
+            return f"  [subagent] {text.removeprefix('subagent ').strip()}"
+        if text.startswith("thinking pass "):
+            return f"  [thinking] {text.removeprefix('thinking ').strip()}"
+        if text.startswith("context compacted"):
+            return f"  [context] {text}"
+        return f"  [event] {text}"
     if text.startswith("tool "):
         rest = text.removeprefix("tool ").strip()
         name, _, args = rest.partition(" ")
@@ -217,6 +241,12 @@ def print_tool_palette(tools: dict[str, str]) -> None:
 
 def print_box(title: str, lines: list[str]) -> None:
     width = min(shutil.get_terminal_size((88, 24)).columns, 96)
+    if plain_terminal():
+        print(f"[{title}]")
+        for line in lines:
+            clipped = strip_ansi(line)[: max(width - 2, 1)] if visible_len(line) > width - 2 else line
+            print(f"  {strip_ansi(clipped)}")
+        return
     print(color("╭─ ", CYAN) + color(title, BOLD + WHITE) + color(" " + "─" * max(width - visible_len(title) - 5, 0) + "╮", CYAN))
     for line in lines:
         clipped = strip_ansi(line)[: max(width - 4, 1)] if visible_len(line) > width - 4 else line
@@ -258,8 +288,8 @@ def status_bar(model: str, mode: str, thinking: str, session_id: str | None = No
 
 
 def composer_prompt(model: str, mode: str, thinking: str, session_id: str | None = None) -> str:
-    session = f" · {session_id[:8]}" if session_id else ""
-    if sys.stdout.isatty() and not os.getenv("NO_COLOR"):
+    session = f" {session_id[:8]}" if session_id and plain_terminal() else f" · {session_id[:8]}" if session_id else ""
+    if sys.stdout.isatty() and not os.getenv("NO_COLOR") and not plain_terminal():
         return (
             color("▌ ", CYAN + BOLD)
             + color(f"{model}", BRIGHT_GREEN if "flash" in model else BRIGHT_MAGENTA)
@@ -352,7 +382,7 @@ def composer_display_text(text: str, width: int) -> str:
 def tail_for_width(text: str, width: int) -> str:
     if display_width(text) <= width:
         return text
-    prefix = "…"
+    prefix = "..." if plain_terminal() else "…"
     remaining = max(width - display_width(prefix), 1)
     chars: list[str] = []
     used = 0
@@ -634,19 +664,19 @@ def read_escape_suffix(fd: int) -> str:
 
 
 def assistant_prefix() -> str:
-    if sys.stdout.isatty() and not os.getenv("NO_COLOR"):
+    if sys.stdout.isatty() and not os.getenv("NO_COLOR") and not plain_terminal():
         return color("assistant", BRIGHT_MAGENTA + BOLD) + color(" › ", GRAY)
     return "assistant> "
 
 
 def color(text: str, code: str) -> str:
-    if not sys.stdout.isatty() or os.getenv("NO_COLOR"):
+    if not sys.stdout.isatty() or os.getenv("NO_COLOR") or plain_terminal():
         return text
     return f"{code}{text}{RESET}"
 
 
 def stream_color(text: str, code: str, stream) -> str:
-    if not stream.isatty() or os.getenv("NO_COLOR"):
+    if not stream.isatty() or os.getenv("NO_COLOR") or plain_terminal():
         return text
     return f"{code}{text}{RESET}"
 
@@ -680,7 +710,8 @@ def clip_visible(text: str, width: int) -> str:
         return text
     if width <= 1:
         return plain[:width]
-    return plain[: width - 1] + "…"
+    marker = "..." if plain_terminal() else "…"
+    return plain[: max(width - len(marker), 1)] + marker
 
 
 def strip_ansi(text: str) -> str:

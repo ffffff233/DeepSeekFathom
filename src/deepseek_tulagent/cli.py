@@ -16,7 +16,7 @@ from .session import SessionStore
 from .skills import SkillStore
 from .tools import ToolRegistry
 from .updates import check_for_update, update_to
-from .ui import ThinkingSpinner, ask_user_choice, assistant_prefix, choose_palette, composer_prompt, confirm_tool, format_agent_event, install_terminal_safety, print_box, print_header, print_slash_palette, print_tool_palette, read_composer, startup_animation
+from .ui import ThinkingSpinner, ask_user_choice, assistant_prefix, choose_palette, composer_prompt, confirm_tool, format_agent_event, install_terminal_safety, plain_terminal, print_box, print_header, print_slash_palette, print_tool_palette, read_composer, startup_animation
 
 
 BANNER = r"""
@@ -235,7 +235,8 @@ def interactive(settings, mode: str, thinking_name: str, yes: bool, resume: str 
     startup_animation(enabled=resume is None)
     approval_text = "all yes" if yes or mode in {"yolo", "root"} else "manual yes for gated tools"
     if resume:
-        print(f"DeepSeek TuLAgent · {settings.model} · {mode}/{thinking.name} · {settings.workspace}")
+        sep = " | " if plain_terminal() else " · "
+        print(f"DeepSeek TuLAgent{sep}{settings.model}{sep}{mode}/{thinking.name}{sep}{settings.workspace}")
     else:
         print_header(str(settings.workspace), settings.base_url, settings.model, mode, thinking.name, approval_text)
     print(f"limits   : {settings.max_tool_rounds} tool rounds, {settings.max_tokens} max tokens, {settings.request_timeout:g}s timeout")
@@ -247,7 +248,8 @@ def interactive(settings, mode: str, thinking_name: str, yes: bool, resume: str 
         try:
             session = SessionStore(settings.workspace).load(resume)
             session.messages.append(Message(role="user", content="Resume note: preserve this conversation. If older tool history shows a background shell command timed out, do not assume the service failed; verify with service_status, ss, or curl. Prefer start_service for new background processes."))
-            print(f"resumed  : {session.session_id[:8]} · {len(session.messages)} messages")
+            sep = " | " if plain_terminal() else " · "
+            print(f"resumed  : {session.session_id[:8]}{sep}{len(session.messages)} messages")
             print_recent_session_messages(session)
         except FileNotFoundError as exc:
             print(str(exc), file=sys.stderr)

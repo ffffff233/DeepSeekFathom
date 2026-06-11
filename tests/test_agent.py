@@ -16,7 +16,7 @@ from deepseek_tulagent.provider import apply_thinking_payload
 from deepseek_tulagent.session import SessionStore
 from deepseek_tulagent.skills import SkillStore
 from deepseek_tulagent.tui import ChatTui, TuiState
-from deepseek_tulagent.ui import ThinkingSpinner, composer_display_text, display_width, filter_slash_items, format_agent_event, read_bracketed_paste, read_escape_suffix, read_raw_char, redraw_composer, selected_window_start, should_submit_newline, tail_for_width, slash_selection_insertion
+from deepseek_tulagent.ui import ThinkingSpinner, composer_display_text, composer_prompt, display_width, filter_slash_items, format_agent_event, print_box, read_bracketed_paste, read_escape_suffix, read_raw_char, redraw_composer, selected_window_start, should_submit_newline, tail_for_width, slash_selection_insertion
 from deepseek_tulagent.tools import ToolError, ToolRegistry, normalize_bing_url
 
 
@@ -1551,6 +1551,21 @@ def test_tail_for_width_keeps_single_line_window():
     chinese = tail_for_width("画画画画", 5)
     assert chinese.startswith("…")
     assert display_width(chinese) <= 5
+
+
+def test_plain_ui_uses_ascii_for_windows_safe_layout(monkeypatch, capsys):
+    monkeypatch.setenv("DSTUL_PLAIN_UI", "1")
+    print_box("Session", ["workspace /tmp/project", "model deepseek-v4-flash"])
+    out = capsys.readouterr().out
+    assert "[Session]" in out
+    assert "╭" not in out
+    assert "│" not in out
+    assert "\033[" not in out
+
+    assert format_agent_event("tool run_shell command=ls") == "  [tool] run_shell | command=ls"
+    assert format_agent_event("done run_shell") == "  [done] run_shell"
+    assert composer_prompt("deepseek-v4-flash", "root", "fast", "abcdef123456") == "[deepseek-v4-flash root fast abcdef12] > "
+    assert tail_for_width("abcdef", 4) == "...f"
 
 
 def test_slash_select_draw_clips_to_terminal_width(monkeypatch):
