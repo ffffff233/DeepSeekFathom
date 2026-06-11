@@ -1,5 +1,21 @@
 # 更新记录 / Changelog
 
+## v0.1.45
+
+中文：
+
+- `delegate_agent` 支持 `agents=[{name, task, mode?, think?, max_rounds?}, ...]`，一次工具调用可委派多个隔离子代理任务。
+- 修复模型把 `fast`、`careful` 等思考模式误填到子代理 `mode` 字段时导致 CLI 崩溃的问题；现在会自动识别为 `think`。
+- 工具执行层现在会把工具参数校验错误转成失败结果返回给主代理，避免单个工具异常中断整个会话。
+- 同步 README 安装链接到 `v0.1.45`。
+
+English:
+
+- `delegate_agent` now accepts `agents=[{name, task, mode?, think?, max_rounds?}, ...]`, allowing multiple isolated subagent tasks in one tool call.
+- Fixed crashes when the model put thinking modes such as `fast` or `careful` into the subagent `mode` field; they are now treated as `think`.
+- Tool argument validation errors are now returned as failed tool results instead of terminating the CLI process.
+- Updated README install links to `v0.1.45`.
+
 ## v0.1.44
 
 中文：

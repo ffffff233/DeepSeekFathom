@@ -8,7 +8,7 @@ import re
 import subprocess
 import zipfile
 
-from deepseek_tulagent.agent import TuLAgent, compact_context_messages, is_question_mark_only, normalize_user_question, parse_tool_call, plainify_assistant_text, promises_more_work, trim_tool_content, tool_result_message
+from deepseek_tulagent.agent import TuLAgent, compact_context_messages, is_question_mark_only, normalize_subagent_mode_and_thinking, normalize_subagent_specs, normalize_user_question, parse_tool_call, plainify_assistant_text, promises_more_work, trim_tool_content, tool_result_message
 from deepseek_tulagent.cli import main
 from deepseek_tulagent.config import Settings, get_settings, merge_file_config, resolve_model
 from deepseek_tulagent.policy import ApprovalPolicy, ThinkingMode
@@ -181,6 +181,63 @@ def test_agent_delegates_to_subagent_with_isolated_context(tmp_path: Path):
     result = TuLAgent(settings(tmp_path), mode="root", client=client).run("主任务秘密：委派检查")
     assert result.answer == "主代理总结：已收到子代理结果。"
     assert client.subagent_saw_parent_prompt is False
+
+
+def test_subagent_treats_thinking_mode_in_mode_field_as_thinking(tmp_path: Path):
+    class DelegateClient:
+        def __init__(self):
+            self.calls = 0
+
+        def chat(self, messages):
+            self.calls += 1
+            if self.calls == 1:
+                return '{"tool":"delegate_agent","arguments":{"name":"researcher","task":"检查 README","mode":"fast","max_rounds":1}}'
+            if self.calls == 2:
+                return "子代理 fast 结论。"
+            assert "SUBAGENT_RESULT name=researcher" in messages[-1].content
+            assert "子代理 fast 结论" in messages[-1].content
+            return "主代理收到。"
+
+    result = TuLAgent(settings(tmp_path), mode="root", thinking="fast", client=DelegateClient()).run("委派检查")
+    assert result.answer == "主代理收到。"
+
+
+def test_agent_delegates_to_multiple_subagents_in_one_tool_call(tmp_path: Path):
+    class MultiDelegateClient:
+        def __init__(self):
+            self.calls = 0
+
+        def chat(self, messages):
+            self.calls += 1
+            if self.calls == 1:
+                return (
+                    '{"tool":"delegate_agent","arguments":{"agents":['
+                    '{"name":"researcher","task":"检查 README","mode":"plan","max_rounds":1},'
+                    '{"name":"reviewer","task":"检查测试","mode":"fast","max_rounds":1}'
+                    ']}}'
+                )
+            if self.calls == 2:
+                return "researcher 结论。"
+            if self.calls == 3:
+                return "reviewer 结论。"
+            assert "SUBAGENT_RESULT name=researcher,reviewer" in messages[-1].content
+            assert "researcher 结论" in messages[-1].content
+            assert "reviewer 结论" in messages[-1].content
+            return "主代理收到两个子代理结果。"
+
+    result = TuLAgent(settings(tmp_path), mode="root", thinking="fast", client=MultiDelegateClient()).run("并行委派检查")
+    assert result.answer == "主代理收到两个子代理结果。"
+
+
+def test_normalize_subagent_mode_and_thinking_handles_swapped_mode():
+    assert normalize_subagent_mode_and_thinking("fast", None, parent_mode="root", parent_thinking="careful") == ("root", "fast")
+    assert normalize_subagent_mode_and_thinking("nonsense", "bad", parent_mode="root", parent_thinking="careful") == ("plan", "careful")
+
+
+def test_normalize_subagent_specs_accepts_agents_and_tasks():
+    specs = normalize_subagent_specs({"agents": [{"name": "one", "task": "a"}, "b"]})
+    assert specs == [{"name": "one", "task": "a"}, {"task": "b", "name": "subagent-2"}]
+    assert normalize_subagent_specs({"task": "single"}) == [{"task": "single"}]
 
 
 def test_agent_ask_user_feeds_answer_back_to_model(tmp_path: Path):

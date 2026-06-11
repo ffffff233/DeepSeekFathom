@@ -11,6 +11,7 @@ DeepSeek TuLAgent 是一个专门适配 DeepSeek OpenAI 兼容接口的终端编
 - 默认全局命令：`deepseekTul`
 - DeepSeek V4 模型别名：`pro`、`v4-pro`、`flash`、`v4-flash`
 - 工具：读写文件、本地搜索、联网搜索、Git 状态、Shell、补丁、下载、仓库拉取、后台服务
+- 子代理：`delegate_agent` 支持单个子代理，也支持 `agents=[...]` 一次委派多个隔离子任务
 - 桌面端：聊天、文件发送、技能列表、工具调用折叠展示、内部思考折叠展示、模型/思考/权限切换、第三方 OpenAI 兼容 API 配置
 - 权限模式：`plan`、`review`、`agent`、`trusted`、`yolo`、`root`
 - 思考模式：`off`、`instant`、`fast`、`standard`、`balanced`、`careful`、`deep`、`deeper`、`max`、`ultra`

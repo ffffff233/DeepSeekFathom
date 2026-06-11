@@ -384,6 +384,7 @@ def interactive(settings, mode: str, thinking_name: str, yes: bool, resume: str 
         if prompt == "/subagents":
             print_box("Subagents", [
                 "delegate_agent(name, task, mode?, think?, max_rounds?)",
+                "delegate_agent(agents=[{name, task, mode?, think?, max_rounds?}, ...])",
                 "isolated context; returns concise summary to parent",
                 "best for research, review, verification, and parallel-style decomposition",
             ])

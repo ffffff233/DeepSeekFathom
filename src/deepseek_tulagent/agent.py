@@ -22,7 +22,7 @@ You can answer normally or request exactly one tool call by returning a single J
 
 Available tools:
 - ask_user(question, options?, allow_manual?, placeholder?): ask the user to choose from structured options or type a custom answer; use this when the next step needs the user's preference
-- delegate_agent(name, task, mode?, think?, max_rounds?): run an isolated subagent and return its summary
+- delegate_agent(name, task, mode?, think?, max_rounds?) or delegate_agent(agents=[{name, task, mode?, think?, max_rounds?}, ...]): run one or more isolated subagents and return summaries
 - list_files(path?, max_entries?)
 - search_text(query, path?, max_matches?)
 - git_status(timeout?)
@@ -52,8 +52,8 @@ Rules:
   `curl -fsS --connect-timeout 5 https://api.ipify.org || curl -fsS --connect-timeout 5 https://ifconfig.me || curl -fsS --connect-timeout 5 https://checkip.amazonaws.com`
   then verify the service with `ss -tlnp`, local `curl`, and firewall status (`ufw status` or iptables/nftables when available).
 - For text search, prefer a narrow path and small max_matches. Broad searches can time out.
-- Use delegate_agent proactively for multi-branch investigation, independent review, verification, research, or long workflows that can be split into focused subtasks. Good subagent names: researcher, reviewer, verifier, implementer, debugger.
-- When delegating, give the subagent a narrow task and ask for evidence plus a recommended next step. Do not delegate trivial one-step tasks.
+- Use delegate_agent proactively for multi-branch investigation, independent review, verification, research, or long workflows that can be split into focused subtasks. For multiple independent tasks, call delegate_agent once with an agents array. Good subagent names: researcher, reviewer, verifier, implementer, debugger.
+- When delegating, give each subagent a narrow task and ask for evidence plus a recommended next step. Do not delegate trivial one-step tasks.
 - If a web_search result is empty, irrelevant, or failed and the user asked to search, request one more web_search with a clearer query instead of saying you will search again.
 - If no tool is needed, answer directly.
 - After tool results, continue until the task is complete or clearly blocked.
@@ -182,7 +182,7 @@ class TuLAgent:
                 else:
                     result = self.tools.run(name, arguments)
                     content = result.to_message()
-            except (ToolError, OSError, subprocess.SubprocessError) as exc:  # type: ignore[name-defined]
+            except (ToolError, ValueError, OSError, subprocess.SubprocessError) as exc:  # type: ignore[name-defined]
                 content = json.dumps({"ok": False, "output": str(exc)}, ensure_ascii=False)
             if on_event:
                 on_event(f"done {name}")
@@ -257,15 +257,36 @@ class TuLAgent:
         return name in dangerous and self.policy.require_confirmation
 
     def _run_subagent(self, arguments: dict[str, Any], on_event: Callable[[str], None] | None = None) -> str:
-        task = str(arguments.get("task") or "").strip()
+        specs = normalize_subagent_specs(arguments)
+        if not specs:
+            raise ToolError("delegate_agent requires task or agents")
+        results = [self._run_one_subagent(spec, index, len(specs), on_event=on_event) for index, spec in enumerate(specs, start=1)]
+        if len(results) == 1:
+            return json.dumps({"ok": True, **results[0]}, ensure_ascii=False)
+        return json.dumps({"ok": True, "count": len(results), "agents": results}, ensure_ascii=False)
+
+    def _run_one_subagent(
+        self,
+        spec: dict[str, Any],
+        index: int,
+        total: int,
+        *,
+        on_event: Callable[[str], None] | None = None,
+    ) -> dict[str, Any]:
+        task = str(spec.get("task") or "").strip()
         if not task:
             raise ToolError("delegate_agent requires task")
-        name = str(arguments.get("name") or "subagent").strip()[:40] or "subagent"
-        mode = str(arguments.get("mode") or "plan")
-        thinking = str(arguments.get("think") or self.thinking.name)
-        max_rounds = min(max(int(arguments.get("max_rounds", 4)), 1), 16)
+        name = str(spec.get("name") or f"subagent-{index}").strip()[:40] or f"subagent-{index}"
+        mode, thinking = normalize_subagent_mode_and_thinking(
+            spec.get("mode"),
+            spec.get("think"),
+            parent_mode=self.mode,
+            parent_thinking=self.thinking.name,
+        )
+        max_rounds = min(max(int(spec.get("max_rounds", 4)), 1), 16)
         if on_event:
-            on_event(f"subagent {name} mode={mode} rounds={max_rounds}")
+            prefix = f"{index}/{total} " if total > 1 else ""
+            on_event(f"subagent {prefix}{name} mode={mode} think={thinking} rounds={max_rounds}")
         subagent = TuLAgent(self.settings, mode=mode, thinking=thinking, client=self.client, approve=self.approve, ask_user=self.ask_user)
         sub_prompt = (
             f"You are subagent `{name}`. Work in an isolated context.\n"
@@ -273,15 +294,13 @@ class TuLAgent:
             "Return a concise result for the parent agent: findings, evidence, and recommended next step."
         )
         result = subagent.run(sub_prompt, max_tool_rounds=max_rounds)
-        payload = {
-            "ok": True,
+        return {
             "name": name,
             "task": task,
             "summary": result.answer,
             "session_id": result.session_id,
             "rounds": result.rounds,
         }
-        return json.dumps(payload, ensure_ascii=False)
 
     def _ask_user(self, arguments: dict[str, Any]) -> str:
         question = str(arguments.get("question") or "").strip()
@@ -388,6 +407,12 @@ def tool_result_message(name: str, content: str) -> str:
             data = json.loads(content)
             if isinstance(data, dict) and isinstance(data.get("name"), str):
                 subagent_name = data["name"]
+            elif isinstance(data, dict) and isinstance(data.get("agents"), list):
+                names = [str(agent.get("name")) for agent in data["agents"] if isinstance(agent, dict) and agent.get("name")]
+                if names:
+                    subagent_name = ",".join(names[:4])
+                    if len(names) > 4:
+                        subagent_name += f",+{len(names) - 4}"
         except json.JSONDecodeError:
             pass
         return f"SUBAGENT_RESULT name={subagent_name}\n{content}"
@@ -723,6 +748,45 @@ def normalize_arguments(value: Any) -> dict[str, Any]:
             return {}
         return decoded if isinstance(decoded, dict) else {}
     return {}
+
+
+def normalize_subagent_specs(arguments: dict[str, Any]) -> list[dict[str, Any]]:
+    raw_agents = arguments.get("agents", arguments.get("subagents", arguments.get("tasks")))
+    if isinstance(raw_agents, list):
+        specs: list[dict[str, Any]] = []
+        for index, item in enumerate(raw_agents, start=1):
+            if isinstance(item, dict):
+                spec = dict(item)
+            else:
+                spec = {"task": str(item)}
+            if "name" not in spec:
+                spec["name"] = f"subagent-{index}"
+            specs.append(spec)
+        return specs[:8]
+    return [dict(arguments)] if arguments.get("task") else []
+
+
+def normalize_subagent_mode_and_thinking(
+    mode_value: Any,
+    think_value: Any,
+    *,
+    parent_mode: str,
+    parent_thinking: str,
+) -> tuple[str, str]:
+    valid_modes = {"plan", "review", "agent", "trusted", "yolo", "root"}
+    valid_thinking = set(ThinkingMode.names())
+    mode = str(mode_value or "plan").strip().lower()
+    thinking = str(think_value or parent_thinking).strip().lower()
+
+    if mode in valid_thinking and mode not in valid_modes:
+        thinking = mode
+        mode = parent_mode if parent_mode in valid_modes else "plan"
+    elif mode not in valid_modes:
+        mode = "plan"
+
+    if thinking not in valid_thinking:
+        thinking = parent_thinking if parent_thinking in valid_thinking else "fast"
+    return mode, thinking
 
 
 def extract_json_objects(text: str) -> list[str]:
