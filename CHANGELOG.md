@@ -1,5 +1,21 @@
 # 更新记录 / Changelog
 
+## v0.1.50
+
+中文：
+
+- 修复终端主输入处 `Ctrl-C` 直接退出程序的问题；现在 `Ctrl-C` 会执行 `/cancel`，清理当前目标/子代理提示状态并回到普通输入。
+- 真正退出终端会话仍使用 `Ctrl-D`、`/exit` 或 `/quit`。
+- 新增 `/cancel` / `/stop` 命令，用于从误触或残留的委派/子代理状态回到普通聊天。
+- 同步 README 安装链接到 `v0.1.50`。
+
+English:
+
+- Fixed terminal main-input `Ctrl-C` exiting the program directly; it now runs `/cancel`, clears active goal/subagent prompt state, and returns to normal input.
+- Exiting the terminal session still uses `Ctrl-D`, `/exit`, or `/quit`.
+- Added `/cancel` / `/stop` commands to recover from accidental or stale delegation/subagent state.
+- Updated README install links to `v0.1.50`.
+
 ## v0.1.49
 
 中文：

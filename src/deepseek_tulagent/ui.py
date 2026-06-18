@@ -327,7 +327,13 @@ def read_composer(prompt: str, slash_items: list[tuple[str, str]] | None = None)
                 sys.stdout.flush()
                 return "".join(buffer)
             if char == "\x03":
-                raise KeyboardInterrupt
+                if buffer:
+                    buffer.clear()
+                    redraw_composer(prompt, buffer)
+                    continue
+                sys.stdout.write("\r\n")
+                sys.stdout.flush()
+                return "/cancel"
             if char == "\x04":
                 raise EOFError
             if char in {"\x7f", "\b"}:

@@ -303,6 +303,10 @@ def interactive(settings, mode: str, thinking_name: str, yes: bool, resume: str 
             if last_session_id:
                 print_session_handoff(last_session_id)
             return 0
+        if prompt in {"/cancel", "/stop"}:
+            active_goal = None
+            print("cancel   : cleared active goal/subagent prompt state; back to normal input")
+            continue
         if prompt == "/":
             print()
             print_palette(settings)

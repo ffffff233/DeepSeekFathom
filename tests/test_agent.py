@@ -1201,6 +1201,29 @@ def test_interactive_subagents_command_returns_to_prompt(monkeypatch, tmp_path: 
     assert "delegate_agent" in out
 
 
+def test_interactive_cancel_command_returns_to_normal_prompt(monkeypatch, tmp_path: Path, capsys):
+    import deepseek_tulagent.cli as cli
+
+    prompts = iter(["/cancel", "/exit"])
+
+    class FakeDeepSeekClient:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def ping(self):
+            return {"model_available": True}
+
+    monkeypatch.setattr(cli, "startup_animation", lambda enabled=True: None)
+    monkeypatch.setattr(cli, "maybe_prompt_update", lambda: None)
+    monkeypatch.setattr(cli, "read_composer", lambda *_args, **_kwargs: next(prompts))
+    monkeypatch.setattr(cli, "DeepSeekClient", FakeDeepSeekClient)
+
+    code = cli.interactive(settings(tmp_path), "root", "fast", True)
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "back to normal input" in out
+
+
 def test_interactive_goal_command_passes_goal_to_agent(monkeypatch, tmp_path: Path, capsys):
     import deepseek_tulagent.cli as cli
 
