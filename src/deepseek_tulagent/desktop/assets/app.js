@@ -62,7 +62,7 @@ window.DeepSeekDesktop = {
       setRunning(true);
       setSaveState("running", "运行中", "正在执行工具和模型");
       addMessage("user", payload.prompt);
-      state.currentAssistant = addMessage("assistant", "");
+      state.currentAssistant = null;
       addEvent("thinking", "内部思考", `thinking mode: ${payload.thinking}`);
     }
     if (event === "assistant:delta") {
@@ -299,14 +299,16 @@ function renderMarkdown(src) {
 function addEvent(kind, name, detail) {
   state.events += 1;
   $("eventCount").textContent = String(state.events);
+  const intro = document.querySelector(".empty, .intro");
+  if (intro) intro.remove();
   const details = document.createElement("details");
-  details.className = `event ${kind}`;
+  details.className = `threadEvent ${kind}`;
   const icon = iconFor(kind);
   details.innerHTML = `
-    <summary><span class="eventIcon">${icon}</span><span>${labelFor(kind)}</span><strong>${escapeHtml(name || "")}</strong></summary>
+    <summary><span class="eventIcon">${icon}</span><span class="evLabel">${labelFor(kind)}</span><strong>${escapeHtml(name || "")}</strong><span class="evChevron">›</span></summary>
     <pre>${escapeHtml(detail || "")}</pre>`;
-  $("activity").append(details);
-  $("activity").scrollTop = $("activity").scrollHeight;
+  $("messages").append(details);
+  scrollMessages();
   const line = `[${labelFor(kind)}] ${name || ""} ${detail || ""}`.trim();
   $("eventMirror").textContent = ($("eventMirror").textContent === "工具、思考和子代理事件会显示在这里。" ? "" : $("eventMirror").textContent + "\n") + line;
   $("eventMirror").scrollTop = $("eventMirror").scrollHeight;
