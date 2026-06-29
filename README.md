@@ -1,4 +1,4 @@
-# DeepSeek TuLAgent
+# Fathom
 
 ## 中文用户请点这里
 
@@ -10,7 +10,7 @@
 
 English
 
-DeepSeek TuLAgent is a terminal coding agent built specifically around DeepSeek's OpenAI-compatible chat API. It provides local tools, session resume, slash commands, permission modes, thinking modes, and installable skills while keeping the implementation independent and compact.
+Fathom is a terminal coding agent built specifically around DeepSeek's OpenAI-compatible chat API. It provides local tools, session resume, slash commands, permission modes, thinking modes, and installable skills while keeping the implementation independent and compact.
 It also includes a desktop entrypoint that can be packaged as a Windows exe.
 
 ## Features
@@ -229,7 +229,7 @@ See [CHANGELOG.md](CHANGELOG.md) for update history.
 
 ## Context Compaction
 
-TuLAgent estimates conversation context before model calls. Near the model context limit, it automatically compacts older messages:
+Fathom estimates conversation context before model calls. Near the model context limit, it automatically compacts older messages:
 
 - system prompt is preserved
 - the most recent 8 messages are kept exactly
@@ -292,7 +292,7 @@ Confirmation rules:
 
 ## Skills
 
-TuLAgent discovers skills from these directories, in order:
+Fathom discovers skills from these directories, in order:
 
 - `<workspace>/.deepseek-tulagent/skills`
 - `<workspace>/.agents/skills`

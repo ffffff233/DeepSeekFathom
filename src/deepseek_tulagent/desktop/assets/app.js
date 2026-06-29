@@ -67,7 +67,9 @@ window.DeepSeekDesktop = {
     }
     if (event === "assistant:delta") {
       if (!state.currentAssistant) state.currentAssistant = addMessage("assistant", "");
-      state.currentAssistant.querySelector(".bubble").textContent += payload.text;
+      const bubble = state.currentAssistant.querySelector(".bubble");
+      bubble.dataset.raw = (bubble.dataset.raw || "") + payload.text;
+      renderBubble(bubble);
       scrollMessages();
     }
     if (event === "agent:event") {
@@ -231,15 +233,67 @@ function renderSkills(skills) {
 }
 
 function addMessage(role, content) {
-  const empty = document.querySelector(".empty");
+  const empty = document.querySelector(".empty, .intro");
   if (empty) empty.remove();
   const row = document.createElement("div");
-  row.className = "message";
-  row.innerHTML = `<div class="role">${role === "user" ? "你" : "助手"}</div><div class="bubble ${role}"></div>`;
-  row.querySelector(".bubble").textContent = content;
+  row.className = `message ${role}`;
+  const avatar = role === "user" ? "你" : "F";
+  const name = role === "user" ? "你" : "Fathom";
+  row.innerHTML = `<div class="avatar ${role}">${avatar}</div><div class="bubbleWrap"><div class="role">${name}</div><div class="bubble ${role}"></div></div>`;
+  const bubble = row.querySelector(".bubble");
+  bubble.dataset.raw = content || "";
+  renderBubble(bubble);
   $("messages").append(row);
   scrollMessages();
   return row;
+}
+
+function renderBubble(bubble) {
+  const raw = bubble.dataset.raw || "";
+  if (bubble.classList.contains("user")) {
+    bubble.textContent = raw;
+  } else {
+    bubble.innerHTML = renderMarkdown(raw);
+  }
+}
+
+function renderMarkdown(src) {
+  src = String(src || "");
+  const blocks = [];
+  src = src.replace(/```([\w-]*)\n?([\s\S]*?)```/g, (m, lang, code) => {
+    const i = blocks.length;
+    blocks.push(`<pre class="code"><div class="codeHead"><span>${escapeHtml(lang || "code")}</span></div><code>${escapeHtml(code.replace(/\n$/, ""))}</code></pre>`);
+    return `@@FB${i}@@`;
+  });
+  const lines = src.split("\n");
+  let html = "";
+  let list = null;
+  const closeList = () => { if (list) { html += `</${list}>`; list = null; } };
+  for (const line of lines) {
+    const ph = line.match(/^@@FB(\d+)@@$/);
+    if (ph) { closeList(); html += blocks[+ph[1]]; continue; }
+    if (/^\s*$/.test(line)) { closeList(); continue; }
+    const h = line.match(/^(#{1,6})\s+(.*)$/);
+    if (h) { closeList(); const n = h[1].length; html += `<h${n} class="mdH">${inline(h[2])}</h${n}>`; continue; }
+    if (/^\s*>\s?/.test(line)) { closeList(); html += `<blockquote>${inline(line.replace(/^\s*>\s?/, ""))}</blockquote>`; continue; }
+    const ol = line.match(/^\s*\d+\.\s+(.*)$/);
+    const ul = line.match(/^\s*[-*]\s+(.*)$/);
+    if (ol) { if (list !== "ol") { closeList(); html += "<ol>"; list = "ol"; } html += `<li>${inline(ol[1])}</li>`; continue; }
+    if (ul) { if (list !== "ul") { closeList(); html += "<ul>"; list = "ul"; } html += `<li>${inline(ul[1])}</li>`; continue; }
+    closeList();
+    html += `<p>${inline(line)}</p>`;
+  }
+  closeList();
+  return html;
+
+  function inline(t) {
+    t = escapeHtml(t);
+    t = t.replace(/`([^`]+)`/g, (m, c) => `<code class="inline">${c}</code>`);
+    t = t.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+    t = t.replace(/(^|[^*])\*([^*]+)\*/g, "$1<em>$2</em>");
+    t = t.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noreferrer">$1</a>');
+    return t;
+  }
 }
 
 function addEvent(kind, name, detail) {
@@ -358,7 +412,7 @@ $("saveSettings").onclick = async (event) => {
 };
 $("newSession").onclick = async () => {
   await window.pywebview.api.new_session();
-  $("messages").innerHTML = '<div class="empty"><h1>DeepSeek TuLAgent</h1><p>新对话已创建。</p></div>';
+  $("messages").innerHTML = '<div class="empty intro"><div class="introMark">Fathom</div><h1>新对话已创建</h1><p>输入任务开始。思考与工具详情默认折叠。</p></div>';
   $("activity").innerHTML = "";
   $("eventMirror").textContent = "工具、思考和子代理事件会显示在这里。";
   $("sessionState").textContent = "新会话";

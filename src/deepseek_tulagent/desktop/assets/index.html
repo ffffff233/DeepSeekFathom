@@ -3,20 +3,22 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>DeepSeek TuLAgent</title>
+  <title>Fathom</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <main class="app">
     <aside class="sidebar">
       <div class="brand">
-        <div class="logo">T</div>
+        <div class="logo" aria-hidden="true">
+          <svg viewBox="0 0 32 32" width="22" height="22"><path d="M2 20c4-6 8-6 12 0s8 6 12 0" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/><path d="M4 26c3.5-4.5 6.5-4.5 10 0" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" opacity=".55"/></svg>
+        </div>
         <div class="brandText">
-          <strong>TuLAgent</strong>
+          <strong>Fathom</strong>
           <span id="version">v0.0.0</span>
         </div>
       </div>
-      <button id="newSession" class="primary wide">新对话</button>
+      <button id="newSession" class="primary wide">＋ 新对话</button>
       <section class="panel">
         <div class="panelHead">
           <h2>会话</h2>
@@ -36,7 +38,7 @@
       <header class="toolbar">
         <div class="topIdentity">
           <span class="pulse"></span>
-          <strong>DeepSeek TuLAgent</strong>
+          <strong>Fathom</strong>
           <small id="topRuntime">ready</small>
         </div>
         <div class="toolbarActions">
@@ -46,10 +48,10 @@
       </header>
 
       <div id="messages" class="messages">
-        <div class="intro">
-          <div class="introMark">DeepSeek TuLAgent</div>
-          <h1>本地工具代理桌面端</h1>
-          <p>文件、技能、工具调用和内部思考集中在一个工作台里。思考和工具详情默认折叠，按需展开。</p>
+        <div class="empty intro">
+          <div class="introMark">Fathom</div>
+          <h1>深入每一寻的本地代理</h1>
+          <p>文件、技能、工具调用与内部思考汇聚于同一工作台。思考与工具详情默认折叠，按需展开。</p>
         </div>
       </div>
 
@@ -70,7 +72,7 @@
         <div id="attachments" class="attachments"></div>
         <div class="composeRow">
           <input id="fileInput" type="file" multiple hidden>
-          <button id="attach" class="icon" title="添加文件">+</button>
+          <button id="attach" class="icon" title="添加文件">＋</button>
           <textarea id="prompt" rows="1" placeholder="输入任务，Enter 发送，Shift+Enter 换行"></textarea>
           <button id="cancel" class="ghost cancel" type="button" hidden>停止</button>
           <button id="send" class="primary">发送</button>
@@ -86,7 +88,7 @@
         <div class="kv"><span>工具事件</span><strong id="eventCount">0</strong></div>
       </section>
       <section class="panel">
-        <h2>TuL 能力</h2>
+        <h2>Fathom 能力</h2>
         <button id="manualCompact" class="ghost wide">手动压缩上下文</button>
         <button id="insertSubagent" class="ghost wide">插入子代理任务</button>
         <div class="capList">
@@ -131,7 +133,7 @@
         </label>
         <section class="settingsNote">
           <strong>界面许可说明</strong>
-          <span>桌面端视觉结构参考 Reasonix Desktop，Reasonix 采用 MIT License。TuLAgent 保留独立 Python/pywebview 实现和自身工具、压缩、技能、子代理能力。</span>
+          <span>桌面端视觉为 Fathom 独立设计，基于 Python / pywebview 实现，内置工具调用、上下文压缩、技能与子代理能力。</span>
         </section>
         <menu>
           <button value="cancel" class="ghost">取消</button>

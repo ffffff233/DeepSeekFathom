@@ -1,5 +1,23 @@
 # 更新记录 / Changelog
 
+## v0.1.52
+
+中文：
+
+- 品牌更名：桌面端由 “DeepSeek TuLAgent” 更名为 **Fathom**（深海主题，寓意“深入每一寻”）；包名与 CLI 入口（dstul / deepseek-tulagent / deepseekTul / deepseekTulDesktop）保持不变，升级无需改动脚本。
+- 桌面端全面重做视觉：深海青绿主题、渐变品牌标识、头像气泡、卡片式三栏布局、脉冲状态点、自定义滚动条与对话框美化，整体观感对齐 Claude / Codex 桌面端。
+- 助手消息支持 **Markdown 渲染**：标题、列表、引用、粗体/斜体、行内代码与带语言标签的代码块，流式输出实时渲染。
+- 修复开场白无法清除的 Bug：`addMessage` 之前只匹配 `.empty`，与实际的 `.intro` 容器不一致，导致首条消息后欢迎语残留。
+- 新会话占位、窗口标题、侧栏与检查器文案同步更新为 Fathom。
+
+English:
+
+- Rebrand: the desktop app is renamed from “DeepSeek TuLAgent” to **Fathom** (deep-sea theme). Package name and CLI entry points (dstul / deepseek-tulagent / deepseekTul / deepseekTulDesktop) are unchanged, so upgrades need no script edits.
+- Full desktop visual redesign: deep-sea teal theme, gradient brand mark, message avatars, card-based three-pane layout, pulse status dot, custom scrollbars and a polished settings dialog — on par with the Claude / Codex desktop clients.
+- Assistant messages now render **Markdown**: headings, lists, blockquotes, bold/italic, inline code and fenced code blocks with a language label, rendered live during streaming.
+- Fixed the welcome-screen bug: `addMessage` matched only `.empty` while the intro container used `.intro`, leaving the welcome block stuck after the first message.
+- New-session placeholder, window title, sidebar and inspector copy updated to Fathom.
+
 ## v0.1.51
 
 中文：

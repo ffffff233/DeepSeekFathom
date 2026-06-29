@@ -1,8 +1,8 @@
-# DeepSeek TuLAgent
+# Fathom
 
 简体中文 | [English](README.md)
 
-DeepSeek TuLAgent 是一个专门适配 DeepSeek OpenAI 兼容接口的终端编程代理。它支持本地工具、会话恢复、`/` 命令面板、权限模式、思考模式和本地技能目录。
+Fathom 是一个专门适配 DeepSeek OpenAI 兼容接口的终端编程代理。它支持本地工具、会话恢复、`/` 命令面板、权限模式、思考模式和本地技能目录。
 同时提供桌面端入口，可打包成 Windows exe。
 
 ## 功能
@@ -256,7 +256,7 @@ root + fast + deepseek-v4-flash
 
 ## 上下文压缩
 
-TuLAgent 会估算消息上下文大小。接近模型上下文窗口时，会自动压缩旧消息：
+Fathom 会估算消息上下文大小。接近模型上下文窗口时，会自动压缩旧消息：
 
 - 保留系统提示
 - 保留最近 8 条消息原文
@@ -352,7 +352,7 @@ deepseekTul sessions list
 
 ## 技能目录
 
-TuLAgent 会发现这些目录里的技能：
+Fathom 会发现这些目录里的技能：
 
 - `<workspace>/.deepseek-tulagent/skills`
 - `<workspace>/.agents/skills`

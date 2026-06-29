@@ -271,7 +271,7 @@ def main() -> None:
 
     api = DesktopApi()
     window = webview.create_window(
-        "DeepSeek TuLAgent",
+        "Fathom",
         str(ASSET_DIR / "index.html"),
         js_api=api,
         width=1180,
