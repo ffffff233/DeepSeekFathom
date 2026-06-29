@@ -238,8 +238,8 @@ function addMessage(role, content) {
   const row = document.createElement("div");
   row.className = `message ${role}`;
   const avatar = role === "user" ? "你" : "F";
-  const name = role === "user" ? "你" : "Fathom";
-  row.innerHTML = `<div class="avatar ${role}">${avatar}</div><div class="bubbleWrap"><div class="role">${name}</div><div class="bubble ${role}"></div></div>`;
+  const name = role === "user" ? "You" : "Fathom";
+  row.innerHTML = `<div class="msgHead"><span class="avatar ${role}">${avatar}</span><span class="who">${name}</span></div><div class="bubble ${role}"></div>`;
   const bubble = row.querySelector(".bubble");
   bubble.dataset.raw = content || "";
   renderBubble(bubble);

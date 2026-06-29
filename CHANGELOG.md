@@ -1,5 +1,23 @@
 # 更新记录 / Changelog
 
+## v0.1.53
+
+中文：
+
+- 桌面端视觉对齐 **Codex / VS Code**：中性深灰底色、VS Code 蓝（#3794ff）强调色、扁平小圆角、IDE 级信息密度，替换上一版的深海主题。
+- 重构对话布局为 **扁平全宽消息**（头像+名字在上、内容在下），不再用左右气泡，阅读动线更接近 Copilot Chat / Codex。
+- **工具调用内联进对话流**：用户消息 → 工具/思考折叠步骤 → 助手回答，按时间顺序排成一条线；移除原先悬在对话区与输入框之间、会被截断的独立事件条。
+- 代码块改为编辑器样式（语言头 + #1e1e1e 正文），行内代码用 VS Code 橙色字符串色。
+- 侧栏改为 hover 高亮的扁平列表，输入区与设置弹窗统一 VS Code 控件风格。
+
+English:
+
+- Desktop visuals realigned to **Codex / VS Code**: neutral dark-grey base, VS Code focus blue (#3794ff) accent, flat small radii and IDE-level density, replacing the previous deep-sea theme.
+- Reworked the conversation into **flat full-width messages** (avatar + name on top, content below) instead of left/right bubbles, closer to Copilot Chat / Codex.
+- **Tool calls render inline in the thread**: user message → collapsible tool/thinking steps → assistant answer, in chronological order; removed the detached, clipped event strip between the chat and composer.
+- Code blocks now use an editor-style chrome (language header + #1e1e1e body); inline code uses the VS Code orange string color.
+- Sidebar is a flat hover-highlight list; composer and settings dialog use unified VS Code-style controls.
+
 ## v0.1.52
 
 中文：
