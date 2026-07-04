@@ -48,12 +48,12 @@ body {
 
 .app {
   display: grid;
-  grid-template-columns: 248px minmax(0, 1fr) 288px;
+  grid-template-columns: 248px minmax(0, 1fr);
   height: 100vh;
   background: var(--bg);
   transition: grid-template-columns .18s ease;
 }
-.app.sidebarCollapsed { grid-template-columns: 0 minmax(0, 1fr) 288px; }
+.app.sidebarCollapsed { grid-template-columns: 0 minmax(0, 1fr); }
 .app.sidebarCollapsed .sidebar { transform: translateX(-100%); opacity: 0; pointer-events: none; }
 
 /* ---------- sidebar ---------- */
@@ -151,6 +151,7 @@ body.is-running .pulse { animation: pulseDot 1s ease-in-out infinite; }
 .introMark { display: inline-block; font-family: var(--mono); letter-spacing: 3px; color: var(--text-4); font-size: 11px; margin-bottom: 14px; text-transform: uppercase; }
 .intro h1, .empty h1 { font-size: 19px; margin: 0 0 8px; color: var(--text); font-weight: 600; }
 .intro p, .empty p { line-height: 1.7; margin: 0; font-size: 13px; }
+.intro kbd, .empty kbd { font-family: var(--mono); font-size: 11px; background: var(--hover-strong); border: 1px solid var(--line); border-radius: 4px; padding: 0 5px; color: var(--text-2); }
 
 /* ---------- messages ---------- */
 .message { max-width: 760px; width: 100%; margin: 0 auto; padding: 6px 24px; display: flex; flex-direction: column; }
@@ -238,6 +239,7 @@ pre.code code { display: block; padding: 12px 14px; font-family: var(--mono); fo
 .chip { background: var(--elevated); border: 1px solid var(--line); color: var(--text-2); border-radius: 999px; padding: 3px 11px; font-size: 12px; }
 
 .composeCard {
+  position: relative;
   background: var(--elevated);
   border: 1px solid var(--line);
   border-radius: var(--r-card);
@@ -246,6 +248,28 @@ pre.code code { display: block; padding: 12px 14px; font-family: var(--mono); fo
   transition: border-color .12s;
 }
 .composeCard:focus-within { border-color: var(--line-heavy); }
+
+/* ---------- slash command menu (Codex style) ---------- */
+.slashMenu {
+  position: absolute; left: 10px; right: 10px; bottom: calc(100% + 8px);
+  max-height: 300px; overflow-y: auto;
+  background: var(--elevated-2);
+  border: 1px solid var(--line-heavy);
+  border-radius: var(--r-card);
+  box-shadow: 0 12px 40px rgba(0,0,0,0.5);
+  padding: 6px;
+  z-index: 30;
+}
+.slashMenu[hidden] { display: none; }
+.slashMenu .slashEmpty { padding: 10px 12px; font-size: 12px; color: var(--text-4); }
+.slashItem {
+  display: flex; align-items: baseline; gap: 8px;
+  padding: 7px 10px; border-radius: var(--r-row); cursor: pointer;
+}
+.slashItem .slashName { font-family: var(--mono); font-size: 12.5px; color: var(--text); white-space: nowrap; }
+.slashItem .slashDesc { font-size: 11.5px; color: var(--text-4); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.slashItem.active, .slashItem:hover { background: var(--hover-strong); }
+.slashItem.active .slashDesc { color: var(--text-3); }
 textarea#prompt {
   resize: none; min-height: 24px; max-height: 200px;
   background: transparent; color: var(--text); border: none;
@@ -332,5 +356,4 @@ dialog.miniModal menu { display: flex; justify-content: flex-end; gap: 8px; marg
 @media (max-width: 1100px) {
   .app { grid-template-columns: 220px minmax(0, 1fr); }
   .app.sidebarCollapsed { grid-template-columns: 0 minmax(0, 1fr); }
-  .inspector { display: none; }
 }

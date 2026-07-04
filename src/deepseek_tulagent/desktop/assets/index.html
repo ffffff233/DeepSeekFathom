@@ -27,12 +27,6 @@
         </div>
         <div id="sessions" class="navList subtle">暂无会话</div>
       </section>
-      <section class="panel">
-        <div class="panelHead">
-          <h2>技能</h2>
-        </div>
-        <div id="skills" class="navList subtle">暂无技能</div>
-      </section>
     </aside>
 
     <section class="chatPane">
@@ -45,6 +39,7 @@
         </div>
         <div class="toolbarActions">
           <span id="workspace" class="workspace"></span>
+          <button id="manualCompact" class="ghost small" title="压缩上下文">压缩</button>
           <button id="settingsBtn" class="ghost">设置</button>
         </div>
       </header>
@@ -53,14 +48,15 @@
         <div class="empty intro">
           <div class="introMark">Fathom</div>
           <h1>深入每一寻的本地代理</h1>
-          <p>文件、技能、工具调用与内部思考汇聚于同一工作台。工具的调用与输出在同一卡片内分层展开。</p>
+          <p>输入任务开始对话。输入 <kbd>/</kbd> 可调出技能与命令菜单，工具调用与输出在同一卡片内分层展开。</p>
         </div>
       </div>
 
       <footer class="composer">
         <div id="attachments" class="attachments"></div>
         <div class="composeCard">
-          <textarea id="prompt" rows="1" placeholder="输入任务，Enter 发送，Shift+Enter 换行"></textarea>
+          <div id="slashMenu" class="slashMenu" hidden></div>
+          <textarea id="prompt" rows="1" placeholder="输入任务，Enter 发送，Shift+Enter 换行，/ 调出命令"></textarea>
           <div class="composeRow">
             <input id="fileInput" type="file" multiple hidden>
             <button id="attach" class="composeIcon attach" title="添加文件" aria-label="添加文件">
@@ -89,56 +85,31 @@
       </footer>
     </section>
 
-    <aside class="inspector">
-      <section class="panel">
-        <h2>运行状态</h2>
-        <div class="kv"><span>API</span><strong id="apiState">未检查</strong></div>
-        <div class="kv"><span>会话</span><strong id="sessionState">新会话</strong></div>
-        <div class="kv"><span>工具事件</span><strong id="eventCount">0</strong></div>
-      </section>
-      <section class="panel">
-        <h2>Fathom 能力</h2>
-        <button id="manualCompact" class="ghost wide">手动压缩上下文</button>
-        <button id="insertSubagent" class="ghost wide">插入子代理任务</button>
-        <div class="capList">
-          <div><strong>自动压缩</strong><span>上下文接近窗口上限时自动整理旧消息</span></div>
-          <div><strong>子代理</strong><span>delegate_agent 隔离上下文执行研究、验证、复核</span></div>
-          <div><strong>技能目录</strong><span>本地 SKILL.md 自动发现，点击即可插入</span></div>
-        </div>
-      </section>
-      <section class="panel">
-        <h2>权限说明</h2>
-        <div id="modeHelp" class="modeHelp subtle">选择权限模式后显示说明。</div>
-      </section>
-      <section class="panel">
-        <h2>事件流</h2>
-        <div id="eventMirror" class="eventMirror subtle">工具、思考和子代理事件会显示在这里。</div>
-      </section>
-    </aside>
-
     <dialog id="settingsDialog">
       <form method="dialog" class="settings">
         <header>
           <div>
             <h2>API 设置</h2>
-            <p>支持 DeepSeek 原生和 OpenAI 兼容接口。保存后立即生效。</p>
+            <p>支持 DeepSeek、OpenAI、Google Gemini、Anthropic Claude 接口。保存后立即生效。</p>
           </div>
           <button value="cancel" class="iconClose">×</button>
         </header>
         <label>接口格式
           <select id="providerFormat">
             <option value="deepseek">DeepSeek</option>
-            <option value="openai-compatible">OpenAI-compatible</option>
+            <option value="openai">OpenAI</option>
+            <option value="gemini">Google Gemini</option>
+            <option value="anthropic">Anthropic Claude</option>
           </select>
         </label>
         <label>Base URL
-          <input id="baseUrl" placeholder="https://api.deepseek.com">
+          <input id="baseUrl" placeholder="留空自动选用该格式默认域名">
         </label>
         <label>API Key
           <input id="apiKey" type="password" placeholder="留空则保留原 key">
         </label>
         <label>默认模型
-          <input id="defaultModel" placeholder="deepseek-v4-flash">
+          <input id="defaultModel" placeholder="如 deepseek-v4-flash / gpt-4o / gemini-2.5-pro / claude-opus-4-8">
         </label>
         <section class="settingsNote">
           <strong>界面许可说明</strong>

@@ -60,7 +60,13 @@ class DesktopApi:
             "apiKeySet": bool(self.settings.api_key),
             "running": self._running,
             "autoCompact": True,
-            "compatFormats": ["deepseek", "openai-compatible"],
+            "compatFormats": ["deepseek", "openai", "gemini", "anthropic"],
+            "formatLabels": {
+                "deepseek": "DeepSeek",
+                "openai": "OpenAI",
+                "gemini": "Google Gemini",
+                "anthropic": "Anthropic Claude",
+            },
         }
 
     def configure(self, data: dict[str, Any]) -> dict[str, Any]:

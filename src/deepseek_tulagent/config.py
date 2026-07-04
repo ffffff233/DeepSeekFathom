@@ -52,10 +52,16 @@ class Settings:
 def get_settings() -> Settings:
     file_config = load_file_config()
     workspace = Path(os.getenv("DSTUL_WORKSPACE", os.getcwd())).expanduser().resolve()
-    model = os.getenv("DEEPSEEK_MODEL") or str(file_config.get("model") or "deepseek-v4-flash")
+    # GUI-writable fields: the saved config file wins over the environment. The desktop
+    # settings dialog writes to the config file, so an env var left over from launch must
+    # not silently shadow what the user just saved ("保存后不生效 / 无法发送").
+    model = string_or_none(file_config.get("model")) or os.getenv("DEEPSEEK_MODEL") or "deepseek-v4-flash"
+    api_key = string_or_none(file_config.get("api_key")) or os.getenv("DEEPSEEK_API_KEY")
+    base_url = string_or_none(file_config.get("base_url")) or os.getenv("DEEPSEEK_BASE_URL") or "https://api.deepseek.com"
+    provider_format = string_or_none(file_config.get("provider_format")) or os.getenv("DEEPSEEK_PROVIDER_FORMAT") or "deepseek"
     return Settings(
-        api_key=os.getenv("DEEPSEEK_API_KEY") or string_or_none(file_config.get("api_key")),
-        base_url=(os.getenv("DEEPSEEK_BASE_URL") or str(file_config.get("base_url") or "https://api.deepseek.com")).rstrip("/"),
+        api_key=api_key,
+        base_url=base_url.rstrip("/"),
         model=resolve_model(model),
         workspace=workspace,
         max_tool_rounds=int(os.getenv("DSTUL_MAX_TOOL_ROUNDS") or file_config.get("max_tool_rounds") or "256"),
@@ -63,7 +69,7 @@ def get_settings() -> Settings:
         request_timeout=float(os.getenv("DSTUL_REQUEST_TIMEOUT") or file_config.get("request_timeout") or "180"),
         default_mode=str(file_config.get("default_mode") or "root"),
         default_thinking=str(file_config.get("default_thinking") or "fast"),
-        provider_format=str(file_config.get("provider_format") or "deepseek"),
+        provider_format=provider_format,
     )
 
 

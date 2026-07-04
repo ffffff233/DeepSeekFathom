@@ -6,9 +6,13 @@ const state = {
   events: 0,
   running: false,
   stickToBottom: true,
+  skills: [],
+  slash: { open: false, items: [], index: 0 },
 };
 
 const $ = (id) => document.getElementById(id);
+// null-safe text setter — inspector elements were removed, callers must not crash on them
+const setText = (id, value) => { const el = $(id); if (el) el.textContent = value; };
 const b64 = (s) => btoa(unescape(encodeURIComponent(s)));
 
 function installDemoApi() {
@@ -33,8 +37,12 @@ function installDemoApi() {
           yolo: "自动确认受限工具",
           root: "最高权限，直接执行",
         },
-        compatFormats: ["deepseek", "openai-compatible"],
-        skills: [{ name: "repo-debug", description: "调试仓库时先运行测试" }],
+        compatFormats: ["deepseek", "openai", "gemini", "anthropic"],
+        formatLabels: { deepseek: "DeepSeek", openai: "OpenAI", gemini: "Google Gemini", anthropic: "Anthropic Claude" },
+        skills: [
+          { name: "repo-debug", description: "调试仓库时先运行测试" },
+          { name: "code-review", description: "审阅改动，找出缺陷" },
+        ],
         apiKeySet: true,
       }),
       models: async () => ({ ok: true, models: ["deepseek-v4-flash", "deepseek-v4-pro", "gpt-4o"] }),
@@ -96,9 +104,8 @@ window.DeepSeekDesktop = {
       setRunning(false);
       refreshSessions();
       const sid = String(payload.sessionId || "");
-      $("sessionState").textContent = sid ? sid.slice(0, 8) : "新会话";
+      setText("sessionState", sid ? sid.slice(0, 8) : "新会话");
       setSaveState("saved", "已保存", sid || "未保存");
-      $("composerSession").textContent = sid || "未保存";
     }
     if (event === "turn:error") {
       state.currentAssistant = null;
@@ -125,39 +132,42 @@ async function boot() {
   state.boot = await window.pywebview.api.boot();
   $("version").textContent = `v${state.boot.version}`;
   $("workspace").textContent = state.boot.workspace || "";
-  $("apiState").textContent = state.boot.apiKeySet ? "已配置" : "未配置";
+  setText("apiState", state.boot.apiKeySet ? "已配置" : "未配置");
   $("topRuntime").textContent = `${state.boot.model} · ${state.boot.mode}/${state.boot.thinking}`;
   setSaveState("idle", "新会话", state.boot.sessionId || "未保存");
   setRunning(Boolean(state.boot.running));
+  const labels = state.boot.formatLabels || {};
   fillSelect("mode", state.boot.modes, state.boot.mode);
   fillSelect("thinking", state.boot.thinkingModes, state.boot.thinking);
-  fillSelect("format", state.boot.compatFormats, state.boot.providerFormat || "deepseek");
-  fillSelect("providerFormat", state.boot.compatFormats, state.boot.providerFormat || "deepseek");
+  fillSelect("format", state.boot.compatFormats, state.boot.providerFormat || "deepseek", labels);
+  fillSelect("providerFormat", state.boot.compatFormats, state.boot.providerFormat || "deepseek", labels);
   fillSelect("model", [state.boot.model], state.boot.model);
   updateModeHelp();
   $("baseUrl").value = state.boot.baseUrl || "";
   $("defaultModel").value = state.boot.model || "";
-  renderSkills(state.boot.skills || []);
+  state.skills = state.boot.skills || [];
   await refreshModels();
   await refreshSessions();
 }
 
-function fillSelect(id, values, selected) {
+function fillSelect(id, values, selected, labels) {
   const element = $(id);
+  if (!element) return;
   element.innerHTML = "";
   values.forEach((value) => {
     const option = document.createElement("option");
     option.value = value;
-    option.textContent = value;
+    option.textContent = (labels && labels[value]) || value;
     option.selected = value === selected;
     element.append(option);
   });
 }
 
 function updateModeHelp() {
-  const mode = $("mode").value;
+  const help = $("modeHelp");
+  if (!help) return;
   const descriptions = state.boot?.modeDescriptions || {};
-  $("modeHelp").textContent = descriptions[mode] || "当前权限模式";
+  help.textContent = descriptions[$("mode").value] || "当前权限模式";
 }
 
 function setSaveState(kind, label, detail) {
@@ -181,7 +191,7 @@ async function refreshModels() {
   const models = result.models && result.models.length ? result.models : [state.boot.model];
   const current = $("model").value || state.boot.model;
   fillSelect("model", models, models.includes(current) ? current : state.boot.model);
-  $("apiState").textContent = result.ok ? "模型可用" : "模型列表失败";
+  setText("apiState", result.ok ? "模型可用" : "模型列表失败");
 }
 
 async function refreshSessions() {
@@ -213,7 +223,7 @@ async function refreshSessions() {
       $("messages").innerHTML = "";
       result.messages.forEach((message) => addMessage(message.role, message.content));
       scrollMessages(true);
-      $("sessionState").textContent = result.sessionId.slice(0, 8);
+      setText("sessionState", result.sessionId.slice(0, 8));
       setSaveState("saved", "已恢复", result.sessionId);
     };
     row.querySelector(".actPin").onclick = async (e) => {
@@ -239,24 +249,9 @@ async function refreshSessions() {
   });
 }
 
-function renderSkills(skills) {
-  const box = $("skills");
-  box.innerHTML = "";
-  if (!skills.length) {
-    box.textContent = "暂无技能";
-    return;
-  }
-  skills.forEach((skill) => {
-    const button = document.createElement("button");
-    button.className = "item";
-    button.innerHTML = `<span>${escapeHtml(skill.name)}</span><small>${escapeHtml(skill.description || "")}</small>`;
-    button.onclick = () => {
-      const prompt = $("prompt");
-      prompt.value = `Use skill ${skill.name}: ` + prompt.value;
-      prompt.focus();
-    };
-    box.append(button);
-  });
+function bumpEventCount() {
+  state.events += 1;
+  setText("eventCount", String(state.events));
 }
 
 function addMessage(role, content) {
@@ -286,8 +281,7 @@ function renderBubble(bubble) {
 
 /* ---------- merged tool block: call (args) on top, output below ---------- */
 function addToolEvent(name, args) {
-  state.events += 1;
-  $("eventCount").textContent = String(state.events);
+  bumpEventCount();
   const intro = document.querySelector(".empty, .intro");
   if (intro) intro.remove();
   const details = document.createElement("details");
@@ -337,8 +331,7 @@ function truncateForDisplay(text) {
 }
 
 function addEvent(kind, name, detail) {
-  state.events += 1;
-  $("eventCount").textContent = String(state.events);
+  bumpEventCount();
   const intro = document.querySelector(".empty, .intro");
   if (intro) intro.remove();
   const details = document.createElement("details");
@@ -353,8 +346,9 @@ function addEvent(kind, name, detail) {
 }
 
 function mirror(line) {
-  const def = "工具、思考和子代理事件会显示在这里。";
   const box = $("eventMirror");
+  if (!box) return;
+  const def = "工具、思考和子代理事件会显示在这里。";
   const current = box.textContent === def ? "" : box.textContent;
   const lines = (current ? current + "\n" : "").concat(line).split("\n");
   box.textContent = lines.slice(-300).join("\n");
@@ -510,10 +504,96 @@ function autoGrow() {
   ta.style.height = "auto";
   ta.style.height = Math.min(ta.scrollHeight, 200) + "px";
 }
-$("prompt").addEventListener("input", autoGrow);
+
+/* ---------- slash command menu (输入 / 调出命令与技能，Codex 风格) ---------- */
+const SLASH_COMMANDS = [
+  { key: "/compact", desc: "压缩当前上下文", run: () => $("manualCompact").click() },
+  { key: "/subagent", desc: "插入子代理任务模板", insert: 'Use delegate_agent with name="researcher" task="' },
+  { key: "/new", desc: "开始新对话", run: () => $("newSession").click() },
+  { key: "/settings", desc: "打开 API 设置", run: () => $("settingsBtn").click() },
+];
+
+function slashCandidates(query) {
+  const q = query.toLowerCase();
+  const skills = (state.skills || []).map((s) => ({
+    key: "/" + s.name, desc: s.description || "技能", insert: `Use skill ${s.name}: `,
+  }));
+  return SLASH_COMMANDS.concat(skills).filter((it) => it.key.toLowerCase().includes(q));
+}
+
+function updateSlash() {
+  const match = $("prompt").value.match(/^\/([\w-]*)$/);
+  if (!match) { closeSlash(); return; }
+  state.slash = { open: true, items: slashCandidates(match[1]), index: 0 };
+  renderSlash();
+}
+
+function renderSlash() {
+  const menu = $("slashMenu");
+  if (!menu || !state.slash.open) { closeSlash(); return; }
+  menu.hidden = false;
+  if (!state.slash.items.length) {
+    menu.innerHTML = '<div class="slashEmpty">无匹配命令</div>';
+    return;
+  }
+  menu.innerHTML = state.slash.items.map((it, i) =>
+    `<div class="slashItem${i === state.slash.index ? " active" : ""}" data-i="${i}">` +
+    `<span class="slashName">${escapeHtml(it.key)}</span>` +
+    `<span class="slashDesc">${escapeHtml(it.desc)}</span></div>`
+  ).join("");
+}
+
+function moveSlash(step) {
+  const n = state.slash.items.length;
+  if (!n) return;
+  state.slash.index = (state.slash.index + step + n) % n;
+  renderSlash();
+  const active = $("slashMenu").querySelector(".slashItem.active");
+  if (active) active.scrollIntoView({ block: "nearest" });
+}
+
+function selectSlash(i) {
+  const it = state.slash.items[i];
+  closeSlash();
+  if (!it) return;
+  if (it.insert !== undefined) {
+    $("prompt").value = it.insert;
+    $("prompt").focus();
+    autoGrow();
+  } else if (it.run) {
+    $("prompt").value = "";
+    autoGrow();
+    it.run();
+  }
+}
+
+function closeSlash() {
+  state.slash.open = false;
+  const menu = $("slashMenu");
+  if (menu) menu.hidden = true;
+}
+
+$("prompt").addEventListener("input", () => { autoGrow(); updateSlash(); });
+$("prompt").addEventListener("blur", () => setTimeout(closeSlash, 150));
+$("slashMenu").addEventListener("mousedown", (e) => {
+  const item = e.target.closest(".slashItem");
+  if (!item) return;
+  e.preventDefault();
+  selectSlash(Number(item.dataset.i));
+});
 $("prompt").addEventListener("keydown", (event) => {
-  // isComposing / keyCode 229: IME (中文输入法) 候选确认，不能当作发送
+  // isComposing / keyCode 229: IME (中文输入法) 候选确认，不能当作发送/命令
   if (event.isComposing || event.keyCode === 229) return;
+  if (state.slash.open) {
+    if (event.key === "ArrowDown") { event.preventDefault(); moveSlash(1); return; }
+    if (event.key === "ArrowUp") { event.preventDefault(); moveSlash(-1); return; }
+    if (event.key === "Enter" || event.key === "Tab") {
+      event.preventDefault();
+      state.slash.items.length ? selectSlash(state.slash.index) : closeSlash();
+      return;
+    }
+    if (event.key === "Escape") { event.preventDefault(); closeSlash(); return; }
+  }
   if (event.key === "Enter" && !event.shiftKey) {
     event.preventDefault();
     $("send").click();
@@ -551,18 +631,13 @@ $("newSession").onclick = async () => {
   state.currentTool = null;
   state.events = 0;
   state.stickToBottom = true;
-  $("eventCount").textContent = "0";
-  $("messages").innerHTML = '<div class="empty intro"><div class="introMark">Fathom</div><h1>新对话已创建</h1><p>输入任务开始。工具调用与输出会内联展开。</p></div>';
-  $("eventMirror").textContent = "工具、思考和子代理事件会显示在这里。";
-  $("sessionState").textContent = "新会话";
+  setText("eventCount", "0");
+  $("messages").innerHTML = '<div class="empty intro"><div class="introMark">Fathom</div><h1>新对话已创建</h1><p>输入任务开始，输入 <kbd>/</kbd> 调出命令。工具调用与输出会内联展开。</p></div>';
+  setText("eventMirror", "工具、思考和子代理事件会显示在这里。");
+  setText("sessionState", "新会话");
   setSaveState("idle", "新会话", "未保存");
 };
 $("refreshSessions").onclick = refreshSessions;
-$("insertSubagent").onclick = () => {
-  const prompt = $("prompt");
-  prompt.value = 'Use delegate_agent with name="researcher" task="';
-  prompt.focus();
-};
 $("manualCompact").onclick = async () => {
   const result = await window.pywebview.api.compact();
   if (!result.ok) {

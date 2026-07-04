@@ -1,5 +1,49 @@
 # 更新记录 / Changelog
 
+## v0.1.56
+
+中文：
+
+- **多 Provider 兼容**：接口格式从 DeepSeek/OpenAI 扩展为 **DeepSeek、OpenAI、Google Gemini、
+  Anthropic Claude** 四种。`provider.py` 按格式分发端点/鉴权/请求体/SSE 解析——OpenAI 系走
+  `/chat/completions` + Bearer；Anthropic 走 `/v1/messages` + `x-api-key`，system 抽到顶层、
+  流式解析 `content_block_delta`，max_tokens 封顶避免 400；Gemini 走
+  `:generateContent`/`:streamGenerateContent?alt=sse`，role 映射 assistant→model、
+  system→systemInstruction。各格式在 base_url 留空时自动选用默认域名。
+- **修复：自定义 API 保存后不生效 / 无法发送** —— `config.get_settings()` 原先环境变量优先于
+  配置文件，桌面端点「保存」写的是配置文件，一旦启动环境里设了 `DEEPSEEK_API_KEY/BASE_URL/MODEL`
+  保存的值永远被覆盖。现改为 GUI 字段（api_key/base_url/model/provider_format）**配置文件优先**，
+  环境变量退为回退。
+- **Codex 式 `/` 命令菜单**：在输入框输入 `/` 弹出命令与技能菜单，支持前缀过滤、↑/↓ 选择、
+  Enter/Tab 确认、Esc 关闭、点击选中；内置 `/compact`、`/subagent`、`/new`、`/settings`，
+  技能自动列入。中文输入法（`isComposing`）下不误触发。
+- **删除左侧「技能」栏**：技能改由 `/` 菜单暴露（贴近输入框，Codex 风格）。
+- **删除右侧 inspector 面板**（运行状态/能力/权限/事件流），腾出阅读空间；「压缩上下文」移到顶栏。
+  所有对已删元素的 DOM 赋值改为空判断，避免 `null.textContent` 报错。
+
+English:
+
+- **Multi-provider support**: interface formats expand from DeepSeek/OpenAI to **DeepSeek,
+  OpenAI, Google Gemini, Anthropic Claude**. `provider.py` dispatches endpoint/auth/body/SSE
+  per format — OpenAI-family uses `/chat/completions` + Bearer; Anthropic uses `/v1/messages`
+  + `x-api-key` (system hoisted to the top level, streaming parses `content_block_delta`,
+  max_tokens capped to avoid 400s); Gemini uses `:generateContent` /
+  `:streamGenerateContent?alt=sse` with assistant→model, system→systemInstruction. Each format
+  falls back to its default host when base_url is left blank.
+- **Fixed: saved custom API not taking effect / cannot send** — `config.get_settings()` used to
+  rank env vars above the config file, but the desktop Save writes the config file, so a leftover
+  `DEEPSEEK_API_KEY/BASE_URL/MODEL` in the launch env silently shadowed it forever. GUI fields
+  (api_key/base_url/model/provider_format) now prefer the config file, env as fallback.
+- **Codex-style `/` command menu**: typing `/` in the composer opens a command+skill menu with
+  prefix filtering, ↑/↓ navigation, Enter/Tab to confirm, Esc to close, click to select; built-in
+  `/compact`, `/subagent`, `/new`, `/settings`, plus every skill. Does not misfire under a Chinese
+  IME (`isComposing`).
+- **Removed the left Skills panel**: skills are now surfaced through the `/` menu next to the
+  composer (Codex style).
+- **Removed the right inspector panel** (status / capabilities / permissions / event mirror) for
+  more reading room; "compact context" moved to the toolbar. Every DOM write to now-removed
+  elements is null-guarded to avoid `null.textContent` crashes.
+
 ## v0.1.55
 
 中文：
