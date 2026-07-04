@@ -16,3 +16,4 @@ skills/
 .env.*
 *.log
 
+*.spec

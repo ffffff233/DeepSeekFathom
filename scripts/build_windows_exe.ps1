@@ -28,7 +28,7 @@ python -m PyInstaller `
   --hidden-import webview.platforms.edgechromium `
   --hidden-import webview.platforms.winforms `
   --hidden-import webview.platforms.mshtml `
-  src/deepseek_tulagent/desktop/app.py
+  scripts/desktop_launcher.py
 
 Write-Host ""
 Write-Host "Built dist\DeepSeekTuLAgent\DeepSeekTuLAgent.exe"
