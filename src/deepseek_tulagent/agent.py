@@ -106,6 +106,7 @@ class TuLAgent:
         *,
         stream: bool = False,
         on_delta: Callable[[str], None] | None = None,
+        on_final: Callable[[str], None] | None = None,
         on_event: Callable[[str], None] | None = None,
         should_cancel: Callable[[], bool] | None = None,
         session: Session | None = None,
@@ -139,11 +140,26 @@ class TuLAgent:
             if stream:
                 parts: list[str] = []
                 held_parts: list[str] = []
+                # Live streaming to the UI is only enabled when on_final is provided
+                # (desktop). We buffer until should_hold_stream_output says the text no
+                # longer looks like a tool call, then emit deltas incrementally; on_final
+                # replaces the streamed text with the cleaned final answer at the end.
+                # Callers with on_delta only (CLI/TUI) keep the buffer-then-flush behavior.
+                stream_live = on_final is not None
+                emitted = 0
+                holding = True
                 for delta in self.client.stream_chat(model_messages):
                     if should_cancel and should_cancel():
                         raise RuntimeError("turn cancelled")
                     parts.append(delta)
                     held_parts.append(delta)
+                    if stream_live and on_delta:
+                        joined = "".join(parts)
+                        if holding and not should_hold_stream_output(joined):
+                            holding = False
+                        if not holding:
+                            on_delta(joined[emitted:])
+                            emitted = len(joined)
                 assistant_text = "".join(parts)
             else:
                 assistant_text = self.client.chat(model_messages)
@@ -152,7 +168,9 @@ class TuLAgent:
             tool_call = None if is_question_mark_only(prompt) else parse_tool_call(assistant_text)
             if not tool_call:
                 assistant_text = plainify_assistant_text(assistant_text)
-                if stream and held_parts and on_delta:
+                if stream and on_final:
+                    on_final(assistant_text)
+                elif stream and held_parts and on_delta:
                     on_delta(assistant_text)
                 session.append(Message("assistant", assistant_text))
                 if last_turn_had_tool_result and promises_more_work(assistant_text):
@@ -198,7 +216,7 @@ class TuLAgent:
             if stop_after_tool:
                 return AgentResult(session.session_id, "", rounds)
         else:
-            final_answer = self._finalize_after_tool_limit(session, stream=stream, on_delta=on_delta, on_event=on_event)
+            final_answer = self._finalize_after_tool_limit(session, stream=stream, on_delta=on_delta, on_final=on_final, on_event=on_event)
             if final_answer:
                 session.append(Message("assistant", final_answer))
             else:
@@ -237,6 +255,7 @@ class TuLAgent:
         *,
         stream: bool,
         on_delta: Callable[[str], None] | None,
+        on_final: Callable[[str], None] | None = None,
         on_event: Callable[[str], None] | None,
     ) -> str:
         if on_event:
@@ -253,9 +272,12 @@ class TuLAgent:
             parts: list[str] = []
             for delta in self.client.stream_chat(messages):
                 parts.append(delta)
-                if on_delta:
+                if on_delta and on_final is None:
                     on_delta(delta)
-            return plainify_assistant_text("".join(parts))
+            final = plainify_assistant_text("".join(parts))
+            if on_final:
+                on_final(final)
+            return final
         return plainify_assistant_text(self.client.chat(messages))
 
     def _needs_confirmation(self, name: str) -> bool:

@@ -1,5 +1,32 @@
 # 更新记录 / Changelog
 
+## v0.1.58
+
+中文：
+
+- **修复：对话区不能上下滚动 / 内容超出视口**。`.messages` 用了 `flex:1` 却没设 `min-height:0`，
+  flex 子项撑到内容高度而非内部滚动。现给 `.chatPane` 与 `.messages` 加 `min-height:0`、
+  `.chatPane` 固定 `100vh` 且 `overflow:hidden`、`.composer` 加 `flex-shrink:0`——对话历史正常滚动，
+  输入区始终可见。
+- **修复：回复不是流式**。`agent.run()` 的流式循环原先只把 token 收集起来，最后一次性回传，
+  所以前端一次拿到整段。现在按 `should_hold_stream_output` 判定不再像工具调用后即增量回调
+  `on_delta`；新增 `on_final` 回调在结束时用清洗后的最终文本替换。桌面端发 `assistant:delta`
+  逐字追加、`assistant:final` 收尾替换，真正逐字流式；CLI/TUI 行为不变（未传 `on_final`）。
+
+English:
+
+- **Fixed: chat area could not scroll / content overflowed the viewport.** `.messages` used
+  `flex:1` without `min-height:0`, so the flex child grew to content height instead of scrolling.
+  Added `min-height:0` to `.chatPane` and `.messages`, a fixed `100vh` + `overflow:hidden` on
+  `.chatPane`, and `flex-shrink:0` on `.composer` — history scrolls normally and the composer
+  stays visible.
+- **Fixed: replies were not streamed.** `agent.run()`'s streaming loop only accumulated tokens and
+  flushed once at the end, so the UI received the whole answer at once. It now calls `on_delta`
+  incrementally once `should_hold_stream_output` clears the tool-call guard, plus a new `on_final`
+  callback that replaces the streamed text with the cleaned answer at the end. Desktop streams via
+  `assistant:delta` (append) and finishes with `assistant:final` (replace) for true token streaming;
+  CLI/TUI behavior is unchanged (they pass no `on_final`).
+
 ## v0.1.57
 
 中文：

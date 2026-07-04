@@ -89,6 +89,14 @@ window.DeepSeekDesktop = {
       renderBubble(bubble);
       scrollMessages();
     }
+    if (event === "assistant:final") {
+      // replace the streamed text with the cleaned final answer
+      if (!state.currentAssistant) state.currentAssistant = addMessage("assistant", "");
+      const bubble = state.currentAssistant.querySelector(".bubble");
+      bubble.dataset.raw = payload.text || "";
+      renderBubble(bubble);
+      scrollMessages();
+    }
     if (event === "agent:event") {
       if (payload.kind === "tool") {
         state.currentTool = addToolEvent(payload.name, payload.detail);

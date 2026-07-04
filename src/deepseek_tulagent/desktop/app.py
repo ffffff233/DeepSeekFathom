@@ -194,6 +194,11 @@ class DesktopApi:
                         raise RuntimeError("turn cancelled")
                     self._emit("assistant:delta", {"text": text})
 
+                def final(text: str) -> None:
+                    if self._cancel_requested:
+                        raise RuntimeError("turn cancelled")
+                    self._emit("assistant:final", {"text": text})
+
                 def event(text: str) -> None:
                     if self._cancel_requested:
                         raise RuntimeError("turn cancelled")
@@ -204,7 +209,7 @@ class DesktopApi:
                     mode=self.mode,
                     thinking=self.thinking.name,
                     approve=(lambda _name, _args: True) if self.mode in {"root", "yolo"} else None,
-                ).run(prompt, stream=True, on_delta=delta, on_event=event, session=self.session)
+                ).run(prompt, stream=True, on_delta=delta, on_final=final, on_event=event, session=self.session)
                 self.session = SessionStore(self.settings.workspace).load(result.session_id)
                 ensure_session_title(self.settings.workspace, self.session)
                 self._emit("turn:done", {"sessionId": result.session_id, "rounds": result.rounds})
