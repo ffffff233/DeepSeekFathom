@@ -60,10 +60,11 @@ class DesktopApi:
             "apiKeySet": bool(self.settings.api_key),
             "running": self._running,
             "autoCompact": True,
-            "compatFormats": ["deepseek", "openai", "gemini", "anthropic"],
+            "compatFormats": ["deepseek", "openai", "openai-responses", "gemini", "anthropic"],
             "formatLabels": {
                 "deepseek": "DeepSeek",
-                "openai": "OpenAI",
+                "openai": "OpenAI (Chat)",
+                "openai-responses": "OpenAI (Responses·最新)",
                 "gemini": "Google Gemini",
                 "anthropic": "Anthropic Claude",
             },

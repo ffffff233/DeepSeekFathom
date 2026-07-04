@@ -1,5 +1,45 @@
 # 更新记录 / Changelog
 
+## v0.1.57
+
+中文：
+
+- **`/` 命令不再被当作普通消息发给模型**：发送时以 `/` 开头的输入先经命令解析——`/compact`、
+  `/new`、`/settings` 在本地执行（不发送）；`/subagent`、技能名展开为提示模板后再发送；
+  **未知命令（如 `/goal ...`）被拦截并提示，绝不原样发给模型**（避免在 root/yolo 权限下被误执行）。
+  形如 `/etc/hosts` 的路径、中文开头等非命令文本照常发送，不会误拦。
+- **兼容 OpenAI 最新 Responses 接口**：接口格式新增 **OpenAI (Responses·最新)**，与旧的
+  **OpenAI (Chat)** 并存。Responses 走 `POST /responses`，消息放 `input`、system 放
+  `instructions`，流式解析 `response.output_text.delta`；Chat 仍走 `/chat/completions`。
+  现共支持 DeepSeek / OpenAI Chat / OpenAI Responses / Google Gemini / Anthropic Claude 五种。
+- **非 DeepSeek 格式统一给 max_tokens 封顶**（32000），避免 OpenAI/Gemini/Claude 因 DeepSeek
+  思考模式的超大输出预算而 400。
+- **桌面端无需再构建 exe**：README 改为主推 `pip install "deepseek-tulagent[desktop]"` 后直接
+  `deepseekTulDesktop` 运行（用系统 WebView，无编译步骤）。
+- **修 exe 构建报错**：`build_windows_exe.ps1` 改用 `--collect-all`（打包 assets 与子模块）+
+  pywebview Windows 后端的 hidden-import（clr/proxy_tools/bottle/edgechromium 等），修掉最常见的
+  「module not found / 空白窗口」问题；CI 直接复用该脚本。
+
+English:
+
+- **`/` commands are no longer sent to the model as plain messages**: a leading-slash input is
+  routed on send — `/compact`, `/new`, `/settings` run locally (never sent); `/subagent` and skill
+  names expand to a prompt template then send; **unknown commands (e.g. `/goal ...`) are blocked
+  with a notice and never sent raw** (so they can't be acted on under root/yolo). Path-like text
+  (`/etc/hosts`) and non-command input still send normally — no false blocking.
+- **OpenAI Responses API support**: added an **OpenAI (Responses·newest)** format alongside the
+  classic **OpenAI (Chat)**. Responses uses `POST /responses` with `input` + `instructions` and
+  streams `response.output_text.delta`; Chat still uses `/chat/completions`. Five formats now:
+  DeepSeek / OpenAI Chat / OpenAI Responses / Google Gemini / Anthropic Claude.
+- **Cap max_tokens for non-DeepSeek formats** (32000) so OpenAI/Gemini/Claude don't 400 on the
+  huge output budgets DeepSeek thinking modes request.
+- **Desktop no longer needs an exe build**: README now leads with `pip install
+  "deepseek-tulagent[desktop]"` + `deepseekTulDesktop` (uses the system WebView; no compile step).
+- **Fixed exe build errors**: `build_windows_exe.ps1` now uses `--collect-all` (bundles the
+  desktop assets and submodules) plus hidden-imports for pywebview's Windows backend
+  (clr/proxy_tools/bottle/edgechromium/…), fixing the common "module not found / blank window"
+  failures; CI reuses the same script.
+
 ## v0.1.56
 
 中文：

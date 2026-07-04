@@ -353,6 +353,18 @@ dialog.miniModal input { background: var(--bg-under); color: var(--text); border
 dialog.miniModal input:focus { border-color: var(--line-heavy); }
 dialog.miniModal menu { display: flex; justify-content: flex-end; gap: 8px; margin: 0; padding: 0; }
 
+/* ---------- transient toast ---------- */
+.toast {
+  position: fixed; left: 50%; bottom: 96px; transform: translate(-50%, 8px);
+  background: var(--elevated-2); color: var(--text);
+  border: 1px solid var(--line-heavy); border-radius: 999px;
+  padding: 8px 16px; font-size: 12.5px;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+  opacity: 0; transition: opacity .18s ease, transform .18s ease; z-index: 60;
+  pointer-events: none;
+}
+.toast.show { opacity: 1; transform: translate(-50%, 0); }
+
 @media (max-width: 1100px) {
   .app { grid-template-columns: 220px minmax(0, 1fr); }
   .app.sidebarCollapsed { grid-template-columns: 0 minmax(0, 1fr); }

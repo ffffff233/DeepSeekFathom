@@ -138,13 +138,24 @@ deepseekTul run --mode agent --think fast --yes "run tests and fix failures"
 
 The desktop app includes:
 
-- conversation and skill navigation
-- model, thinking mode, permission mode, and compatibility format selectors
-- third-party API / OpenAI-compatible Base URL settings
+- conversation navigation and a Codex-style `/` command menu (skills + `/compact`, `/subagent`, `/new`, `/settings`)
+- model, thinking mode, permission mode, and provider-format selectors
+- DeepSeek, OpenAI (Chat and Responses), Google Gemini, and Anthropic Claude API support, with Base URL / API key settings
 - `+` file uploads
 - collapsible tool calls, subagents, context compaction, and internal thinking events
 
-Build the Windows exe locally:
+You do **not** need to build an exe. Just install the desktop extra and run it:
+
+```powershell
+py -3 -m pip install --upgrade "deepseek-tulagent[desktop]"
+deepseekTulDesktop           # or: deepseekTul desktop
+```
+
+On Linux / macOS use `python3 -m pip install --upgrade "deepseek-tulagent[desktop]"` then `deepseekTulDesktop`. The desktop uses your system WebView (Edge WebView2 on Windows, WebKitGTK on Linux, WKWebView on macOS); no compilation step is involved.
+
+### Optional: standalone Windows exe (advanced)
+
+Only if you want a double-clickable bundle for machines without Python:
 
 ```powershell
 git clone https://github.com/ffffff233/deepseek-tulagent.git
@@ -152,13 +163,7 @@ cd deepseek-tulagent
 .\scripts\build_windows_exe.ps1
 ```
 
-Output:
-
-```text
-dist\DeepSeekTuLAgent\DeepSeekTuLAgent.exe
-```
-
-GitHub Actions also builds a `DeepSeekTuLAgent-windows` artifact on tagged releases. This Linux workspace cannot directly produce a real Windows exe; build it on Windows or through the `windows-latest` workflow.
+Output: `dist\DeepSeekTuLAgent\DeepSeekTuLAgent.exe`. The script bundles the desktop assets and pywebview's Windows backend (the usual cause of "module not found" / blank-window errors); if the window is blank, install the free Microsoft Edge WebView2 Runtime. GitHub Actions also builds a `DeepSeekTuLAgent-windows` artifact on tagged releases (this Linux workspace cannot produce a real Windows exe directly).
 
 ## Conversations
 

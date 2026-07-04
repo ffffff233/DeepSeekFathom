@@ -16,6 +16,9 @@ FORMAT_ALIASES = {
     "deepseek": "deepseek",
     "openai": "openai",
     "openai-compatible": "openai",
+    "openai-chat": "openai",
+    "openai-responses": "openai-responses",
+    "responses": "openai-responses",
     "gemini": "gemini",
     "google": "gemini",
     "google-gemini": "gemini",
@@ -27,6 +30,7 @@ FORMAT_ALIASES = {
 # at the generic DeepSeek default while a different family is selected.
 DEFAULT_BASE_URLS = {
     "openai": "https://api.openai.com/v1",
+    "openai-responses": "https://api.openai.com/v1",
     "gemini": "https://generativelanguage.googleapis.com",
     "anthropic": "https://api.anthropic.com",
 }
@@ -78,7 +82,9 @@ class DeepSeekClient:
 
     def _output_tokens(self) -> int:
         tokens = int(self.settings.max_tokens or 8192)
-        if self.format in {"anthropic", "gemini"}:
+        # Only DeepSeek accepts the very large thinking budgets (up to 384000). OpenAI /
+        # Gemini / Anthropic reject them, so cap output for every other family.
+        if self.format != "deepseek":
             return max(1, min(tokens, _OUTPUT_CAP))
         return tokens
 
@@ -89,6 +95,8 @@ class DeepSeekClient:
             return self._anthropic_chat(messages, stream=False)  # type: ignore[return-value]
         if self.format == "gemini":
             return self._gemini_chat(messages, stream=False)  # type: ignore[return-value]
+        if self.format == "openai-responses":
+            return self._responses_chat(messages, stream=False)  # type: ignore[return-value]
         return self._openai_chat(messages, stream=False)  # type: ignore[return-value]
 
     def stream_chat(self, messages: Iterable[Message]) -> Iterator[str]:
@@ -97,6 +105,8 @@ class DeepSeekClient:
             return self._anthropic_chat(messages, stream=True)  # type: ignore[return-value]
         if self.format == "gemini":
             return self._gemini_chat(messages, stream=True)  # type: ignore[return-value]
+        if self.format == "openai-responses":
+            return self._responses_chat(messages, stream=True)  # type: ignore[return-value]
         return self._openai_chat(messages, stream=True)  # type: ignore[return-value]
 
     def models(self) -> list[str]:
@@ -104,6 +114,7 @@ class DeepSeekClient:
             return self._anthropic_models()
         if self.format == "gemini":
             return self._gemini_models()
+        # openai + openai-responses share GET /models
         return self._openai_models()
 
     def ping(self) -> dict[str, object]:
@@ -170,6 +181,60 @@ class DeepSeekClient:
             response.raise_for_status()
         data = response.json()
         return [item["id"] for item in data.get("data", []) if isinstance(item, dict) and "id" in item]
+
+    # ---- OpenAI Responses API (newest format) ----
+    def _responses_chat(self, messages: list[Message], *, stream: bool):
+        self._require_key()
+        system, turns = split_system(messages)
+        payload: dict = {
+            "model": self.settings.model,
+            "input": [{"role": m.role, "content": m.content} for m in turns],
+            "max_output_tokens": self._output_tokens(),
+            "stream": stream,
+        }
+        if system:
+            payload["instructions"] = system
+        headers = {
+            "Authorization": f"Bearer {self.settings.api_key}",
+            "Content-Type": "application/json",
+        }
+        url = f"{self._base_url()}/responses"
+        if not stream:
+            response = self._http().post(url, headers=headers, json=payload)
+            raise_for_status_with_body(response)
+            data = response.json()
+            text = data.get("output_text")
+            if isinstance(text, str) and text:
+                return text
+            parts: list[str] = []
+            for item in data.get("output", []) if isinstance(data, dict) else []:
+                if isinstance(item, dict) and item.get("type") == "message":
+                    for block in item.get("content", []):
+                        if isinstance(block, dict) and block.get("type") == "output_text":
+                            parts.append(block.get("text", ""))
+            if parts:
+                return "".join(parts)
+            compact = json.dumps(data, ensure_ascii=False)[:1000]
+            raise RuntimeError(f"Unexpected Responses payload: {compact}")
+        return self._responses_stream(url, headers, payload)
+
+    def _responses_stream(self, url: str, headers: dict, payload: dict) -> Iterator[str]:
+        with self._http().stream("POST", url, headers=headers, json=payload) as response:
+            raise_for_status_with_body(response)
+            for line in response.iter_lines():
+                if not line or not line.startswith("data:"):
+                    continue
+                chunk = line[len("data:"):].strip()
+                if not chunk or chunk == "[DONE]":
+                    continue
+                try:
+                    data = json.loads(chunk)
+                except json.JSONDecodeError:
+                    continue
+                if data.get("type") == "response.output_text.delta":
+                    delta = data.get("delta")
+                    if delta:
+                        yield delta
 
     # ---- Anthropic / Claude ----
     def _anthropic_chat(self, messages: list[Message], *, stream: bool):

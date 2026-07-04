@@ -37,8 +37,8 @@ function installDemoApi() {
           yolo: "自动确认受限工具",
           root: "最高权限，直接执行",
         },
-        compatFormats: ["deepseek", "openai", "gemini", "anthropic"],
-        formatLabels: { deepseek: "DeepSeek", openai: "OpenAI", gemini: "Google Gemini", anthropic: "Anthropic Claude" },
+        compatFormats: ["deepseek", "openai", "openai-responses", "gemini", "anthropic"],
+        formatLabels: { deepseek: "DeepSeek", openai: "OpenAI (Chat)", "openai-responses": "OpenAI (Responses·最新)", gemini: "Google Gemini", anthropic: "Anthropic Claude" },
         skills: [
           { name: "repo-debug", description: "调试仓库时先运行测试" },
           { name: "code-review", description: "审阅改动，找出缺陷" },
@@ -476,10 +476,18 @@ async function updateRuntime() {
 
 $("send").onclick = async () => {
   if (state.running) return;
-  const prompt = $("prompt").value.trim();
-  if (!prompt && !state.attachments.length) return;
+  const raw = $("prompt").value.trim();
+  if (!raw && !state.attachments.length) return;
+  let outgoing = raw;
+  if (raw) {
+    const cmd = interpretPrompt(raw);
+    if (cmd.handled) { $("prompt").value = ""; autoGrow(); closeSlash(); return; }
+    if (cmd.unknown) { closeSlash(); toast(`未知命令 /${cmd.unknown} —— 输入 / 查看可用命令`); return; }
+    outgoing = cmd.send;
+  }
   $("prompt").value = "";
   autoGrow();
+  closeSlash();
   const attachments = state.attachments;
   state.attachments = [];
   renderAttachments();
@@ -487,12 +495,12 @@ $("send").onclick = async () => {
   setRunning(true);
   try {
     await updateRuntime();
-    const result = await window.pywebview.api.send({ prompt, attachments });
+    const result = await window.pywebview.api.send({ prompt: outgoing, attachments });
     if (!result.ok) throw new Error(result.error || "unknown error");
   } catch (error) {
     setRunning(false);
     addEvent("error", "发送失败", String(error.message || error));
-    $("prompt").value = prompt;
+    $("prompt").value = raw;
     state.attachments = attachments;
     renderAttachments();
     autoGrow();
@@ -571,6 +579,41 @@ function closeSlash() {
   state.slash.open = false;
   const menu = $("slashMenu");
   if (menu) menu.hidden = true;
+}
+
+/* Route a leading-slash message: run app commands locally, expand skill/subagent
+   templates, and BLOCK unknown commands — a bare "/xxx" is never sent raw to the
+   model (which in root/yolo mode could act on it). Path-like text (/etc/hosts) and
+   非命令文本 fall through to a normal send. */
+function interpretPrompt(text) {
+  const match = text.match(/^\/([a-zA-Z][\w-]*)(?:\s+([\s\S]*))?$/);
+  if (!match) return { send: text };
+  const name = match[1].toLowerCase();
+  const rest = (match[2] || "").trim();
+  if (name === "compact") { $("manualCompact").click(); return { handled: true }; }
+  if (name === "new") { $("newSession").click(); return { handled: true }; }
+  if (name === "settings") { $("settingsBtn").click(); return { handled: true }; }
+  if (name === "subagent") {
+    if (!rest) {
+      $("prompt").value = 'Use delegate_agent with name="researcher" task="';
+      $("prompt").focus();
+      autoGrow();
+      return { handled: true };
+    }
+    return { send: `Use delegate_agent with name="researcher" task="${rest}"` };
+  }
+  const skill = (state.skills || []).find((s) => (s.name || "").toLowerCase() === name);
+  if (skill) return { send: rest ? `Use skill ${skill.name}: ${rest}` : `Use skill ${skill.name}: ` };
+  return { unknown: match[1] };
+}
+
+function toast(message) {
+  const el = document.createElement("div");
+  el.className = "toast";
+  el.textContent = message;
+  document.body.append(el);
+  requestAnimationFrame(() => el.classList.add("show"));
+  setTimeout(() => { el.classList.remove("show"); setTimeout(() => el.remove(), 200); }, 2600);
 }
 
 $("prompt").addEventListener("input", () => { autoGrow(); updateSlash(); });
