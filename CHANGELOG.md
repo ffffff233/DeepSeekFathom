@@ -1,5 +1,37 @@
 # 更新记录 / Changelog
 
+## v0.1.55
+
+中文：
+
+- **视觉全面对齐 Codex 桌面端设计体系**（研究了官方 Codex Desktop 前端后重写）：单一石墨灰 `#181818` 底色，浮层 `#212121`；文字用白色 100%/70%/50%/32% 四档透明度分层；边框全部改为 8%/12% 白色发丝线；暗色主按钮改为白底黑字；去掉蓝色渐变 logo、大蓝按钮、彩色状态胶囊和工具卡彩色左边条等所有彩色噪音。
+- **消息布局重做**：用户消息改为右对齐圆角气泡，助手消息为通栏正文，去掉头像行；工具调用折叠行改为 30px 紧凑行高。
+- **输入区重做**：模型/思考/权限/接口选择器、附件、发送/中断按钮全部收进一张浮起的圆角输入卡片（Codex composer 样式）。
+- **修复：中文输入法回车误发送** —— 拼音候选未上屏时按 Enter 不再直接发送（检查 `isComposing`/keyCode 229）。
+- **修复：启动时序竞态** —— 现在等待 `pywebviewready` 事件后再初始化，pywebview 注入 api 慢时不再白屏；浏览器预览超时后才回退演示数据。
+- **修复：会话改名/删除失效** —— `window.prompt/confirm` 在 pywebview 多数后端不可用，改为应用内置对话框。
+- **修复：工具输出串卡** —— 工具完成事件按名称匹配未完成的卡片且完成后复位指针，连续/交错的工具调用不再把输出写进错误的卡片。
+- **修复：流式输出强制滚底** —— 向上翻阅历史时不再被拽回底部，只有停留在底部附近才跟随滚动。
+- **修复：`hidden` 属性被 CSS `display` 覆盖**，中断按钮不再在空闲时显示。
+- **修复：模型输出含 U+2028/U+2029 时事件丢失**（后端 `evaluate_js` JSON 注入转义）。
+- **修复：超长工具输出卡死界面** —— 展示截断至 4 万字符、跳过超大文本的语法高亮，输出区限高滚动。
+- **修复其余小问题**：新对话/恢复会话不重置事件计数与流式状态、`turn:done` 空 sessionId 崩溃、markdown 链接允许 `javascript:`、发送失败不恢复附件、事件流面板无限增长等。
+
+English:
+
+- **Visual system realigned with Codex Desktop** (rewritten after studying the official frontend): single graphite `#181818` background with `#212121` elevated surfaces; text in white at 100/70/50/32% opacity tiers; all borders replaced with 8%/12% white hairlines; dark-mode primary buttons are now white-on-black; removed the blue gradient logo, big blue buttons, colored status pills and colored tool-card edge bars.
+- **Message layout redone**: user messages are right-aligned rounded bubbles, assistant messages full-width prose, avatar rows removed; tool rows use a compact 30px height.
+- **Composer redone**: model/thinking/mode/format selectors, attach, and send/stop now live inside one elevated rounded composer card (Codex style).
+- **Fixed: IME Enter mis-send** — pressing Enter while composing Chinese no longer sends (checks `isComposing`/keyCode 229).
+- **Fixed: startup race** — boot now waits for `pywebviewready`; no more blank UI when api injection is slow; demo data only after a browser-preview timeout.
+- **Fixed: session rename/delete dead** — `window.prompt/confirm` are unavailable in most pywebview backends; replaced with in-app dialogs.
+- **Fixed: tool output landing in the wrong card** — completion events match pending cards by name and reset the pointer afterwards.
+- **Fixed: forced auto-scroll during streaming** — scrolling up is respected; the view only follows when near the bottom.
+- **Fixed: `hidden` attribute overridden by CSS `display`** — the stop button no longer shows while idle.
+- **Fixed: events lost when model output contains U+2028/U+2029** (escaped in the backend `evaluate_js` JSON bridge).
+- **Fixed: huge tool outputs freezing the UI** — display truncated at 40k chars, syntax highlighting skipped for oversized text, output pane capped with its own scroll.
+- **Other fixes**: event counter/stream state now reset on new/resumed sessions, null-sessionId crash in `turn:done`, `javascript:` links blocked in markdown, attachments restored on failed send, event mirror capped at 300 lines.
+
 ## v0.1.54
 
 中文：

@@ -5,12 +5,13 @@ const state = {
   attachments: [],
   events: 0,
   running: false,
+  stickToBottom: true,
 };
 
 const $ = (id) => document.getElementById(id);
 const b64 = (s) => btoa(unescape(encodeURIComponent(s)));
 
-if (!window.pywebview) {
+function installDemoApi() {
   const demoOut = "$ pytest -q\n........                                         [100%]\n8 passed in 0.42s";
   window.pywebview = {
     api: {
@@ -66,11 +67,12 @@ window.DeepSeekDesktop = {
     const { event, payload } = message;
     if (event === "turn:start") {
       setRunning(true);
+      state.stickToBottom = true;
       setSaveState("running", "运行中", "正在执行工具和模型");
       addMessage("user", payload.prompt);
       state.currentAssistant = null;
       state.currentTool = null;
-      addEvent("thinking", "内部思考", `thinking mode: ${payload.thinking}`);
+      addEvent("thinking", "", `thinking mode: ${payload.thinking}`);
     }
     if (event === "assistant:delta") {
       if (!state.currentAssistant) state.currentAssistant = addMessage("assistant", "");
@@ -93,9 +95,10 @@ window.DeepSeekDesktop = {
       state.currentTool = null;
       setRunning(false);
       refreshSessions();
-      $("sessionState").textContent = payload.sessionId.slice(0, 8);
-      setSaveState("saved", "已保存", payload.sessionId);
-      $("composerSession").textContent = payload.sessionId;
+      const sid = String(payload.sessionId || "");
+      $("sessionState").textContent = sid ? sid.slice(0, 8) : "新会话";
+      setSaveState("saved", "已保存", sid || "未保存");
+      $("composerSession").textContent = sid || "未保存";
     }
     if (event === "turn:error") {
       state.currentAssistant = null;
@@ -176,7 +179,8 @@ function setRunning(running) {
 async function refreshModels() {
   const result = await window.pywebview.api.models();
   const models = result.models && result.models.length ? result.models : [state.boot.model];
-  fillSelect("model", models, state.boot.model);
+  const current = $("model").value || state.boot.model;
+  fillSelect("model", models, models.includes(current) ? current : state.boot.model);
   $("apiState").textContent = result.ok ? "模型可用" : "模型列表失败";
 }
 
@@ -194,7 +198,7 @@ async function refreshSessions() {
     row.innerHTML = `
       <button class="sessionMain">
         <span>${escapeHtml(session.title || session.session_id.slice(0, 8))}</span>
-        <small>${session.pinned ? "置顶 · " : ""}${escapeHtml(session.session_id.slice(0, 8))}</small>
+        <small>${escapeHtml(session.session_id.slice(0, 8))}</small>
       </button>
       <div class="sessionActions">
         <button title="${session.pinned ? "取消置顶" : "置顶"}" class="actPin">${session.pinned ? "★" : "☆"}</button>
@@ -203,8 +207,12 @@ async function refreshSessions() {
       </div>`;
     row.querySelector(".sessionMain").onclick = async () => {
       const result = await window.pywebview.api.resume(session.session_id);
+      state.currentAssistant = null;
+      state.currentTool = null;
+      state.stickToBottom = true;
       $("messages").innerHTML = "";
       result.messages.forEach((message) => addMessage(message.role, message.content));
+      scrollMessages(true);
       $("sessionState").textContent = result.sessionId.slice(0, 8);
       setSaveState("saved", "已恢复", result.sessionId);
     };
@@ -215,14 +223,15 @@ async function refreshSessions() {
     };
     row.querySelector(".actRename").onclick = async (e) => {
       e.stopPropagation();
-      const title = prompt("新的会话标题", session.title || "");
+      const title = await uiPrompt("新的会话标题", session.title || "");
       if (!title) return;
       await window.pywebview.api.rename_session(session.session_id, title);
       await refreshSessions();
     };
     row.querySelector(".actDelete").onclick = async (e) => {
       e.stopPropagation();
-      if (!confirm(`删除会话「${session.title || session.session_id.slice(0, 8)}」？此操作不可恢复。`)) return;
+      const ok = await uiConfirm(`删除会话「${session.title || session.session_id.slice(0, 8)}」？此操作不可恢复。`);
+      if (!ok) return;
       await window.pywebview.api.delete_session(session.session_id);
       await refreshSessions();
     };
@@ -283,6 +292,7 @@ function addToolEvent(name, args) {
   if (intro) intro.remove();
   const details = document.createElement("details");
   details.className = "threadEvent tool";
+  details.dataset.tool = name || "";
   details.innerHTML = `
     <summary><span class="eventIcon">⌘</span><span class="evLabel">工具调用</span><strong>${escapeHtml(name || "")}</strong><span class="evStatus">运行中</span><span class="evChevron">›</span></summary>
     <div class="toolBody">
@@ -296,25 +306,34 @@ function addToolEvent(name, args) {
 }
 
 function completeToolEvent(name, output) {
-  const block = state.currentTool || lastToolBlock();
+  let block = state.currentTool;
+  if (!block || block.dataset.done || (name && block.dataset.tool && block.dataset.tool !== name)) {
+    const blocks = Array.from($("messages").querySelectorAll(".threadEvent.tool")).reverse();
+    block = blocks.find((b) => !b.dataset.done && b.dataset.tool === name)
+      || blocks.find((b) => !b.dataset.done)
+      || null;
+  }
   if (!block) {
     addEvent("done", name, output);
     return;
   }
+  block.dataset.done = "1";
+  state.currentTool = null;
   const status = block.querySelector(".evStatus");
   if (status) { status.textContent = "完成"; status.classList.add("ok"); }
   const out = block.querySelector(".toolOut");
   const code = out.querySelector("code");
-  const text = String(output || "").trim();
+  const text = truncateForDisplay(String(output || "").trim());
   code.innerHTML = text ? highlightCode(text, "") : "<span class=\"t-com\">（无输出）</span>";
   out.hidden = false;
   scrollMessages();
   mirror(`[工具完成] ${name || ""} ${(output || "").slice(0, 200)}`);
 }
 
-function lastToolBlock() {
-  const blocks = $("messages").querySelectorAll(".threadEvent.tool");
-  return blocks.length ? blocks[blocks.length - 1] : null;
+const MAX_DISPLAY_CHARS = 40000;
+function truncateForDisplay(text) {
+  if (text.length <= MAX_DISPLAY_CHARS) return text;
+  return text.slice(0, MAX_DISPLAY_CHARS) + `\n…（输出过长，已截断 ${text.length - MAX_DISPLAY_CHARS} 字符）`;
 }
 
 function addEvent(kind, name, detail) {
@@ -335,8 +354,11 @@ function addEvent(kind, name, detail) {
 
 function mirror(line) {
   const def = "工具、思考和子代理事件会显示在这里。";
-  $("eventMirror").textContent = ($("eventMirror").textContent === def ? "" : $("eventMirror").textContent + "\n") + line;
-  $("eventMirror").scrollTop = $("eventMirror").scrollHeight;
+  const box = $("eventMirror");
+  const current = box.textContent === def ? "" : box.textContent;
+  const lines = (current ? current + "\n" : "").concat(line).split("\n");
+  box.textContent = lines.slice(-300).join("\n");
+  box.scrollTop = box.scrollHeight;
 }
 
 function labelFor(kind) {
@@ -353,7 +375,14 @@ function iconFor(kind) {
   }[kind] || "·";
 }
 
-function scrollMessages() { $("messages").scrollTop = $("messages").scrollHeight; }
+function scrollMessages(force = false) {
+  const box = $("messages");
+  if (force || state.stickToBottom) box.scrollTop = box.scrollHeight;
+}
+$("messages").addEventListener("scroll", () => {
+  const box = $("messages");
+  state.stickToBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 80;
+});
 
 function escapeHtml(text) {
   return String(text).replace(/[&<>"']/g, (char) => ({
@@ -397,7 +426,8 @@ function renderMarkdown(src) {
     t = t.replace(/`([^`]+)`/g, (m, c) => `<code class="inline">${c}</code>`);
     t = t.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
     t = t.replace(/(^|[^*])\*([^*]+)\*/g, "$1<em>$2</em>");
-    t = t.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noreferrer">$1</a>');
+    t = t.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (m, label, href) =>
+      /^https?:\/\//i.test(href) ? `<a href="${href}" target="_blank" rel="noreferrer">${label}</a>` : m);
     return t;
   }
 }
@@ -419,10 +449,11 @@ function guessLang(name, args) {
 
 function highlightCode(code, lang) {
   code = String(code);
+  const esc = (s) => s.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+  if (code.length > 60000) return esc(code);
   lang = (lang || "").toLowerCase();
   lang = HL_ALIAS[lang] || lang;
   const kw = new Set(HL_KEYWORDS[lang] || []);
-  const esc = (s) => s.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
   const re = /("""[\s\S]*?"""|'''[\s\S]*?'''|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`)|(#[^\n]*|\/\/[^\n]*|\/\*[\s\S]*?\*\/)|(\b0x[0-9a-fA-F]+\b|\b\d+\.?\d*\b)|([A-Za-z_$][A-Za-z0-9_$]*)/g;
   let out = "", last = 0, m;
   while ((m = re.exec(code))) {
@@ -458,13 +489,19 @@ $("send").onclick = async () => {
   const attachments = state.attachments;
   state.attachments = [];
   renderAttachments();
-  await updateRuntime();
+  state.stickToBottom = true;
   setRunning(true);
-  const result = await window.pywebview.api.send({ prompt, attachments });
-  if (!result.ok) {
+  try {
+    await updateRuntime();
+    const result = await window.pywebview.api.send({ prompt, attachments });
+    if (!result.ok) throw new Error(result.error || "unknown error");
+  } catch (error) {
     setRunning(false);
-    addEvent("error", "发送失败", result.error || "unknown error");
+    addEvent("error", "发送失败", String(error.message || error));
     $("prompt").value = prompt;
+    state.attachments = attachments;
+    renderAttachments();
+    autoGrow();
   }
 };
 
@@ -475,6 +512,8 @@ function autoGrow() {
 }
 $("prompt").addEventListener("input", autoGrow);
 $("prompt").addEventListener("keydown", (event) => {
+  // isComposing / keyCode 229: IME (中文输入法) 候选确认，不能当作发送
+  if (event.isComposing || event.keyCode === 229) return;
   if (event.key === "Enter" && !event.shiftKey) {
     event.preventDefault();
     $("send").click();
@@ -508,6 +547,11 @@ $("saveSettings").onclick = async (event) => {
 };
 $("newSession").onclick = async () => {
   await window.pywebview.api.new_session();
+  state.currentAssistant = null;
+  state.currentTool = null;
+  state.events = 0;
+  state.stickToBottom = true;
+  $("eventCount").textContent = "0";
   $("messages").innerHTML = '<div class="empty intro"><div class="introMark">Fathom</div><h1>新对话已创建</h1><p>输入任务开始。工具调用与输出会内联展开。</p></div>';
   $("eventMirror").textContent = "工具、思考和子代理事件会显示在这里。";
   $("sessionState").textContent = "新会话";
@@ -574,4 +618,51 @@ function renderAttachments() {
   });
 }
 
-boot();
+/* ---------- in-app modal (window.prompt/confirm 在 pywebview 多数后端不可用) ---------- */
+function uiModal({ title, withInput, defaultValue }) {
+  return new Promise((resolve) => {
+    const dialog = document.createElement("dialog");
+    dialog.className = "miniModal";
+    dialog.innerHTML = `
+      <form method="dialog">
+        <p>${escapeHtml(title)}</p>
+        ${withInput ? '<input type="text" autofocus>' : ""}
+        <menu>
+          <button value="cancel" class="ghost">取消</button>
+          <button value="ok" class="primary">确定</button>
+        </menu>
+      </form>`;
+    document.body.append(dialog);
+    const input = dialog.querySelector("input");
+    if (input) input.value = defaultValue || "";
+    dialog.addEventListener("close", () => {
+      const ok = dialog.returnValue === "ok";
+      resolve(withInput ? (ok ? (input.value || "").trim() : null) : ok);
+      dialog.remove();
+    });
+    dialog.showModal();
+    if (input) { input.focus(); input.select(); }
+  });
+}
+const uiPrompt = (title, defaultValue) => uiModal({ title, withInput: true, defaultValue });
+const uiConfirm = (title) => uiModal({ title, withInput: false });
+
+/* ---------- startup: 等待 pywebview 注入 api，浏览器预览时回退到演示数据 ---------- */
+function start() {
+  if (window.__fathomBooted) return;
+  window.__fathomBooted = true;
+  boot().catch((error) => {
+    setSaveState("error", "启动失败", String(error.message || error));
+  });
+}
+if (window.pywebview && window.pywebview.api) {
+  start();
+} else {
+  window.addEventListener("pywebviewready", start);
+  setTimeout(() => {
+    if (!window.__fathomBooted) {
+      if (!window.pywebview) installDemoApi();
+      if (window.pywebview && window.pywebview.api) start();
+    }
+  }, 1500);
+}

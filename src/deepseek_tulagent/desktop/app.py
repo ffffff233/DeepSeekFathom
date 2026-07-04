@@ -216,7 +216,13 @@ class DesktopApi:
         if self.window is None:
             return
         data = json.dumps({"event": event, "payload": payload}, ensure_ascii=False)
-        self.window.evaluate_js(f"window.DeepSeekDesktop.onNativeEvent({data});")
+        # U+2028/U+2029 are valid inside JSON strings but are line terminators in
+        # JS source, which would break evaluate_js and silently drop the event.
+        data = data.replace(" ", "\\u2028").replace(" ", "\\u2029")
+        try:
+            self.window.evaluate_js(f"window.DeepSeekDesktop.onNativeEvent({data});")
+        except Exception:
+            pass
 
 
 def serialize_messages(messages: list[Message]) -> list[dict[str, str]]:
