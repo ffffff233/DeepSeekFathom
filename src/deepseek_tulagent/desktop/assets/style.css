@@ -98,7 +98,7 @@ body {
 .sessionMain span { font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sessionMain small { color: var(--text-4); font-size: 10.5px; font-family: var(--mono); }
 .sessionItem.pinned .sessionMain span::before { content: "☆ "; color: var(--text-4); }
-.sessionActions { display: flex; align-items: center; opacity: 0; transition: opacity .12s; padding-right: 4px; }
+.sessionActions { display: flex; align-items: center; opacity: .5; transition: opacity .12s; padding-right: 4px; }
 .sessionItem:hover .sessionActions { opacity: 1; }
 .sessionActions button { background: none; border: none; color: var(--text-4); cursor: pointer; padding: 0 5px; font-size: 12px; height: 100%; }
 .sessionActions button:hover { color: var(--text); }
@@ -254,7 +254,9 @@ pre.code code { display: block; padding: 12px 14px; font-family: var(--mono); fo
 /* ---------- slash command menu (Codex style) ---------- */
 .slashMenu {
   position: absolute; left: 10px; right: 10px; bottom: calc(100% + 8px);
-  max-height: 300px; overflow-y: auto;
+  /* Cap to the space above the composer so a long list never overflows off the top
+     of the window (where it would be unreachable) — scroll inside instead. */
+  max-height: min(340px, calc(100vh - 130px)); overflow-y: auto;
   background: var(--elevated-2);
   border: 1px solid var(--line-heavy);
   border-radius: var(--r-card);

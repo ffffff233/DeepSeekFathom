@@ -1,5 +1,30 @@
 # 更新记录 / Changelog
 
+## v0.1.59
+
+中文：
+
+- **修复：`/` 菜单显示不全、无法滚动**。菜单从输入框向上弹出，之前固定 `max-height:300px`，
+  在较矮的窗口里顶部会溢出到视口之外、够不到、也滚不动。改为
+  `max-height: min(340px, calc(100vh - 130px))`，始终留在窗口内并内部滚动到全部命令/技能。
+- **会话的置顶 / 改标题 / 删除更易发现**：这三个操作一直都在（每条会话右侧 ★ 置顶、✎ 改名、
+  🗑 删除），但之前要 hover 才显示。现在默认半透明常显、hover 变亮。
+- 说明：**对话标题是自动生成的**——首条消息发送后由 `session_title_from_text` 从内容提取，
+  也可随时用 ✎ 手动改名（改名对话框预填当前标题）。
+
+English:
+
+- **Fixed: `/` menu was cut off and could not scroll.** The menu pops up above the composer;
+  its fixed `max-height:300px` overflowed off the top of the viewport on shorter windows, where
+  the top items were unreachable and unscrollable. Now `max-height: min(340px, calc(100vh - 130px))`
+  keeps it inside the window and scrolls internally through every command/skill.
+- **Session pin / rename / delete are easier to find**: these actions always existed (★ pin, ✎
+  rename, 🗑 delete on the right of each session row) but only appeared on hover. They are now
+  faintly visible by default and brighten on hover.
+- Note: **conversation titles are auto-generated** — `session_title_from_text` derives one from the
+  first message after it's sent, and ✎ lets you rename anytime (the dialog pre-fills the current
+  title).
+
 ## v0.1.58
 
 中文：
