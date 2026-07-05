@@ -1,5 +1,29 @@
 # 更新记录 / Changelog
 
+## v0.1.66
+
+中文：
+
+- **修复（最严重）：切回旧对话后工具调用全变成一串参数**。之前 resume 把「工具调用的助手消息」
+  原样当文本渲染，你看到的就是那段 JSON 参数。现在 `serialize_messages` 会把工具调用还原成
+  **工具卡片**（名称 + 参数 + 配对的输出），并把周围正文拆出来单独显示。
+- **修复：串上下文**。一轮回复结束时，只有当你还停在发起该轮的对话时才把会话指针切过去；
+  如果你中途开了新对话或切到别的对话，旧轮不再把上下文灌进当前对话。
+- **修复：切回对话要点两下才出现「复制/重试/开分支」**。最新一轮的操作按钮改为常显（不再依赖
+  悬停），切回对话立即可见。
+
+English:
+
+- **Fixed (most severe): tool calls turned into a blob of arguments after switching back to a
+  conversation.** Resume rendered the tool-call assistant message as plain text. `serialize_messages`
+  now rebuilds tool calls as **tool cards** (name + args + paired output), splitting any surrounding
+  prose into its own bubble.
+- **Fixed: context bleeding across chats.** When a turn finishes, the session pointer only adopts
+  the result if you're still on the conversation that started it — opening/switching to another
+  chat mid-turn no longer leaks the old turn into the current chat.
+- **Fixed: copy/retry/branch needed two clicks after switching back.** The latest turn's actions are
+  now always visible (no hover), so they appear immediately on resume.
+
 ## v0.1.65
 
 中文：

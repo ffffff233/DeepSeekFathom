@@ -68,7 +68,11 @@ function installDemoApi() {
       }),
       models: async () => ({ ok: true, models: ["deepseek-v4-flash", "deepseek-v4-pro", "gpt-4o"] }),
       sessions: async () => ([{ session_id: "demo-session-0001", title: "检查项目并修复问题", updated_at: "today", pinned: true }]),
-      resume: async (sessionId) => ({ ok: true, sessionId, messages: [{ role: "user", content: "检查项目并修复问题" }, { role: "assistant", content: "已读取项目结构，下一步运行测试。" }] }),
+      resume: async (sessionId) => ({ ok: true, sessionId, messages: [
+        { role: "user", content: "检查项目并修复问题" },
+        { role: "tool", name: "run_shell", detail: "cmd=pytest -q", output: "8 passed in 0.42s" },
+        { role: "assistant", content: "测试通过，仓库状态正常。" },
+      ] }),
       rename_session: async () => ({ ok: true }),
       pin_session: async () => ({ ok: true }),
       delete_session: async () => ({ ok: true }),
@@ -299,7 +303,7 @@ async function refreshSessions() {
       state.currentTool = null;
       state.stickToBottom = true;
       $("messages").innerHTML = "";
-      result.messages.forEach((message) => addMessage(message.role, message.content));
+      result.messages.forEach(replayMessage);
       markMessageActions();
       scrollMessages(true);
       setText("sessionState", result.sessionId.slice(0, 8));
@@ -326,6 +330,26 @@ async function refreshSessions() {
     };
     box.append(row);
   });
+}
+
+// replay a serialized transcript entry: text bubble or a completed tool card
+function replayMessage(entry) {
+  if (entry.role === "tool") {
+    const card = addToolEvent(entry.name, entry.detail);
+    if (card) {
+      card.dataset.done = "1";
+      const status = card.querySelector(".evStatus");
+      if (status) { status.textContent = "完成"; status.classList.add("ok"); }
+      const out = card.querySelector(".toolOut");
+      const code = out.querySelector("code");
+      const text = truncateForDisplay(String(entry.output || "").trim());
+      code.innerHTML = text ? highlightCode(text, "") : '<span class="t-com">（无输出）</span>';
+      out.hidden = false;
+    }
+    state.currentTool = null;
+    return;
+  }
+  addMessage(entry.role, entry.content);
 }
 
 function bumpEventCount() {
@@ -803,7 +827,7 @@ $("manualCompact").onclick = async () => {
     return;
   }
   $("messages").innerHTML = "";
-  result.messages.forEach((message) => addMessage(message.role, message.content));
+  result.messages.forEach(replayMessage);
   addEvent("compact", "手动压缩", `${result.before} -> ${result.after} estimated tokens`);
 };
 $("attach").onclick = () => $("fileInput").click();
@@ -1005,7 +1029,7 @@ async function doBranch() {
     state.currentTool = null;
     state.stickToBottom = true;
     $("messages").innerHTML = "";
-    (result.messages || []).forEach((m) => addMessage(m.role, m.content));
+    (result.messages || []).forEach(replayMessage);
     markMessageActions();
     scrollMessages(true);
     setText("sessionState", String(result.sessionId || "").slice(0, 8));

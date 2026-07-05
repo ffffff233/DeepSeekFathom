@@ -320,6 +320,7 @@ class DesktopApi:
 
     def _run_agent_turn(self, prompt: str) -> None:
         with self._lock:
+            turn_session_id = self.session.session_id if self.session else None
             try:
                 self._emit("turn:start", {"prompt": prompt, "thinking": self.thinking.name})
 
@@ -344,8 +345,13 @@ class DesktopApi:
                     thinking=self.thinking.name,
                     approve=(lambda _n, _a: True) if self.mode in {"root", "yolo"} else self._request_approval,
                 ).run(prompt, stream=True, on_delta=delta, on_final=final, on_event=event, session=self.session)
-                self.session = SessionStore(self.settings.workspace).load(result.session_id)
-                ensure_session_title(self.settings.workspace, self.session)
+                # Only adopt the finished turn's session if the user hasn't switched to a
+                # different conversation meanwhile — otherwise the next send would land in
+                # the OLD conversation (context bleeding across chats).
+                current_id = self.session.session_id if self.session else None
+                if current_id in (turn_session_id, result.session_id):
+                    self.session = SessionStore(self.settings.workspace).load(result.session_id)
+                ensure_session_title(self.settings.workspace, SessionStore(self.settings.workspace).load(result.session_id))
                 self._emit("turn:done", {"sessionId": result.session_id, "rounds": result.rounds})
             except RuntimeError as exc:
                 if str(exc) == "turn cancelled":
@@ -376,16 +382,45 @@ def approval_summary(name: str, arguments: dict[str, Any]) -> str:
     return text[:500] if text else "（无参数）"
 
 
-def serialize_messages(messages: list[Message]) -> list[dict[str, str]]:
-    visible: list[dict[str, str]] = []
+def serialize_messages(messages: list[Message]) -> list[dict[str, Any]]:
+    """Rebuild the desktop transcript from stored messages.
+
+    An assistant message that is a tool call is emitted as a structured tool block
+    (with the surrounding prose split out) and paired with the following TOOL_RESULT /
+    SUBAGENT_RESULT so a resumed conversation shows tool cards instead of raw JSON.
+    """
+    from ..agent import parse_tool_call, strip_tool_call_display, summarize_arguments
+
+    visible: list[dict[str, Any]] = []
+    pending_tool: dict[str, Any] | None = None
     for message in messages:
+        content = message.content
+        if content.startswith(("TOOL_RESULT", "SUBAGENT_RESULT", "USER_ANSWER")):
+            if pending_tool is not None:
+                _, _, body = content.partition("\n")
+                pending_tool["output"] = body
+                pending_tool = None
+            continue
         if message.role not in {"user", "assistant"}:
             continue
-        content = message.content
-        if content.startswith("TOOL_RESULT") or content.startswith("SUBAGENT_RESULT"):
-            continue
+        if message.role == "assistant":
+            tool_call = parse_tool_call(content)
+            if tool_call:
+                name, arguments = tool_call
+                prose = strip_tool_call_display(content)
+                if prose:
+                    visible.append({"role": "assistant", "content": prose})
+                pending_tool = {
+                    "role": "tool",
+                    "name": name,
+                    "detail": summarize_arguments(arguments),
+                    "output": "",
+                }
+                visible.append(pending_tool)
+                continue
+        pending_tool = None
         visible.append({"role": message.role, "content": content})
-    return visible[-40:]
+    return visible[-80:]
 
 
 def ensure_session_title(workspace: Path, session: Session) -> None:
