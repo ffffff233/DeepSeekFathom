@@ -12,6 +12,7 @@ const state = {
   editSrc: null,
   pendingVersions: null,
   models: [],
+  currentSessionId: "",
 };
 
 const $ = (id) => document.getElementById(id);
@@ -173,6 +174,8 @@ window.DeepSeekDesktop = {
       dismissApproval();
       refreshSessions();
       const sid = String(payload.sessionId || "");
+      state.currentSessionId = sid;
+      if (state.boot) state.boot.sessionId = sid;
       setText("sessionState", sid ? sid.slice(0, 8) : "新会话");
       setSaveState("saved", "已保存", sid || "未保存");
       markMessageActions();
@@ -315,6 +318,8 @@ async function refreshSessions() {
       result.messages.forEach(replayMessage);
       markMessageActions();
       scrollMessages(true);
+      state.currentSessionId = result.sessionId;
+      if (state.boot) state.boot.sessionId = result.sessionId;
       setText("sessionState", result.sessionId.slice(0, 8));
       setSaveState("saved", "已恢复", result.sessionId);
     };
@@ -833,6 +838,46 @@ $("newSession").onclick = async () => {
   setSaveState("idle", "新会话", "未保存");
 };
 $("refreshSessions").onclick = refreshSessions;
+
+/* ---------- conversation menu (top-right ⋮ — copy ID / rename / branch / new / delete) ---------- */
+function currentSessionId() {
+  return (state.boot && state.boot.sessionId) || state.currentSessionId || "";
+}
+const convMenu = $("convMenu");
+$("convMenuBtn").onclick = (e) => {
+  e.stopPropagation();
+  convMenu.hidden = !convMenu.hidden;
+};
+document.addEventListener("click", (e) => {
+  if (!convMenu.hidden && !e.target.closest(".convMenuWrap")) convMenu.hidden = true;
+});
+convMenu.addEventListener("click", async (e) => {
+  const item = e.target.closest(".convItem");
+  if (!item) return;
+  convMenu.hidden = true;
+  const act = item.dataset.act;
+  const sid = currentSessionId();
+  if (act === "copyId") {
+    if (!sid) { toast("当前还没有会话 ID（先发一条消息）"); return; }
+    copyToClipboard(sid, null, null, null);
+    toast(`已复制会话 ID：${sid.slice(0, 8)}…`);
+  } else if (act === "rename") {
+    if (!sid) { toast("当前还没有会话"); return; }
+    const title = await uiPrompt("新的会话标题", "");
+    if (title) { await window.pywebview.api.rename_session(sid, title); await refreshSessions(); }
+  } else if (act === "branch") {
+    doBranch();
+  } else if (act === "new") {
+    $("newSession").click();
+  } else if (act === "delete") {
+    if (!sid) { toast("当前还没有会话"); return; }
+    const ok = await uiConfirm("删除当前对话？此操作不可恢复。");
+    if (!ok) return;
+    await window.pywebview.api.delete_session(sid);
+    $("newSession").click();
+    await refreshSessions();
+  }
+});
 $("manualCompact").onclick = async () => {
   const result = await window.pywebview.api.compact();
   if (!result.ok) {
@@ -925,6 +970,7 @@ $("messages").addEventListener("click", (e) => {
 
 function copyToClipboard(text, btn, okLabel, resetLabel) {
   navigator.clipboard.writeText(text).then(() => {
+    if (!btn) return;
     if (okLabel && resetLabel) {
       btn.textContent = okLabel;
       setTimeout(() => (btn.textContent = resetLabel), 1200);

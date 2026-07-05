@@ -1,5 +1,31 @@
 # 更新记录 / Changelog
 
+## v0.1.68
+
+中文：
+
+- **修复：第三方接口老「空返回」**。根因是 Base URL 只填了域名（如 `https://api.hanhegufei.online`）
+  没带 `/v1`，网关返回的是**网页 HTML**（200），流式解析器找不到 `data:` 行就啥都不返回，空结果被
+  当成正常完成。两处修复：① **OpenAI 系（含 DeepSeek）自动补 `/v1`**——只填域名时自动加，不用你手动补；
+  ② 万一仍返回 HTML/非 API 响应，**直接报错提示**（"上游返回的是网页而不是 API 响应…"），不再空返回当成功。
+  已用你给的接口（chat 协议）实测：模型列表、流式、非流式全部正常。
+- **兼容返回 `reasoning_content` 的网关**：非流式回复缺 `content` 键时回退读 `reasoning_content`，不再报错。
+- **顶栏 ⋮ 对话菜单（学 Codex）**：右上角三点菜单——**复制会话 ID**、重命名对话、从最新回复开分支、
+  新建对话、删除对话。
+
+English:
+
+- **Fixed: third-party endpoints kept returning empty.** Root cause: a bare-host Base URL (no `/v1`)
+  hit the gateway's HTML homepage (200); the SSE parser found no `data:` lines and the empty result was
+  treated as a successful empty answer. Two fixes: (1) **auto-append `/v1` for OpenAI-family (incl.
+  DeepSeek)** when only a host is given — no manual `/v1` needed; (2) if an HTML/non-API response still
+  comes back, **raise a clear error** instead of silently returning empty. Verified end-to-end against
+  the provided endpoint (chat protocol): models, streaming, and non-streaming all work.
+- **Tolerate gateways that return `reasoning_content`**: non-stream replies missing `content` fall back
+  to `reasoning_content` instead of erroring.
+- **Top-bar ⋮ conversation menu (Codex-style)**: copy conversation ID, rename, branch from latest reply,
+  new conversation, delete.
+
 ## v0.1.67
 
 中文：

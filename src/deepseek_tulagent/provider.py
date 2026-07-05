@@ -46,6 +46,31 @@ def normalize_format(value: str | None) -> str:
     return FORMAT_ALIASES.get((value or "deepseek").strip().lower(), "deepseek")
 
 
+def _has_path(base_url: str) -> bool:
+    """True if the URL has a real path beyond the host (so we shouldn't append /v1)."""
+    from urllib.parse import urlparse
+
+    try:
+        path = urlparse(base_url).path.strip("/")
+    except Exception:
+        return True
+    return bool(path)
+
+
+def guard_api_content_type(response: httpx.Response, *, streaming: bool) -> None:
+    """Reject non-API responses (e.g. a gateway's HTML homepage returned with 200).
+
+    Without this, an HTML body has no SSE `data:` lines / JSON, so streaming yields
+    nothing and the empty result is silently treated as a valid empty answer.
+    """
+    ctype = response.headers.get("content-type", "").lower()
+    if "text/html" in ctype:
+        raise RuntimeError(
+            "上游返回的是网页而不是 API 响应（Base URL 可能指向了网关首页）。"
+            "请检查接口地址是否正确。"
+        )
+
+
 class DeepSeekClient:
     """OpenAI/DeepSeek/Anthropic/Gemini chat client.
 
@@ -75,9 +100,15 @@ class DeepSeekClient:
         # Fall back to the family default when the base is empty or still the DeepSeek
         # default but the selected family is something else.
         if self.format in DEFAULT_BASE_URLS and (not base or base == _DEEPSEEK_DEFAULT):
-            return DEFAULT_BASE_URLS[self.format]
-        if not base:
-            return _DEEPSEEK_DEFAULT
+            base = DEFAULT_BASE_URLS[self.format]
+        elif not base:
+            base = _DEEPSEEK_DEFAULT
+        # OpenAI-compatible gateways (incl. DeepSeek) serve the API under /v1. If the user
+        # gave a bare host with no path, auto-append /v1 so we don't hit the gateway's
+        # website (which returns HTML → silent empty responses). Anthropic/Gemini build
+        # their own version paths, so leave those alone.
+        if self.format in {"openai", "openai-responses", "deepseek"} and not _has_path(base):
+            base = base + "/v1"
         return base
 
     def _output_tokens(self) -> int:
@@ -146,9 +177,12 @@ class DeepSeekClient:
         if not stream:
             response = self._http().post(url, headers=headers, json=payload)
             raise_for_status_with_body(response)
+            guard_api_content_type(response, streaming=False)
             data = response.json()
             try:
-                return data["choices"][0]["message"]["content"] or ""
+                message = data["choices"][0]["message"]
+                # some gateways omit "content" when the text went to reasoning_content
+                return message.get("content") or message.get("reasoning_content") or ""
             except (KeyError, IndexError, TypeError) as exc:
                 compact = json.dumps(data, ensure_ascii=False)[:1000]
                 raise RuntimeError(f"Unexpected response: {compact}") from exc
@@ -157,6 +191,7 @@ class DeepSeekClient:
     def _openai_stream(self, url: str, headers: dict, payload: dict) -> Iterator[str]:
         with self._http().stream("POST", url, headers=headers, json=payload) as response:
             raise_for_status_with_body(response)
+            guard_api_content_type(response, streaming=True)
             for line in response.iter_lines():
                 if not line or not line.startswith("data: "):
                     continue
@@ -179,6 +214,7 @@ class DeepSeekClient:
         with httpx.Client(timeout=30.0) as client:
             response = client.get(url, headers=headers)
             response.raise_for_status()
+            guard_api_content_type(response, streaming=False)
         data = response.json()
         return [item["id"] for item in data.get("data", []) if isinstance(item, dict) and "id" in item]
 
@@ -202,6 +238,7 @@ class DeepSeekClient:
         if not stream:
             response = self._http().post(url, headers=headers, json=payload)
             raise_for_status_with_body(response)
+            guard_api_content_type(response, streaming=False)
             data = response.json()
             text = data.get("output_text")
             if isinstance(text, str) and text:
@@ -221,6 +258,7 @@ class DeepSeekClient:
     def _responses_stream(self, url: str, headers: dict, payload: dict) -> Iterator[str]:
         with self._http().stream("POST", url, headers=headers, json=payload) as response:
             raise_for_status_with_body(response)
+            guard_api_content_type(response, streaming=True)
             for line in response.iter_lines():
                 if not line or not line.startswith("data:"):
                     continue
@@ -292,6 +330,7 @@ class DeepSeekClient:
         with httpx.Client(timeout=30.0) as client:
             response = client.get(url, headers=headers)
             response.raise_for_status()
+            guard_api_content_type(response, streaming=False)
         data = response.json()
         return [item["id"] for item in data.get("data", []) if isinstance(item, dict) and "id" in item]
 

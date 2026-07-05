@@ -40,6 +40,16 @@
         <div class="toolbarActions">
           <span id="workspace" class="workspace"></span>
           <button id="manualCompact" class="ghost small" title="压缩上下文">压缩</button>
+          <div class="convMenuWrap">
+            <button id="convMenuBtn" class="railBtn" title="对话操作" aria-label="对话操作"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="1.4" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="12" cy="19" r="1.4" fill="currentColor" stroke="none"/></svg></button>
+            <div id="convMenu" class="convMenu" hidden>
+              <button class="convItem" data-act="copyId">复制会话 ID</button>
+              <button class="convItem" data-act="rename">重命名对话</button>
+              <button class="convItem" data-act="branch">从最新回复开分支</button>
+              <button class="convItem" data-act="new">新建对话</button>
+              <button class="convItem danger" data-act="delete">删除对话</button>
+            </div>
+          </div>
           <button id="settingsBtn" class="ghost">设置</button>
         </div>
       </header>
