@@ -125,11 +125,19 @@ window.DeepSeekDesktop = {
       scrollMessages();
     }
     if (event === "assistant:final") {
-      // replace the streamed text with the cleaned final answer
+      // replace the streamed text with the cleaned final answer; empty text means the
+      // streamed content was actually a tool call — remove the bubble entirely
+      const text = payload.text || "";
+      if (!text.trim()) {
+        if (state.currentAssistant) { state.currentAssistant.remove(); state.currentAssistant = null; }
+        return;
+      }
       if (!state.currentAssistant) state.currentAssistant = addMessage("assistant", "");
       const bubble = state.currentAssistant.querySelector(".bubble");
-      bubble.dataset.raw = payload.text || "";
+      bubble.dataset.raw = text;
       renderBubble(bubble);
+      // a tool call may follow in this same turn — let the next delta open a new bubble
+      state.currentAssistant = null;
       scrollMessages();
     }
     if (event === "agent:event") {
@@ -340,7 +348,7 @@ function addToolEvent(name, args) {
   details.innerHTML = `
     <summary><span class="eventIcon">${icon("terminal")}</span><span class="evLabel">工具调用</span><strong>${escapeHtml(name || "")}</strong><span class="evStatus">运行中</span><span class="evChevron">${icon("chevron", 13)}</span></summary>
     <div class="toolBody">
-      <div class="toolSection toolCall"><div class="secLabel">调用</div><pre><code>${highlightCode(String(args || "").trim(), guessLang(name, args))}</code></pre></div>
+      <div class="toolSection toolCall"><div class="secLabel">调用</div><pre><code>${String(args || "").trim() ? highlightCode(String(args).trim(), guessLang(name, args)) : '<span class="t-com">（无参数）</span>'}</code></pre></div>
       <div class="toolSection toolOut" hidden><div class="secLabel">输出</div><pre><code></code></pre></div>
     </div>`;
   $("messages").append(details);

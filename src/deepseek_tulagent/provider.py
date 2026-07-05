@@ -379,8 +379,44 @@ def raise_for_status_with_body(response: httpx.Response) -> None:
     try:
         response.raise_for_status()
     except httpx.HTTPStatusError as exc:
-        body = response.text[:1000]
-        raise RuntimeError(f"API error {response.status_code}: {body}") from exc
+        # Streaming responses haven't read the body yet — reading .text would raise
+        # httpx.ResponseNotRead and mask the real upstream error. Read it first.
+        try:
+            body = response.text
+        except httpx.ResponseNotRead:
+            try:
+                response.read()
+                body = response.text
+            except Exception:
+                body = "<unreadable body>"
+        body = (body or "").strip()[:1000]
+        detail = extract_error_message(body)
+        raise RuntimeError(f"API error {response.status_code}: {detail or body or response.reason_phrase}") from exc
+
+
+def extract_error_message(body: str) -> str:
+    """Pull the human-readable message out of provider error JSON if present.
+
+    Handles OpenAI/DeepSeek ({"error":{"message":...}}), Anthropic
+    ({"error":{"message":...}} / {"type":"error",...}) and Gemini
+    ({"error":{"message":...,"status":...}}) shapes.
+    """
+    try:
+        data = json.loads(body)
+    except (json.JSONDecodeError, TypeError):
+        return ""
+    if isinstance(data, list) and data:
+        data = data[0]
+    if not isinstance(data, dict):
+        return ""
+    err = data.get("error")
+    if isinstance(err, dict):
+        message = err.get("message") or err.get("msg") or ""
+        code = err.get("code") or err.get("status") or err.get("type") or ""
+        return f"{message}" + (f" ({code})" if code and message else "")
+    if isinstance(err, str):
+        return err
+    return str(data.get("message") or "")
 
 
 def apply_thinking_payload(payload: dict, settings: Settings) -> None:

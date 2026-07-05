@@ -141,13 +141,13 @@ class TuLAgent:
                 parts: list[str] = []
                 held_parts: list[str] = []
                 # Live streaming to the UI is only enabled when on_final is provided
-                # (desktop). We buffer until should_hold_stream_output says the text no
-                # longer looks like a tool call, then emit deltas incrementally; on_final
-                # replaces the streamed text with the cleaned final answer at the end.
+                # (desktop). Deltas are emitted only up to a "safe" boundary: any tail
+                # that looks like the start of a tool call (a line starting with '{' or
+                # a code fence) is held back so tool JSON never leaks into the chat as
+                # prose. on_final replaces the streamed text at the end either way.
                 # Callers with on_delta only (CLI/TUI) keep the buffer-then-flush behavior.
                 stream_live = on_final is not None
                 emitted = 0
-                holding = True
                 for delta in self.client.stream_chat(model_messages):
                     if should_cancel and should_cancel():
                         raise RuntimeError("turn cancelled")
@@ -155,11 +155,12 @@ class TuLAgent:
                     held_parts.append(delta)
                     if stream_live and on_delta:
                         joined = "".join(parts)
-                        if holding and not should_hold_stream_output(joined):
-                            holding = False
-                        if not holding:
-                            on_delta(joined[emitted:])
-                            emitted = len(joined)
+                        if should_hold_stream_output(joined):
+                            continue
+                        safe = safe_stream_emit_length(joined)
+                        if safe > emitted:
+                            on_delta(joined[emitted:safe])
+                            emitted = safe
                 assistant_text = "".join(parts)
             else:
                 assistant_text = self.client.chat(model_messages)
@@ -186,6 +187,11 @@ class TuLAgent:
                     continue
                 final_answer = assistant_text
                 break
+            # Tool call detected. If any text already streamed to the UI, replace it
+            # with the prose around the tool JSON (or clear it) so the raw call never
+            # stays visible as an assistant message.
+            if stream and on_final is not None:
+                on_final(strip_tool_call_display(assistant_text))
             session.append(Message("assistant", assistant_text))
             last_turn_had_tool_result = False
             last_turn_had_tool_error = False
@@ -616,6 +622,62 @@ def should_hold_stream_output(text: str) -> bool:
     if any(stripped.startswith(prefix) for prefix in tool_prefixes):
         return len(stripped) < 32000
     return False
+
+
+def safe_stream_emit_length(text: str) -> int:
+    """How much of a streaming buffer is safe to show without leaking a tool call.
+
+    A line starting with '{' or a code fence may be the beginning of a tool call the
+    model appends after prose. Hold everything from the last such opener back unless
+    it's clearly finished and NOT a tool call (closed fence with non-tool content /
+    complete JSON that doesn't normalize to a tool).
+    """
+    last = None
+    for match in re.finditer(r"(?m)^[ \t]*(\{|```)", text):
+        last = match
+    if last is None:
+        return len(text)
+    start = last.start()
+    segment = text[start:].strip()
+    if segment.startswith("```"):
+        if segment.count("```") >= 2:  # fence closed
+            inner = re.sub(r"^```[\w-]*\s*|\s*```.*$", "", segment, flags=re.DOTALL).strip()
+            if inner.startswith("{"):
+                try:
+                    if normalize_tool_call(json.loads(inner)):
+                        return start
+                except json.JSONDecodeError:
+                    return start
+            return len(text)
+        return start
+    try:
+        data = json.loads(segment)
+    except json.JSONDecodeError:
+        return start  # incomplete JSON — keep holding
+    return start if normalize_tool_call(data) else len(text)
+
+
+def strip_tool_call_display(text: str) -> str:
+    """Remove tool-call JSON/blocks from assistant text, keeping surrounding prose."""
+    def _drop_if_tool(candidate: str, whole: str) -> str:
+        try:
+            if normalize_tool_call(json.loads(candidate)):
+                return ""
+        except json.JSONDecodeError:
+            pass
+        return whole
+
+    out = re.sub(
+        r"```(?:json)?\s*(\{.*?\})\s*```",
+        lambda m: _drop_if_tool(m.group(1), m.group(0)),
+        text,
+        flags=re.DOTALL,
+    )
+    for candidate in extract_json_objects(out):
+        cleaned = _drop_if_tool(candidate, candidate)
+        if cleaned == "":
+            out = out.replace(candidate, "", 1)
+    return plainify_assistant_text(out).strip()
 
 
 def compact_context_messages(
