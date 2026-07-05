@@ -187,7 +187,9 @@ body.is-running .pulse { animation: pulseDot 1s ease-in-out infinite; }
 .msgAct:hover { background: var(--hover); color: var(--text-2); }
 .msgAct.copied { color: var(--ok); }
 .msgAct.retry, .msgAct.edit, .msgAct.branch { display: none; }
-.message.canRetry .msgAct.retry, .message.canRetry .msgAct.branch, .message.canEdit .msgAct.edit { display: inline-grid; }
+/* every assistant offers retry+branch, every user offers edit (revealed on hover) */
+.message.assistant .msgAct.retry, .message.assistant .msgAct.branch { display: inline-grid; }
+.message.user .msgAct.edit { display: inline-grid; }
 
 /* retry version pager: ‹ i/n › */
 .versionPager { display: inline-flex; align-items: center; gap: 2px; margin-right: 4px; color: var(--text-4); font-size: 11px; font-family: var(--mono); }

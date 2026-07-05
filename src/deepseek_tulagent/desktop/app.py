@@ -110,9 +110,15 @@ class DesktopApi:
             value = data.get(source)
             if isinstance(value, str) and value.strip():
                 config[target] = value.strip().rstrip("/") if source == "baseUrl" else value.strip()
+        # keep the currently-selected model across the reload — get_settings() would
+        # otherwise reset it to the file default (deepseek-v4-flash) every time the user
+        # changes provider or saves settings.
+        keep_model = self.settings.model
         merge_file_config(config)
         self.settings = get_settings()
-        self.mode = self.settings.default_mode
+        if "model" not in config and keep_model:
+            self.settings = self.settings.with_runtime(model=keep_model)
+        self.mode = coerce_permission_tier(self.settings.default_mode)
         self.thinking = ThinkingMode.resolve(self.settings.default_thinking)
         return self.boot()
 
@@ -207,16 +213,19 @@ class DesktopApi:
         thread.start()
         return {"ok": True}
 
-    def _truncate_to_last_user(self) -> str | None:
-        """Drop the last user turn and everything after it; return that user prompt.
+    def _truncate_to_last_user(self, before_index: int | None = None) -> str | None:
+        """Drop a user turn and everything after it; return that user prompt.
 
+        With before_index, target the user message at/nearest-before that transcript
+        index (for retry/edit on any message); otherwise the last user message.
         Skips tool-result / subagent-result messages (which also carry role 'user').
         Rewrites the session log so a fresh turn appends cleanly.
         """
         if self.session is None:
             return None
         messages = self.session.messages
-        for i in range(len(messages) - 1, -1, -1):
+        start = len(messages) - 1 if before_index is None else min(before_index, len(messages) - 1)
+        for i in range(start, -1, -1):
             message = messages[i]
             if message.role == "user" and not message.content.startswith(("TOOL_RESULT", "SUBAGENT_RESULT")):
                 prompt = message.content
@@ -225,19 +234,27 @@ class DesktopApi:
                 return prompt
         return None
 
-    def retry(self) -> dict[str, Any]:
-        """Regenerate the last assistant answer for the same last user message."""
+    def _user_index_for(self, src_index: int | None) -> int | None:
+        """Given a transcript index (any message), return the index to truncate at
+        for a retry/edit: the user message at/just before src_index."""
+        if self.session is None or src_index is None:
+            return None
+        return min(src_index, len(self.session.messages) - 1)
+
+    def retry(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Regenerate the answer for a user message (the one at srcIndex, or the last)."""
         if self._running:
             return {"ok": False, "error": "turn already running"}
         if self.session is None:
             return {"ok": False, "error": "no active session"}
-        prompt = self._truncate_to_last_user()
+        src = payload.get("srcIndex") if isinstance(payload, dict) else None
+        prompt = self._truncate_to_last_user(self._user_index_for(src))
         if prompt is None:
             return {"ok": False, "error": "no user message to retry"}
         return self._start_turn(prompt)
 
     def edit_resend(self, payload: dict[str, Any]) -> dict[str, Any]:
-        """Branch: replace the last user message with edited text and re-run."""
+        """Branch: replace a user message (at srcIndex, or the last) with edited text."""
         if self._running:
             return {"ok": False, "error": "turn already running"}
         if self.session is None:
@@ -245,21 +262,25 @@ class DesktopApi:
         text = str(payload.get("prompt") or "").strip()
         if not text:
             return {"ok": False, "error": "empty prompt"}
-        self._truncate_to_last_user()
+        self._truncate_to_last_user(self._user_index_for(payload.get("srcIndex")))
         return self._start_turn(text)
 
-    def branch(self) -> dict[str, Any]:
-        """Fork a new session from the last assistant reply (Codex-style branch).
+    def branch(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Fork a new session from an assistant reply (Codex-style branch).
 
-        History up to and including the latest assistant message is copied into a new
-        session; the original conversation is left untouched.
+        History up to and including the assistant message (at srcIndex, or the latest)
+        is copied into a new session; the original conversation is left untouched.
         """
         if self._running:
             return {"ok": False, "error": "turn already running"}
         if self.session is None:
             return {"ok": False, "error": "no active session"}
         messages = self.session.messages
-        idx = next((i for i in range(len(messages) - 1, -1, -1) if messages[i].role == "assistant"), None)
+        src = payload.get("srcIndex") if isinstance(payload, dict) else None
+        if src is not None and 0 <= src < len(messages):
+            idx = src
+        else:
+            idx = next((i for i in range(len(messages) - 1, -1, -1) if messages[i].role == "assistant"), None)
         if idx is None:
             return {"ok": False, "error": "no assistant message to branch from"}
         forked = Session(self.settings.workspace)
@@ -393,7 +414,7 @@ def serialize_messages(messages: list[Message]) -> list[dict[str, Any]]:
 
     visible: list[dict[str, Any]] = []
     pending_tool: dict[str, Any] | None = None
-    for message in messages:
+    for idx, message in enumerate(messages):
         content = message.content
         if content.startswith(("TOOL_RESULT", "SUBAGENT_RESULT", "USER_ANSWER")):
             if pending_tool is not None:
@@ -409,18 +430,19 @@ def serialize_messages(messages: list[Message]) -> list[dict[str, Any]]:
                 name, arguments = tool_call
                 prose = strip_tool_call_display(content)
                 if prose:
-                    visible.append({"role": "assistant", "content": prose})
+                    visible.append({"role": "assistant", "content": prose, "srcIndex": idx})
                 pending_tool = {
                     "role": "tool",
                     "name": name,
                     "detail": summarize_arguments(arguments),
                     "output": "",
+                    "srcIndex": idx,
                 }
                 visible.append(pending_tool)
                 continue
         pending_tool = None
-        visible.append({"role": message.role, "content": content})
-    return visible[-80:]
+        visible.append({"role": message.role, "content": content, "srcIndex": idx})
+    return visible[-120:]
 
 
 def ensure_session_title(workspace: Path, session: Session) -> None:

@@ -9,7 +9,9 @@ const state = {
   skills: [],
   slash: { open: false, items: [], index: 0 },
   editing: false,
+  editSrc: null,
   pendingVersions: null,
+  models: [],
 };
 
 const $ = (id) => document.getElementById(id);
@@ -215,9 +217,8 @@ async function boot() {
   fillSelect("thinking", state.boot.thinkingModes, state.boot.thinking, state.boot.thinkingLabels || {});
   fillSelect("format", state.boot.compatFormats, state.boot.providerFormat || "deepseek", labels);
   fillSelect("providerFormat", state.boot.compatFormats, state.boot.providerFormat || "deepseek", labels);
-  fillSelect("model", [state.boot.model], state.boot.model);
-  updateModeHelp();
-  $("baseUrl").value = state.boot.baseUrl || "";
+  fillSelect("model", ensureIncludes((state.models && state.models.length ? state.models : [state.boot.model]), state.boot.model), state.boot.model);
+  updateModeHelp();  $("baseUrl").value = state.boot.baseUrl || "";
   state.skills = state.boot.skills || [];
   await refreshModels();
   await refreshSessions();
@@ -261,19 +262,27 @@ function setRunning(running) {
 
 async function refreshModels() {
   const result = await window.pywebview.api.models();
-  const models = result.models && result.models.length ? result.models : [state.boot.model];
-  const current = $("model").value || state.boot.model;
-  if (result.ok && models.length && !models.includes(current)) {
-    // stale model from another provider — switch to this provider's first model
-    // instead of silently keeping a name the API will reject
-    fillSelect("model", models, models[0]);
+  const fetched = result.ok && result.models && result.models.length ? result.models : [];
+  // cache the last good full list so it never collapses to a single fallback item
+  if (fetched.length) state.models = fetched;
+  const list = (state.models && state.models.length) ? state.models.slice() : [state.boot.model];
+  let current = $("model").value || state.boot.model;
+  if (fetched.length && !fetched.includes(current)) {
+    // model isn't offered by this provider — pick the provider's first, then persist
+    current = fetched[0];
+    fillSelect("model", ensureIncludes(list, current), current);
     setText("apiState", "模型可用");
     await updateRuntime();
-    toast(`模型已切换为 ${models[0]}`);
+    toast(`模型已切换为 ${current}`);
     return;
   }
-  fillSelect("model", models, models.includes(current) ? current : state.boot.model);
-  setText("apiState", result.ok ? "模型可用" : "模型列表失败");
+  fillSelect("model", ensureIncludes(list, current), current);
+  setText("apiState", result.ok ? "模型可用" : "模型列表暂不可用（沿用上次列表）");
+}
+
+// keep the current model in the option list even if the fetched list omits it
+function ensureIncludes(list, value) {
+  return value && !list.includes(value) ? [value].concat(list) : list;
 }
 
 async function refreshSessions() {
@@ -349,7 +358,7 @@ function replayMessage(entry) {
     state.currentTool = null;
     return;
   }
-  addMessage(entry.role, entry.content);
+  addMessage(entry.role, entry.content, entry.srcIndex);
 }
 
 function bumpEventCount() {
@@ -357,17 +366,18 @@ function bumpEventCount() {
   setText("eventCount", String(state.events));
 }
 
-function addMessage(role, content) {
+function addMessage(role, content, srcIndex) {
   const empty = document.querySelector(".empty, .intro");
   if (empty) empty.remove();
   const row = document.createElement("div");
   row.className = `message ${role}`;
+  if (srcIndex !== undefined && srcIndex !== null) row.dataset.src = String(srcIndex);
   const avatar = role === "user" ? "你" : "F";
   const name = role === "user" ? "You" : "Fathom";
   row.innerHTML = `<div class="msgHead"><span class="avatar ${role}">${avatar}</span><span class="who">${name}</span></div><div class="bubble ${role}"></div>` +
     `<div class="msgActions">` +
     `<button class="msgAct copy" title="复制">${icon("copy", 13)}</button>` +
-    (role === "assistant" ? `<button class="msgAct retry" title="重试">${icon("refresh", 13)}</button><button class="msgAct branch" title="从这里开分支">${icon("branch", 13)}</button>` : "") +
+    (role === "assistant" ? `<button class="msgAct retry" title="重试（重新生成，丢弃其后内容）">${icon("refresh", 13)}</button><button class="msgAct branch" title="从这里开分支">${icon("branch", 13)}</button>` : "") +
     (role === "user" ? `<button class="msgAct edit" title="编辑并重发（分支）">${icon("edit", 13)}</button>` : "") +
     `</div>`;
   const bubble = row.querySelector(".bubble");
@@ -628,11 +638,13 @@ $("send").onclick = async () => {
   state.stickToBottom = true;
   setRunning(true);
   const editing = state.editing;
+  const editSrc = state.editSrc;
   state.editing = false;
+  state.editSrc = null;
   try {
     await updateRuntime();
     const result = editing
-      ? await window.pywebview.api.edit_resend({ prompt: outgoing })
+      ? await window.pywebview.api.edit_resend(editSrc != null ? { prompt: outgoing, srcIndex: editSrc } : { prompt: outgoing })
       : await window.pywebview.api.send({ prompt: outgoing, attachments });
     if (!result.ok) throw new Error(result.error || "unknown error");
   } catch (error) {
@@ -785,7 +797,8 @@ $("cancel").onclick = async () => {
   await window.pywebview.api.cancel();
 };
 
-["model", "thinking", "mode"].forEach((id) => $(id).addEventListener("change", updateRuntime));
+["thinking", "mode"].forEach((id) => $(id).addEventListener("change", updateRuntime));
+$("model").addEventListener("change", updateRuntime);
 $("mode").addEventListener("change", updateModeHelp);
 $("format").addEventListener("change", async () => {
   $("providerFormat").value = $("format").value;
@@ -903,10 +916,11 @@ $("messages").addEventListener("click", (e) => {
   if (!act) return;
   const msg = act.closest(".message");
   const raw = msg.querySelector(".bubble").dataset.raw || "";
+  const src = msg.dataset.src !== undefined ? Number(msg.dataset.src) : null;
   if (act.classList.contains("copy")) copyToClipboard(raw, act, null, null);
-  else if (act.classList.contains("retry")) doRetry();
-  else if (act.classList.contains("branch")) doBranch();
-  else if (act.classList.contains("edit")) doEdit(raw);
+  else if (act.classList.contains("retry")) doRetry(src);
+  else if (act.classList.contains("branch")) doBranch(src);
+  else if (act.classList.contains("edit")) doEdit(raw, src, msg);
 });
 
 function copyToClipboard(text, btn, okLabel, resetLabel) {
@@ -965,23 +979,41 @@ function dismissApproval() {
   });
 }
 
-async function doRetry() {
-  if (state.running) return;
-  // keep the answer being replaced so the version pager (‹ ›) can flip back to it
-  const box = $("messages");
-  const assistants = box.querySelectorAll(".message.assistant");
-  if (assistants.length) {
-    const bubble = assistants[assistants.length - 1].querySelector(".bubble");
-    let versions = [];
-    try { versions = JSON.parse(assistants[assistants.length - 1].dataset.versions || "[]"); } catch (_) {}
-    state.pendingVersions = versions.concat([bubble.dataset.raw || ""]);
+// remove an element and every sibling after it
+function removeElAndAfter(el) {
+  let node = el;
+  while (node) { const next = node.nextSibling; node.remove(); node = next; }
+}
+
+// for retrying/editing an assistant/user message: strip back to (and including) the
+// user message that starts that turn, so the regenerated turn replaces it cleanly
+function removeTurnFrom(msg) {
+  let anchor = msg;
+  if (msg.classList.contains("assistant")) {
+    let p = msg.previousElementSibling;
+    while (p && !(p.classList && p.classList.contains("message") && p.classList.contains("user"))) p = p.previousElementSibling;
+    if (p) anchor = p;
   }
-  removeLastExchange();
+  removeElAndAfter(anchor);
+  state.currentAssistant = null;
+  state.currentTool = null;
+}
+
+async function doRetry(src) {
+  if (state.running) return;
+  const msg = src != null ? $("messages").querySelector(`.message.assistant[data-src="${src}"]`) : null;
+  const target = msg || [...$("messages").querySelectorAll(".message.assistant")].pop();
+  if (!target) return;
+  // capture the answer being replaced so the version pager (‹ ›) can flip back
+  let versions = [];
+  try { versions = JSON.parse(target.dataset.versions || "[]"); } catch (_) {}
+  state.pendingVersions = versions.concat([target.querySelector(".bubble").dataset.raw || ""]);
+  removeTurnFrom(target);
   state.stickToBottom = true;
   setRunning(true);
   try {
     await updateRuntime();
-    const result = await window.pywebview.api.retry();
+    const result = await window.pywebview.api.retry(src != null ? { srcIndex: src } : {});
     if (!result.ok) throw new Error(result.error || "unknown error");
   } catch (error) {
     setRunning(false);
@@ -1020,10 +1052,10 @@ function attachVersionPager(msg) {
   msg.querySelector(".msgActions").prepend(pager);
 }
 
-async function doBranch() {
+async function doBranch(src) {
   if (state.running) return;
   try {
-    const result = await window.pywebview.api.branch();
+    const result = await window.pywebview.api.branch(src != null ? { srcIndex: src } : {});
     if (!result.ok) throw new Error(result.error || "unknown error");
     state.currentAssistant = null;
     state.currentTool = null;
@@ -1041,16 +1073,17 @@ async function doBranch() {
   }
 }
 
-function doEdit(text) {
+function doEdit(text, src, msg) {
   if (state.running) return;
-  removeLastExchange();
+  removeTurnFrom(msg || [...$("messages").querySelectorAll(".message.user")].pop());
   state.editing = true;
+  state.editSrc = src != null ? src : null;
   $("prompt").value = text;
   autoGrow();
   $("prompt").focus();
 }
 
-// mark the latest user/assistant messages so their edit/retry actions show
+// mark the latest turn so its actions stay visible without hover (others hover-reveal)
 function markMessageActions() {
   const box = $("messages");
   box.querySelectorAll(".canRetry, .canEdit").forEach((m) => m.classList.remove("canRetry", "canEdit"));
