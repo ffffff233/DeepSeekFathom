@@ -8,6 +8,7 @@ const state = {
   stickToBottom: true,
   skills: [],
   slash: { open: false, items: [], index: 0 },
+  editing: false,
 };
 
 const $ = (id) => document.getElementById(id);
@@ -28,6 +29,8 @@ const ICONS = {
   alert: '<path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
   sparkle: '<path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/>',
   chevron: '<path d="M9 6l6 6-6 6"/>',
+  copy: '<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
+  refresh: '<path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 4v5h-5"/>',
 };
 function icon(name, size = 14) {
   return `<svg class="ic" viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name] || ""}</svg>`;
@@ -84,6 +87,20 @@ function installDemoApi() {
         return { ok: true };
       },
       cancel: async () => ({ ok: true }),
+      retry: async () => {
+        const D = window.DeepSeekDesktop;
+        setTimeout(() => D.onNativeEvent({ event: "turn:start", payload: { prompt: "检查项目并修复问题", thinking: $("thinking").value } }), 40);
+        setTimeout(() => D.onNativeEvent({ event: "assistant:final", payload: { text: "这是重试后的新回答。" } }), 320);
+        setTimeout(() => D.onNativeEvent({ event: "turn:done", payload: { sessionId: "demo-session-0001", rounds: 1 } }), 420);
+        return { ok: true };
+      },
+      edit_resend: async ({ prompt }) => {
+        const D = window.DeepSeekDesktop;
+        setTimeout(() => D.onNativeEvent({ event: "turn:start", payload: { prompt, thinking: $("thinking").value } }), 40);
+        setTimeout(() => D.onNativeEvent({ event: "assistant:final", payload: { text: "已按编辑后的问题重新回答。" } }), 320);
+        setTimeout(() => D.onNativeEvent({ event: "turn:done", payload: { sessionId: "demo-session-0001", rounds: 1 } }), 420);
+        return { ok: true };
+      },
     },
   };
 }
@@ -132,6 +149,7 @@ window.DeepSeekDesktop = {
       const sid = String(payload.sessionId || "");
       setText("sessionState", sid ? sid.slice(0, 8) : "新会话");
       setSaveState("saved", "已保存", sid || "未保存");
+      markMessageActions();
     }
     if (event === "turn:error") {
       state.currentAssistant = null;
@@ -248,6 +266,7 @@ async function refreshSessions() {
       state.stickToBottom = true;
       $("messages").innerHTML = "";
       result.messages.forEach((message) => addMessage(message.role, message.content));
+      markMessageActions();
       scrollMessages(true);
       setText("sessionState", result.sessionId.slice(0, 8));
       setSaveState("saved", "已恢复", result.sessionId);
@@ -287,7 +306,12 @@ function addMessage(role, content) {
   row.className = `message ${role}`;
   const avatar = role === "user" ? "你" : "F";
   const name = role === "user" ? "You" : "Fathom";
-  row.innerHTML = `<div class="msgHead"><span class="avatar ${role}">${avatar}</span><span class="who">${name}</span></div><div class="bubble ${role}"></div>`;
+  row.innerHTML = `<div class="msgHead"><span class="avatar ${role}">${avatar}</span><span class="who">${name}</span></div><div class="bubble ${role}"></div>` +
+    `<div class="msgActions">` +
+    `<button class="msgAct copy" title="复制">${icon("copy", 13)}</button>` +
+    (role === "assistant" ? `<button class="msgAct retry" title="重试">${icon("refresh", 13)}</button>` : "") +
+    (role === "user" ? `<button class="msgAct edit" title="编辑并重发（分支）">${icon("edit", 13)}</button>` : "") +
+    `</div>`;
   const bubble = row.querySelector(".bubble");
   bubble.dataset.raw = content || "";
   renderBubble(bubble);
@@ -519,9 +543,13 @@ $("send").onclick = async () => {
   renderAttachments();
   state.stickToBottom = true;
   setRunning(true);
+  const editing = state.editing;
+  state.editing = false;
   try {
     await updateRuntime();
-    const result = await window.pywebview.api.send({ prompt: outgoing, attachments });
+    const result = editing
+      ? await window.pywebview.api.edit_resend({ prompt: outgoing })
+      : await window.pywebview.api.send({ prompt: outgoing, attachments });
     if (!result.ok) throw new Error(result.error || "unknown error");
   } catch (error) {
     setRunning(false);
@@ -721,14 +749,60 @@ $("manualCompact").onclick = async () => {
 };
 $("attach").onclick = () => $("fileInput").click();
 $("fileInput").onchange = async (event) => {
-  for (const file of event.target.files) {
-    const content = await readFileAsDataUrl(file);
-    const saved = await window.pywebview.api.save_upload({ name: file.name, content });
-    state.attachments.push(saved);
-  }
+  for (const file of event.target.files) await uploadFile(file);
   event.target.value = "";
   renderAttachments();
 };
+
+async function uploadFile(file, relPath) {
+  try {
+    const content = await readFileAsDataUrl(file);
+    const saved = await window.pywebview.api.save_upload({ name: relPath || file.name, content });
+    if (saved && saved.ok) state.attachments.push(saved);
+  } catch (_) { /* skip unreadable file */ }
+}
+
+// walk a dropped FileSystemEntry (file or directory) and upload every file
+function collectEntry(entry, prefix) {
+  return new Promise((resolve) => {
+    if (entry.isFile) {
+      entry.file(async (file) => { await uploadFile(file, (prefix || "") + entry.name); resolve(); }, () => resolve());
+    } else if (entry.isDirectory) {
+      const reader = entry.createReader();
+      const dir = (prefix || "") + entry.name + "/";
+      const readBatch = () => reader.readEntries(async (entries) => {
+        if (!entries.length) { resolve(); return; }
+        for (const child of entries) await collectEntry(child, dir);
+        readBatch(); // directories may return entries in batches
+      }, () => resolve());
+      readBatch();
+    } else { resolve(); }
+  });
+}
+
+// drag files / folders from the OS onto the composer
+const composeCard = document.querySelector(".composeCard");
+["dragenter", "dragover"].forEach((ev) => composeCard.addEventListener(ev, (e) => {
+  e.preventDefault();
+  composeCard.classList.add("dropping");
+}));
+composeCard.addEventListener("dragleave", (e) => {
+  if (e.relatedTarget && composeCard.contains(e.relatedTarget)) return;
+  composeCard.classList.remove("dropping");
+});
+composeCard.addEventListener("drop", async (e) => {
+  e.preventDefault();
+  composeCard.classList.remove("dropping");
+  const dt = e.dataTransfer;
+  const items = dt && dt.items ? Array.from(dt.items) : [];
+  const entries = items.map((it) => it.webkitGetAsEntry && it.webkitGetAsEntry()).filter(Boolean);
+  if (entries.length) {
+    for (const entry of entries) await collectEntry(entry, "");
+  } else if (dt && dt.files) {
+    for (const file of dt.files) await uploadFile(file);
+  }
+  renderAttachments();
+});
 
 // collapse sidebar
 const toggleCollapse = () => document.querySelector(".app").classList.toggle("sidebarCollapsed");
@@ -736,14 +810,77 @@ const toggleCollapse = () => document.querySelector(".app").classList.toggle("si
 
 // copy buttons in code blocks (event delegation)
 $("messages").addEventListener("click", (e) => {
-  const btn = e.target.closest(".copyBtn");
-  if (!btn) return;
-  const code = btn.closest(".code").querySelector("code");
-  navigator.clipboard.writeText(code.textContent).then(() => {
-    btn.textContent = "已复制";
-    setTimeout(() => (btn.textContent = "复制"), 1200);
-  }).catch(() => {});
+  const copyBtn = e.target.closest(".copyBtn");
+  if (copyBtn) {
+    const code = copyBtn.closest(".code").querySelector("code");
+    copyToClipboard(code.textContent, copyBtn, "已复制", "复制");
+    return;
+  }
+  const act = e.target.closest(".msgAct");
+  if (!act) return;
+  const msg = act.closest(".message");
+  const raw = msg.querySelector(".bubble").dataset.raw || "";
+  if (act.classList.contains("copy")) copyToClipboard(raw, act, null, null);
+  else if (act.classList.contains("retry")) doRetry();
+  else if (act.classList.contains("edit")) doEdit(raw);
 });
+
+function copyToClipboard(text, btn, okLabel, resetLabel) {
+  navigator.clipboard.writeText(text).then(() => {
+    if (okLabel && resetLabel) {
+      btn.textContent = okLabel;
+      setTimeout(() => (btn.textContent = resetLabel), 1200);
+    } else {
+      btn.classList.add("copied");
+      setTimeout(() => btn.classList.remove("copied"), 900);
+    }
+  }).catch(() => {});
+}
+
+// remove the last user message and everything after it from the transcript view
+function removeLastExchange() {
+  const box = $("messages");
+  const users = box.querySelectorAll(".message.user");
+  if (!users.length) return;
+  let node = users[users.length - 1];
+  while (node) { const next = node.nextSibling; node.remove(); node = next; }
+  state.currentAssistant = null;
+  state.currentTool = null;
+}
+
+async function doRetry() {
+  if (state.running) return;
+  removeLastExchange();
+  state.stickToBottom = true;
+  setRunning(true);
+  try {
+    await updateRuntime();
+    const result = await window.pywebview.api.retry();
+    if (!result.ok) throw new Error(result.error || "unknown error");
+  } catch (error) {
+    setRunning(false);
+    addEvent("error", "重试失败", String(error.message || error));
+  }
+}
+
+function doEdit(text) {
+  if (state.running) return;
+  removeLastExchange();
+  state.editing = true;
+  $("prompt").value = text;
+  autoGrow();
+  $("prompt").focus();
+}
+
+// mark the latest user/assistant messages so their edit/retry actions show
+function markMessageActions() {
+  const box = $("messages");
+  box.querySelectorAll(".canRetry, .canEdit").forEach((m) => m.classList.remove("canRetry", "canEdit"));
+  const assistants = box.querySelectorAll(".message.assistant");
+  const usersList = box.querySelectorAll(".message.user");
+  if (assistants.length) assistants[assistants.length - 1].classList.add("canRetry");
+  if (usersList.length) usersList[usersList.length - 1].classList.add("canEdit");
+}
 
 function readFileAsDataUrl(file) {
   return new Promise((resolve, reject) => {

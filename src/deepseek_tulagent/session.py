@@ -30,6 +30,18 @@ class Session:
         with self.path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(event, ensure_ascii=False) + "\n")
 
+    def rewrite(self) -> None:
+        """Persist current in-memory messages, replacing the append-only log.
+
+        Used to truncate a conversation (retry / edit-and-branch): the JSONL file is
+        rewritten from self.messages instead of appended to.
+        """
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        with self.path.open("w", encoding="utf-8") as handle:
+            for message in self.messages:
+                event = {"session_id": self.session_id, "created_at": self.created_at, "message": asdict(message)}
+                handle.write(json.dumps(event, ensure_ascii=False) + "\n")
+
 
 class SessionStore:
     def __init__(self, workspace: Path):

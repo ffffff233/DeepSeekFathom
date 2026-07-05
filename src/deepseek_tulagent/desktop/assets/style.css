@@ -174,6 +174,17 @@ body.is-running .pulse { animation: pulseDot 1s ease-in-out infinite; }
 }
 .bubble.assistant { color: var(--text); width: 100%; }
 
+/* per-message hover actions (copy / retry / edit-branch), Codex-style */
+.message { position: relative; }
+.msgActions { display: flex; gap: 2px; margin-top: 4px; opacity: 0; transition: opacity .12s; }
+.message.user .msgActions { justify-content: flex-end; }
+.message:hover .msgActions { opacity: 1; }
+.msgAct { display: inline-grid; place-items: center; width: 24px; height: 24px; border: none; background: transparent; color: var(--text-4); border-radius: var(--r-sm); cursor: pointer; transition: background .12s, color .12s; }
+.msgAct:hover { background: var(--hover); color: var(--text-2); }
+.msgAct.copied { color: var(--ok); }
+.msgAct.retry, .msgAct.edit { display: none; }
+.message.canRetry .msgAct.retry, .message.canEdit .msgAct.edit { display: inline-grid; }
+
 /* markdown */
 .bubble p { margin: 0 0 9px; }
 .bubble p:last-child { margin-bottom: 0; }
@@ -254,6 +265,8 @@ pre.code code { display: block; padding: 12px 14px; font-family: var(--mono); fo
   transition: border-color .12s;
 }
 .composeCard:focus-within { border-color: var(--line-heavy); }
+.composeCard.dropping { border-color: var(--link); box-shadow: 0 0 0 2px color-mix(in oklab, var(--link) 30%, transparent); }
+.composeCard.dropping::after { content: "松开以添加文件 / 文件夹"; position: absolute; inset: 0; display: grid; place-items: center; background: color-mix(in oklab, var(--elevated) 82%, transparent); border-radius: var(--r-card); color: var(--text-2); font-size: 13px; pointer-events: none; z-index: 40; }
 
 /* ---------- slash command menu (Codex style) ---------- */
 .slashMenu {

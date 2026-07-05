@@ -171,11 +171,55 @@ class DesktopApi:
             )
         if not prompt:
             return {"ok": False, "error": "empty prompt"}
+        return self._start_turn(prompt)
+
+    def _start_turn(self, prompt: str) -> dict[str, Any]:
         self._cancel_requested = False
         self._running = True
         thread = threading.Thread(target=self._run_agent_turn, args=(prompt,), daemon=True)
         thread.start()
         return {"ok": True}
+
+    def _truncate_to_last_user(self) -> str | None:
+        """Drop the last user turn and everything after it; return that user prompt.
+
+        Skips tool-result / subagent-result messages (which also carry role 'user').
+        Rewrites the session log so a fresh turn appends cleanly.
+        """
+        if self.session is None:
+            return None
+        messages = self.session.messages
+        for i in range(len(messages) - 1, -1, -1):
+            message = messages[i]
+            if message.role == "user" and not message.content.startswith(("TOOL_RESULT", "SUBAGENT_RESULT")):
+                prompt = message.content
+                self.session.messages = messages[:i]
+                self.session.rewrite()
+                return prompt
+        return None
+
+    def retry(self) -> dict[str, Any]:
+        """Regenerate the last assistant answer for the same last user message."""
+        if self._running:
+            return {"ok": False, "error": "turn already running"}
+        if self.session is None:
+            return {"ok": False, "error": "no active session"}
+        prompt = self._truncate_to_last_user()
+        if prompt is None:
+            return {"ok": False, "error": "no user message to retry"}
+        return self._start_turn(prompt)
+
+    def edit_resend(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Branch: replace the last user message with edited text and re-run."""
+        if self._running:
+            return {"ok": False, "error": "turn already running"}
+        if self.session is None:
+            return {"ok": False, "error": "no active session"}
+        text = str(payload.get("prompt") or "").strip()
+        if not text:
+            return {"ok": False, "error": "empty prompt"}
+        self._truncate_to_last_user()
+        return self._start_turn(text)
 
     def cancel(self) -> dict[str, Any]:
         if not self._running:

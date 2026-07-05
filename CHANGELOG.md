@@ -1,5 +1,33 @@
 # 更新记录 / Changelog
 
+## v0.1.61
+
+中文：
+
+- **消息悬停操作（学 Codex）**：每条消息 hover 出现操作按钮——**复制**（所有消息）、
+  **重试**（最新的助手回复，重新生成）、**编辑并重发 / 分支**（最新的用户消息，改完重发）。
+- **重试** 会把最近一轮的旧回答换成新回答,不再重复堆消息:后端新增 `Session.rewrite()` 把会话
+  日志截断到最后一条用户消息,再重新跑一轮(`DesktopApi.retry`)。
+- **编辑分支**：点用户消息的编辑,原文进输入框、该轮从视图移除,发送时走 `edit_resend`
+  截断并用新内容重跑,相当于从这条消息开分支。
+- **拖拽文件 / 文件夹到输入框**：从桌面把文件或整个目录拖到输入卡片即可添加为附件;目录会递归
+  遍历上传每个文件;拖动时输入框高亮并提示「松开以添加文件 / 文件夹」。
+
+English:
+
+- **Per-message hover actions (Codex-style)**: each message reveals actions on hover — **copy**
+  (all messages), **retry** (regenerate the latest assistant reply), and **edit & resend / branch**
+  (edit the latest user message and re-run).
+- **Retry** replaces the last answer instead of stacking duplicates: new backend
+  `Session.rewrite()` truncates the log to the last user message, then re-runs the turn
+  (`DesktopApi.retry`).
+- **Edit-branch**: clicking edit on a user message drops its text into the composer, removes that
+  turn from view, and on send routes through `edit_resend`, which truncates and re-runs with the
+  new text — effectively branching from that message.
+- **Drag & drop files / folders onto the composer**: drop files or whole directories from the OS
+  onto the input card to attach them; directories are walked recursively and each file uploaded;
+  the card highlights with a "松开以添加文件 / 文件夹" prompt while dragging.
+
 ## v0.1.60
 
 中文：
