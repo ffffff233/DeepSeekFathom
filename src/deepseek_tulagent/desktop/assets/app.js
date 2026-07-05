@@ -9,6 +9,7 @@ const state = {
   skills: [],
   slash: { open: false, items: [], index: 0 },
   editing: false,
+  pendingVersions: null,
 };
 
 const $ = (id) => document.getElementById(id);
@@ -49,7 +50,8 @@ function installDemoApi() {
         thinking: "fast",
         providerFormat: "deepseek",
         modes: ["plan", "review", "agent", "trusted", "yolo", "root"],
-        thinkingModes: ["auto", "off", "instant", "fast", "standard", "balanced", "careful", "deep", "deeper", "max", "ultra"],
+        thinkingModes: ["instant", "fast", "balanced", "deep", "ultra"],
+        thinkingLabels: { instant: "Minimal", fast: "Low", balanced: "Medium", deep: "High", ultra: "Extra High" },
         modeDescriptions: {
           plan: "只读规划，不写文件，不跑 shell",
           review: "读取和诊断，危险动作需要确认",
@@ -87,6 +89,9 @@ function installDemoApi() {
         return { ok: true };
       },
       cancel: async () => ({ ok: true }),
+      branch: async () => ({ ok: true, sessionId: "branch-0001", messages: [
+        { role: "user", content: "检查项目并修复问题" }, { role: "assistant", content: "已读取项目结构，下一步运行测试。" },
+      ] }),
       retry: async () => {
         const D = window.DeepSeekDesktop;
         setTimeout(() => D.onNativeEvent({ event: "turn:start", payload: { prompt: "检查项目并修复问题", thinking: $("thinking").value } }), 40);
@@ -142,9 +147,13 @@ window.DeepSeekDesktop = {
     }
     if (event === "agent:event") {
       if (payload.kind === "tool") {
+        // a tool card starts a new visual block — text after it must open a NEW
+        // bubble below the card, not append to the bubble above it
+        state.currentAssistant = null;
         state.currentTool = addToolEvent(payload.name, payload.detail);
       } else if (payload.kind === "done") {
         completeToolEvent(payload.name, payload.detail);
+        state.currentAssistant = null;
       } else {
         addEvent(payload.kind, payload.name, payload.detail);
       }
@@ -158,6 +167,9 @@ window.DeepSeekDesktop = {
       setText("sessionState", sid ? sid.slice(0, 8) : "新会话");
       setSaveState("saved", "已保存", sid || "未保存");
       markMessageActions();
+      // if this turn was a retry, attach the ‹ i/n › version pager to the new answer
+      const assistants = $("messages").querySelectorAll(".message.assistant");
+      if (assistants.length) attachVersionPager(assistants[assistants.length - 1]);
     }
     if (event === "turn:error") {
       state.currentAssistant = null;
@@ -190,7 +202,7 @@ async function boot() {
   setRunning(Boolean(state.boot.running));
   const labels = state.boot.formatLabels || {};
   fillSelect("mode", state.boot.modes, state.boot.mode);
-  fillSelect("thinking", state.boot.thinkingModes, state.boot.thinking);
+  fillSelect("thinking", state.boot.thinkingModes, state.boot.thinking, state.boot.thinkingLabels || {});
   fillSelect("format", state.boot.compatFormats, state.boot.providerFormat || "deepseek", labels);
   fillSelect("providerFormat", state.boot.compatFormats, state.boot.providerFormat || "deepseek", labels);
   fillSelect("model", [state.boot.model], state.boot.model);
@@ -317,7 +329,7 @@ function addMessage(role, content) {
   row.innerHTML = `<div class="msgHead"><span class="avatar ${role}">${avatar}</span><span class="who">${name}</span></div><div class="bubble ${role}"></div>` +
     `<div class="msgActions">` +
     `<button class="msgAct copy" title="复制">${icon("copy", 13)}</button>` +
-    (role === "assistant" ? `<button class="msgAct retry" title="重试">${icon("refresh", 13)}</button>` : "") +
+    (role === "assistant" ? `<button class="msgAct retry" title="重试">${icon("refresh", 13)}</button><button class="msgAct branch" title="从这里开分支">${icon("branch", 13)}</button>` : "") +
     (role === "user" ? `<button class="msgAct edit" title="编辑并重发（分支）">${icon("edit", 13)}</button>` : "") +
     `</div>`;
   const bubble = row.querySelector(".bubble");
@@ -456,10 +468,36 @@ function renderMarkdown(src) {
   let html = "";
   let list = null;
   const closeList = () => { if (list) { html += `</${list}>`; list = null; } };
-  for (const line of lines) {
+  const isTableRow = (l) => typeof l === "string" && /\|/.test(l) && l.trim() !== "";
+  const isTableSep = (l) => typeof l === "string" && /^\s*\|?(\s*:?-{2,}:?\s*\|)*\s*:?-{2,}:?\s*\|?\s*$/.test(l);
+  const splitCells = (l) => {
+    let s = l.trim();
+    if (s.startsWith("|")) s = s.slice(1);
+    if (s.endsWith("|")) s = s.slice(0, -1);
+    return s.split("|").map((c) => c.trim());
+  };
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
     const ph = line.match(/^@@FB(\d+)@@$/);
     if (ph) { closeList(); html += blocks[+ph[1]]; continue; }
     if (/^\s*$/.test(line)) { closeList(); continue; }
+    // markdown table: header row + separator row + body rows
+    if (isTableRow(line) && isTableSep(lines[i + 1])) {
+      closeList();
+      const head = splitCells(line);
+      let body = [];
+      let j = i + 2;
+      while (j < lines.length && isTableRow(lines[j]) && !isTableSep(lines[j])) {
+        body.push(splitCells(lines[j]));
+        j++;
+      }
+      html += '<div class="mdTableWrap"><table class="mdTable"><thead><tr>' +
+        head.map((c) => `<th>${inline(c)}</th>`).join("") + "</tr></thead><tbody>" +
+        body.map((row) => "<tr>" + head.map((_, k) => `<td>${inline(row[k] || "")}</td>`).join("") + "</tr>").join("") +
+        "</tbody></table></div>";
+      i = j - 1;
+      continue;
+    }
     const h = line.match(/^(#{1,6})\s+(.*)$/);
     if (h) { closeList(); const n = h[1].length; html += `<h${n} class="mdH">${inline(h[2])}</h${n}>`; continue; }
     if (/^\s*>\s?/.test(line)) { closeList(); html += `<blockquote>${inline(line.replace(/^\s*>\s?/, ""))}</blockquote>`; continue; }
@@ -830,6 +868,7 @@ $("messages").addEventListener("click", (e) => {
   const raw = msg.querySelector(".bubble").dataset.raw || "";
   if (act.classList.contains("copy")) copyToClipboard(raw, act, null, null);
   else if (act.classList.contains("retry")) doRetry();
+  else if (act.classList.contains("branch")) doBranch();
   else if (act.classList.contains("edit")) doEdit(raw);
 });
 
@@ -858,6 +897,15 @@ function removeLastExchange() {
 
 async function doRetry() {
   if (state.running) return;
+  // keep the answer being replaced so the version pager (‹ ›) can flip back to it
+  const box = $("messages");
+  const assistants = box.querySelectorAll(".message.assistant");
+  if (assistants.length) {
+    const bubble = assistants[assistants.length - 1].querySelector(".bubble");
+    let versions = [];
+    try { versions = JSON.parse(assistants[assistants.length - 1].dataset.versions || "[]"); } catch (_) {}
+    state.pendingVersions = versions.concat([bubble.dataset.raw || ""]);
+  }
   removeLastExchange();
   state.stickToBottom = true;
   setRunning(true);
@@ -867,7 +915,59 @@ async function doRetry() {
     if (!result.ok) throw new Error(result.error || "unknown error");
   } catch (error) {
     setRunning(false);
+    state.pendingVersions = null;
     addEvent("error", "重试失败", String(error.message || error));
+  }
+}
+
+/* Codex-style response versions: after a retry, the newest assistant message gets
+   ‹ i/n › arrows to flip between the regenerated answer and the previous ones. */
+function attachVersionPager(msg) {
+  const versions = state.pendingVersions;
+  state.pendingVersions = null;
+  if (!versions || !versions.length || !msg) return;
+  const bubble = msg.querySelector(".bubble");
+  const all = versions.concat([bubble.dataset.raw || ""]);
+  msg.dataset.versions = JSON.stringify(versions);
+  let index = all.length - 1;
+  const pager = document.createElement("span");
+  pager.className = "versionPager";
+  const render = () => {
+    pager.innerHTML =
+      `<button class="vBtn prev" title="上一版本"${index === 0 ? " disabled" : ""}>${icon("chevron", 12)}</button>` +
+      `<span class="vCount">${index + 1}/${all.length}</span>` +
+      `<button class="vBtn next" title="下一版本"${index === all.length - 1 ? " disabled" : ""}>${icon("chevron", 12)}</button>`;
+  };
+  pager.addEventListener("click", (e) => {
+    const btn = e.target.closest(".vBtn");
+    if (!btn || btn.disabled) return;
+    index += btn.classList.contains("prev") ? -1 : 1;
+    bubble.dataset.raw = all[index];
+    renderBubble(bubble);
+    render();
+  });
+  render();
+  msg.querySelector(".msgActions").prepend(pager);
+}
+
+async function doBranch() {
+  if (state.running) return;
+  try {
+    const result = await window.pywebview.api.branch();
+    if (!result.ok) throw new Error(result.error || "unknown error");
+    state.currentAssistant = null;
+    state.currentTool = null;
+    state.stickToBottom = true;
+    $("messages").innerHTML = "";
+    (result.messages || []).forEach((m) => addMessage(m.role, m.content));
+    markMessageActions();
+    scrollMessages(true);
+    setText("sessionState", String(result.sessionId || "").slice(0, 8));
+    setSaveState("saved", "已开分支", result.sessionId || "");
+    await refreshSessions();
+    toast("已从该回复开出新分支");
+  } catch (error) {
+    addEvent("error", "开分支失败", String(error.message || error));
   }
 }
 

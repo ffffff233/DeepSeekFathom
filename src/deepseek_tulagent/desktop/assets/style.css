@@ -179,11 +179,20 @@ body.is-running .pulse { animation: pulseDot 1s ease-in-out infinite; }
 .msgActions { display: flex; gap: 2px; margin-top: 4px; opacity: 0; transition: opacity .12s; }
 .message.user .msgActions { justify-content: flex-end; }
 .message:hover .msgActions { opacity: 1; }
+.msgActions:has(.versionPager) { opacity: 1; }
 .msgAct { display: inline-grid; place-items: center; width: 24px; height: 24px; border: none; background: transparent; color: var(--text-4); border-radius: var(--r-sm); cursor: pointer; transition: background .12s, color .12s; }
 .msgAct:hover { background: var(--hover); color: var(--text-2); }
 .msgAct.copied { color: var(--ok); }
-.msgAct.retry, .msgAct.edit { display: none; }
-.message.canRetry .msgAct.retry, .message.canEdit .msgAct.edit { display: inline-grid; }
+.msgAct.retry, .msgAct.edit, .msgAct.branch { display: none; }
+.message.canRetry .msgAct.retry, .message.canRetry .msgAct.branch, .message.canEdit .msgAct.edit { display: inline-grid; }
+
+/* retry version pager: ‹ i/n › */
+.versionPager { display: inline-flex; align-items: center; gap: 2px; margin-right: 4px; color: var(--text-4); font-size: 11px; font-family: var(--mono); }
+.vBtn { display: inline-grid; place-items: center; width: 20px; height: 20px; border: none; background: transparent; color: var(--text-4); border-radius: var(--r-sm); cursor: pointer; }
+.vBtn:hover:not(:disabled) { background: var(--hover); color: var(--text-2); }
+.vBtn:disabled { opacity: .3; cursor: default; }
+.vBtn.prev svg { transform: rotate(180deg); }
+.vCount { min-width: 26px; text-align: center; }
 
 /* markdown */
 .bubble p { margin: 0 0 9px; }
@@ -199,6 +208,14 @@ body.is-running .pulse { animation: pulseDot 1s ease-in-out infinite; }
 .bubble blockquote { margin: 8px 0; padding: 2px 12px; border-left: 2px solid var(--line-heavy); color: var(--text-2); }
 .bubble strong { color: var(--text); font-weight: 600; }
 code.inline { font-family: var(--mono); font-size: 12px; background: var(--hover-strong); padding: 1px 5px; border-radius: 4px; color: var(--text); }
+
+/* markdown tables */
+.mdTableWrap { overflow-x: auto; margin: 10px 0; border: 1px solid var(--line); border-radius: var(--r-row); }
+.mdTable { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+.mdTable th, .mdTable td { padding: 6px 12px; text-align: left; border-bottom: 1px solid var(--line); }
+.mdTable th { color: var(--text-2); font-weight: 600; background: var(--hover); white-space: nowrap; }
+.mdTable tr:last-child td { border-bottom: none; }
+.mdTable td { color: var(--text); vertical-align: top; }
 
 /* code block */
 pre.code { margin: 10px 0; background: var(--bg-under); border: 1px solid var(--line); border-radius: var(--r-row); overflow: hidden; }

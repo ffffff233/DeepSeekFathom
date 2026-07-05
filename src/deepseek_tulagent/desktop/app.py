@@ -20,6 +20,16 @@ from ..skills import SkillStore
 
 ASSET_DIR = Path(__file__).resolve().parent / "assets"
 MODES = ["plan", "review", "agent", "trusted", "yolo", "root"]
+# Codex-style reasoning effort tiers exposed in the desktop UI, mapped onto the
+# richer internal ThinkingMode set (CLI keeps the full list).
+THINKING_TIERS = ["instant", "fast", "balanced", "deep", "ultra"]
+THINKING_LABELS = {
+    "instant": "Minimal",
+    "fast": "Low",
+    "balanced": "Medium",
+    "deep": "High",
+    "ultra": "Extra High",
+}
 
 
 class DesktopApi:
@@ -54,7 +64,8 @@ class DesktopApi:
                 "yolo": "自动确认受限工具",
                 "root": "最高权限，直接执行",
             },
-            "thinkingModes": ThinkingMode.names(),
+            "thinkingModes": [t for t in THINKING_TIERS if t in ThinkingMode.names()] or ThinkingMode.names(),
+            "thinkingLabels": THINKING_LABELS,
             "skills": [asdict(skill) | {"path": str(skill.path)} for skill in SkillStore(self.settings.workspace).list()],
             "sessionId": self.session.session_id if self.session else None,
             "apiKeySet": bool(self.settings.api_key),
@@ -220,6 +231,34 @@ class DesktopApi:
             return {"ok": False, "error": "empty prompt"}
         self._truncate_to_last_user()
         return self._start_turn(text)
+
+    def branch(self) -> dict[str, Any]:
+        """Fork a new session from the last assistant reply (Codex-style branch).
+
+        History up to and including the latest assistant message is copied into a new
+        session; the original conversation is left untouched.
+        """
+        if self._running:
+            return {"ok": False, "error": "turn already running"}
+        if self.session is None:
+            return {"ok": False, "error": "no active session"}
+        messages = self.session.messages
+        idx = next((i for i in range(len(messages) - 1, -1, -1) if messages[i].role == "assistant"), None)
+        if idx is None:
+            return {"ok": False, "error": "no assistant message to branch from"}
+        forked = Session(self.settings.workspace)
+        forked.messages = [Message(m.role, m.content, m.name) for m in messages[: idx + 1]]
+        forked.rewrite()
+        store = SessionStore(self.settings.workspace)
+        old_title = str(store.metadata(self.session.session_id).get("title") or "").strip()
+        store.update_metadata(forked.session_id, title=(old_title + " · 分支") if old_title else "分支会话")
+        self.session = forked
+        return {
+            "ok": True,
+            "sessionId": forked.session_id,
+            "messages": serialize_messages(forked.messages),
+            "sessions": self.sessions(),
+        }
 
     def cancel(self) -> dict[str, Any]:
         if not self._running:

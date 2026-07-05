@@ -1,5 +1,42 @@
 # 更新记录 / Changelog
 
+## v0.1.63
+
+中文（对照 Codex 桌面端源码实现）：
+
+- **修复：工具调用卡片总在最底下**。工具事件后 `currentAssistant` 未复位，后续文字全续写进
+  工具卡上方的旧气泡，导致工具卡永远垫底。现在工具卡出现后文字开新气泡，时间顺序与 Codex 一致：
+  正文 → 工具卡 → 后续正文。
+- **回复版本箭头（Codex 的 ‹ i/n ›）**：重试不再丢弃旧回答——新回答生成后消息下方出现
+  ‹ 1/2 › 分页箭头，可来回翻看每一版（对应 Codex 的 previousResponse/currentVersion）。
+- **从回复开分支（Codex 的 onForkTurn）**：助手消息上新增分支按钮，把到该回复为止的历史
+  fork 成一个新会话（标题自动加「· 分支」），原会话不动。
+- **思考等级学 Codex**：桌面端从 11 档精简为 Codex 的 5 档 reasoning effort——
+  Minimal / Low / Medium / High / Extra High（内部映射 instant/fast/balanced/deep/ultra，CLI 不变）。
+- **Markdown 表格解析**：模型输出的 `| a | b |` 表格现在渲染成真正的表格（表头、斑马线、横向滚动）。
+
+English (implemented against the Codex desktop source):
+
+- **Fixed: tool-call cards always stuck at the bottom.** `currentAssistant` wasn't reset after a
+  tool event, so post-tool text kept appending to the bubble above the card. Text now opens a new
+  bubble after each tool card — chronological like Codex: text → tool card → more text.
+- **Response version arrows (Codex's ‹ i/n ›)**: retry keeps the old answer — the regenerated
+  message gets ‹ 1/2 › arrows to flip between versions (Codex's previousResponse/currentVersion).
+- **Branch from a reply (Codex's onForkTurn)**: new branch action on assistant messages forks the
+  history up to that reply into a new session (title suffixed "· 分支"); the original stays intact.
+- **Thinking levels follow Codex**: the desktop trims 11 modes down to Codex's 5 reasoning-effort
+  tiers — Minimal / Low / Medium / High / Extra High (mapped to instant/fast/balanced/deep/ultra
+  internally; CLI unchanged).
+- **Markdown table parsing**: `| a | b |` tables from the model now render as real tables
+  (header, row dividers, horizontal scroll).
+
+## v0.1.62
+
+- 修复流式上游错误解析（`ResponseNotRead` 吞错误；现按各家格式提取 `error.message`）。
+  Fixed streamed upstream-error parsing (ResponseNotRead masked errors; provider error JSON now parsed).
+- 工具调用 JSON 不再泄露进聊天正文（安全边界扣留 + `assistant:final` 替换；空调用显示占位）。
+  Tool-call JSON no longer leaks into streamed chat text (safe-boundary holdback + final replace).
+
 ## v0.1.61
 
 中文：
