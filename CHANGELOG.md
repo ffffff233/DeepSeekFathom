@@ -1,5 +1,28 @@
 # 更新记录 / Changelog
 
+## v0.1.67
+
+中文：
+
+- **修复：模型用一次后列表全没、老默认回 deepseek-v4-flash**。根因有二：① 切换接口 / 保存设置时
+  `configure()` 会 `get_settings()` 重新读文件，把当前模型重置成文件默认（v4-flash）——现在
+  configure 会保留你当前选的模型。② 前端每次拉不到模型列表就把下拉塌成一个当前项——现在**缓存
+  上一次成功的完整列表**，拉取失败时沿用旧列表、不再清空，当前模型也始终保留在选项里。
+  （把上一版把下拉改成输入框的处理已还原成下拉。）
+- **复制 / 重试 / 开分支 现在每条消息都能用**（之前只有最新那条有）：每条助手消息都能重试、开分支，
+  每条用户消息都能编辑分支；后端按消息在会话中的真实位置（srcIndex）截断，可从任意一条开分支或重来。
+
+English:
+
+- **Fixed: model list vanished after one use and kept defaulting to deepseek-v4-flash.** Two causes:
+  (1) `configure()` reloaded settings from file on provider switch / save, resetting the model to the
+  file default — it now preserves the currently selected model; (2) the dropdown collapsed to a single
+  item whenever a model fetch failed — it now **caches the last good full list**, reuses it on failure,
+  and always keeps the current model in the options. (The stopgap combobox is reverted to a dropdown.)
+- **Copy / retry / branch now work on every message** (previously only the latest): every assistant
+  message can be retried or branched, every user message edited-and-branched; the backend truncates by
+  each message's real transcript position (srcIndex), so you can fork or redo from any point.
+
 ## v0.1.66
 
 中文：
