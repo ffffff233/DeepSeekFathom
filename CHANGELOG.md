@@ -1,5 +1,15 @@
 # 更新记录 / Changelog
 
+## v0.1.82
+
+中文：
+
+- **修复：JSON / `<tool_call>` 仍会被当成文字流出来**。上一版的流式截流只在**行首**检测工具调用起始符，但模型经常把工具调用**紧跟在一句话后面、同一行**（`好的，我来调用：<tool_call>{…}` 或 `结果是 {"tool":…}`），行首检测就漏了。现在改为**在整段缓冲里的任意位置**查找高信号的工具起始标记（`<tool_call`、`{"tool"`、`{"name"`、`{"function_call"`、`{"tool_calls"` 等），一旦出现就从那里开始扣住，只把它**之前的正文**流出去。因为结尾 `on_final` 总会把清洗后的完整正文再发一遍，所以哪怕偶尔扣错一段普通正文，也只是延后显示、绝不会丢；而 `{100}` 这类普通花括号不会误伤。
+
+English:
+
+- **Fixed: JSON / `<tool_call>` still leaked as prose**. The previous stream-hold only detected a tool-call opener at **line start**, but models routinely append the tool call to the **same line as a sentence** (`好的，我来调用：<tool_call>{…}` or `结果是 {"tool":…}`), which line-start detection missed. It now scans the **whole buffer** for high-signal tool markers (`<tool_call`, `{"tool"`, `{"name"`, `{"function_call"`, `{"tool_calls"`, …) and holds from the first one, streaming only the prose before it. Since `on_final` re-sends the full cleaned text at end-of-turn, a rare false hold only delays prose (never drops it), and ordinary braces like `{100}` aren't affected.
+
 ## v0.1.81
 
 中文：

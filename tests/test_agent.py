@@ -120,6 +120,24 @@ def test_parse_xml_tool_call_variants():
     assert "<tool_call" not in plainify_assistant_text('<tool_call>\n{"name":"write_file"')
 
 
+def test_stream_holds_mid_line_tool_calls():
+    """A tool call appended to the SAME line as prose must still be held back — only the
+    prose before the marker is safe to stream."""
+    from deepseek_tulagent.agent import safe_stream_emit_length
+
+    # <tool_call> tag right after a sentence
+    t1 = '好的，我来调用：<tool_call>{"name":"write_file","arguments":{}}'
+    assert t1[: safe_stream_emit_length(t1)] == "好的，我来调用："
+
+    # inline tool JSON mid-line
+    t2 = '结果是这样 {"tool":"run_shell","arguments":{"command":"ls"}}'
+    assert t2[: safe_stream_emit_length(t2)] == "结果是这样 "
+
+    # non-tool braces stream normally (no false hold)
+    t3 = "价格是 {100} 元"
+    assert safe_stream_emit_length(t3) == len(t3)
+
+
 def test_parse_action_bash_block_as_shell_tool():
     call = parse_tool_call("我现在检查仓库。\n\n```bash\nprintf repo-ok\n```")
     assert call == ("run_shell", {"command": "printf repo-ok"})

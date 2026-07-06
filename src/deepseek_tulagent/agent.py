@@ -733,21 +733,27 @@ def should_hold_stream_output(text: str) -> bool:
 def safe_stream_emit_length(text: str) -> int:
     """How much of a streaming buffer is safe to show without leaking a tool call.
 
-    A line starting with '{' or a code fence may be the beginning of a tool call the
-    model appends after prose. Hold everything from the last such opener back unless
-    it's clearly finished and NOT a tool call (closed fence with non-tool content /
-    complete JSON that doesn't normalize to a tool).
+    Models often append a tool call right after a sentence, on the SAME line
+    (`好的，我来调用：<tool_call>{…}` or `… {"tool":…}`), so line-start detection alone
+    leaks it. We first look for a specific tool-call marker anywhere and hold from there;
+    everything before it (real prose) stays visible. on_final re-sends the full cleaned
+    text at end-of-turn, so holding a false positive back only delays it, never drops it.
     """
+    # 1) specific, high-signal tool-call openers that may appear mid-line
+    specific = re.search(
+        r"(?i)<tool_call|\{\s*\"(?:tool|name|function_call|tool_calls|arguments|input)\"",
+        text,
+    )
+    if specific:
+        return specific.start()
+    # 2) otherwise a line starting with '{' or a code fence may begin a tool call
     last = None
-    for match in re.finditer(r"(?mi)^[ \t]*(\{|```|<tool_call)", text):
+    for match in re.finditer(r"(?m)^[ \t]*(\{|```)", text):
         last = match
     if last is None:
         return len(text)
     start = last.start()
     segment = text[start:].strip()
-    if segment.lower().startswith("<tool_call"):
-        # a tool-call tag (open or closed) is never chat prose — always hold it back
-        return start
     if segment.startswith("```"):
         if segment.count("```") >= 2:  # fence closed
             inner = re.sub(r"^```[\w-]*\s*|\s*```.*$", "", segment, flags=re.DOTALL).strip()
