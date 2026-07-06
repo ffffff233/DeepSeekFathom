@@ -1,5 +1,17 @@
 # 更新记录 / Changelog
 
+## v0.1.83
+
+中文：
+
+- **修复：`window.pywebview.api.test_connection is not a function`**。pywebview 可能**逐个异步挂载 api 方法**，所以即便 `boot` 已可用，`test_connection` 等方法仍可能晚一步——直接调用就报“不是函数”。新增 `apiMethod(name)`：调用前**短暂轮询等待该方法就绪**（最多 8s），再调用。已给测试连接、`models`、`sessions`、`configure`、`set_runtime`、`send` 等用户触发的接口全部套上。
+- **修复：每次读取后端已保存的 API 特别慢**。根因：`boot()` 之前**同步 `await refreshModels()`**，而拉模型列表是一次 `GET /models` 网络请求——于是每次加载都要干等这个网络往返才显示已保存的配置。现在改成**先用已保存的模型即时渲染界面，模型列表在后台拉取、到了再刷新下拉框**，不再阻塞。
+
+English:
+
+- **Fixed: `window.pywebview.api.test_connection is not a function`**. pywebview can attach api method proxies **incrementally**, so a method like `test_connection` may lag behind `boot` and a direct call throws "not a function". A new `apiMethod(name)` helper **waits (briefly) for the method to be ready** before calling it (up to 8s), now applied to test-connection, `models`, `sessions`, `configure`, `set_runtime`, and `send`.
+- **Fixed: reading the saved backend API was very slow every time**. Root cause: `boot()` **awaited `refreshModels()`**, a `GET /models` network round-trip — so every load waited on the network before showing the saved config. It now **renders immediately with the saved model and fetches the model list in the background**, refreshing the dropdown when it arrives.
+
 ## v0.1.82
 
 中文：

@@ -267,8 +267,23 @@ async function boot() {
   fillSelect("model", ensureIncludes((state.models && state.models.length ? state.models : [state.boot.model]), state.boot.model), state.boot.model);
   updateModeHelp();  $("baseUrl").value = state.boot.baseUrl || "";
   state.skills = state.boot.skills || [];
-  await refreshModels();
-  await refreshSessions();
+  // Don't block the UI on the network model list — the dropdown already shows the saved
+  // model; fetch the full list in the background and refresh it when it arrives. Awaiting
+  // here made every load wait on a slow GET /models round-trip.
+  refreshModels().catch(() => {});
+  refreshSessions().catch(() => {});
+}
+
+// pywebview may attach method proxies incrementally, so a method can be missing for a
+// moment even after boot works. Wait (briefly) for it before calling instead of throwing
+// "X is not a function".
+async function apiMethod(name, timeoutMs = 8000) {
+  const started = Date.now();
+  while (!(window.pywebview && window.pywebview.api && typeof window.pywebview.api[name] === "function")) {
+    if (Date.now() - started > timeoutMs) throw new Error(`后端接口 ${name} 尚未就绪，请稍候重试`);
+    await new Promise((r) => setTimeout(r, 60));
+  }
+  return window.pywebview.api[name];
 }
 
 function fillSelect(id, values, selected, labels) {
@@ -308,7 +323,8 @@ function setRunning(running) {
 }
 
 async function refreshModels() {
-  const result = await window.pywebview.api.models();
+  const models = await apiMethod("models");
+  const result = await models();
   const fetched = result.ok && result.models && result.models.length ? result.models : [];
   // cache the last good full list so it never collapses to a single fallback item
   if (fetched.length) state.models = fetched;
@@ -335,7 +351,8 @@ function ensureIncludes(list, value) {
 async function refreshSessions() {
   let sessions;
   try {
-    sessions = await window.pywebview.api.sessions();
+    const fn = await apiMethod("sessions", 3000);
+    sessions = await fn();
   } catch (_) {
     return;  // api not ready yet — a later poll will populate the list
   }
@@ -746,7 +763,8 @@ function highlightCode(code, lang) {
 }
 
 async function updateRuntime() {
-  state.boot = await window.pywebview.api.set_runtime({
+  const setRuntime = await apiMethod("set_runtime");
+  state.boot = await setRuntime({
     model: $("model").value,
     thinking: $("thinking").value,
     mode: $("mode").value,
@@ -782,7 +800,8 @@ $("send").onclick = async () => {
   setRunning(true);
   try {
     await updateRuntime();
-    const result = await window.pywebview.api.send({ prompt: outgoing, attachments, images: images.map((i) => i.url) });
+    const sendFn = await apiMethod("send");
+    const result = await sendFn({ prompt: outgoing, attachments, images: images.map((i) => i.url) });
     if (!result.ok) throw new Error(result.error || "unknown error");
   } catch (error) {
     setRunning(false);
@@ -992,8 +1011,10 @@ $("model").addEventListener("change", updateRuntime);
 $("mode").addEventListener("change", updateModeHelp);
 $("format").addEventListener("change", async () => {
   $("providerFormat").value = $("format").value;
-  await window.pywebview.api.configure({ providerFormat: $("format").value });
-  state.boot = await window.pywebview.api.boot();
+  const configure = await apiMethod("configure");
+  await configure({ providerFormat: $("format").value });
+  const bootFn = await apiMethod("boot");
+  state.boot = await bootFn();
   // the new provider serves a different model list — refresh it
   await refreshModels().catch(() => {});
 });
@@ -1008,7 +1029,8 @@ $("testConn").onclick = async () => {
     try { return JSON.stringify(r); } catch (_) { return String(r); }
   };
   try {
-    const r = await window.pywebview.api.test_connection({
+    const testConnection = await apiMethod("test_connection");
+    const r = await testConnection({
       baseUrl: $("baseUrl").value,
       apiKey: $("apiKey").value,
       providerFormat: $("providerFormat").value,
@@ -1034,7 +1056,8 @@ $("testConn").onclick = async () => {
 };
 $("saveSettings").onclick = async (event) => {
   event.preventDefault();
-  state.boot = await window.pywebview.api.configure({
+  const configure = await apiMethod("configure");
+  state.boot = await configure({
     baseUrl: $("baseUrl").value,
     apiKey: $("apiKey").value,
     providerFormat: $("providerFormat").value,
