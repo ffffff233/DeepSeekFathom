@@ -474,7 +474,8 @@ def serialize_messages(messages: list[Message]) -> list[dict[str, Any]]:
                 name, arguments = tool_call
                 prose = strip_tool_call_display(content)
                 if prose:
-                    visible.append({"role": "assistant", "content": prose, "srcIndex": idx})
+                    # pre-tool narration — not a standalone reply, carries no actions
+                    visible.append({"role": "assistant", "content": prose, "srcIndex": idx, "intermediate": True})
                 pending_tool = {
                     "role": "tool",
                     "name": name,

@@ -182,6 +182,10 @@ window.DeepSeekDesktop = {
         // a tool card starts a new visual block — text after it must open a NEW
         // bubble below the card, not append to the bubble above it
         state.currentAssistant = null;
+        // any assistant prose that streamed just before this tool call is pre-tool
+        // narration, not a standalone reply — demote it so it carries no copy/retry/
+        // branch (one turn shows one set of actions, on its final reply)
+        markLastAssistantIntermediate();
         state.currentTool = addToolEvent(payload.name, payload.detail);
       } else if (payload.kind === "done") {
         completeToolEvent(payload.name, payload.detail);
@@ -409,7 +413,9 @@ function replayMessage(entry) {
     state.currentTool = null;
     return;
   }
-  addMessage(entry.role, entry.content, entry.srcIndex);
+  const row = addMessage(entry.role, entry.content, entry.srcIndex);
+  if (entry.intermediate && row) row.classList.add("intermediate");
+  return row;
 }
 
 function bumpEventCount() {
@@ -1434,10 +1440,18 @@ function doEdit(text, src, msg) {
 function markMessageActions() {
   const box = $("messages");
   box.querySelectorAll(".canRetry, .canEdit").forEach((m) => m.classList.remove("canRetry", "canEdit"));
-  const assistants = box.querySelectorAll(".message.assistant");
+  // only real replies are actionable — skip pre-tool narration bubbles
+  const assistants = box.querySelectorAll(".message.assistant:not(.intermediate)");
   const usersList = box.querySelectorAll(".message.user");
   if (assistants.length) assistants[assistants.length - 1].classList.add("canRetry");
   if (usersList.length) usersList[usersList.length - 1].classList.add("canEdit");
+}
+
+// Demote the most recent assistant bubble to pre-tool narration: it's part of this
+// turn, not a standalone reply, so it should carry no copy/retry/branch actions.
+function markLastAssistantIntermediate() {
+  const assistants = $("messages").querySelectorAll(".message.assistant:not(.intermediate)");
+  if (assistants.length) assistants[assistants.length - 1].classList.add("intermediate");
 }
 
 function readFileAsDataUrl(file) {

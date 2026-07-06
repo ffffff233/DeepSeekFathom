@@ -1,5 +1,15 @@
 # 更新记录 / Changelog
 
+## v0.1.81
+
+中文：
+
+- **修复：一轮对话里出现两组复制/分支按钮（“工具前的引子文字”被当成独立一条）**。当模型在一轮里先说一句话、再调用工具、最后再给结论时，工具前那段“引子文字”会单独成为一条 assistant 气泡，也带上了复制/重试/开分支——于是同一轮看起来像两条对话、两组按钮。现在把**工具调用前的引子文字标记为“turn 内中间态”**：它不再显示任何操作按钮，一轮只在**最终回复**上出现一组复制/重试/分支。实时流式和重新打开历史对话两条路径都改了（`serialize_messages` 给引子块打 `intermediate` 标记，`markMessageActions` 只认非中间态的最后一条回复）。
+
+English:
+
+- **Fixed: one turn showed two sets of copy/branch actions (pre-tool narration treated as a standalone reply)**. When the model says something, then calls a tool, then gives its final answer within one turn, the pre-tool narration became its own assistant bubble carrying copy/retry/branch — so a single turn looked like two conversations with two action rows. Pre-tool narration is now flagged **intermediate**: it shows no actions, and a turn surfaces one set of copy/retry/branch on its **final reply** only. Fixed on both the live-stream path and the reopen-history path (`serialize_messages` marks the prose block `intermediate`; `markMessageActions` only considers the last non-intermediate reply).
+
 ## v0.1.80
 
 中文：

@@ -1918,3 +1918,20 @@ def test_newline_without_pending_input_submits():
     finally:
         os.close(read_fd)
         os.close(write_fd)
+
+
+def test_serialize_marks_pre_tool_prose_intermediate():
+    """Pre-tool narration in a turn must be flagged intermediate so it carries no
+    copy/retry/branch — one turn shows one set of actions, on its final reply."""
+    from deepseek_tulagent.desktop.app import serialize_messages
+    from deepseek_tulagent.messages import Message
+
+    out = serialize_messages([
+        Message("user", "写个文件"),
+        Message("assistant", '我来写文件。\n{"tool":"write_file","arguments":{"path":"a","content":"x"}}'),
+        Message("user", 'TOOL_RESULT name=write_file\n{"ok":true}'),
+        Message("assistant", "写好了。"),
+    ])
+    roles = [(o["role"], o.get("intermediate")) for o in out]
+    assert ("assistant", True) in roles          # pre-tool prose demoted
+    assert out[-1]["role"] == "assistant" and not out[-1].get("intermediate")  # final reply keeps actions

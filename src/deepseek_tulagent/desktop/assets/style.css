@@ -204,6 +204,9 @@ body.is-running .pulse { animation: pulseDot 1s ease-in-out infinite; }
 /* every assistant offers retry+branch, every user offers edit (revealed on hover) */
 .message.assistant .msgAct.retry, .message.assistant .msgAct.branch { display: inline-grid; }
 .message.user .msgAct.edit { display: inline-grid; }
+/* pre-tool narration inside a turn is not a standalone reply — no copy/retry/branch,
+   so one turn shows one set of actions (on its final reply), not two */
+.message.assistant.intermediate .msgActions { display: none; }
 
 /* retry version pager: ‹ i/n › */
 .versionPager { display: inline-flex; align-items: center; gap: 2px; margin-right: 4px; color: var(--text-4); font-size: 11px; font-family: var(--mono); }
