@@ -1498,6 +1498,13 @@ const uiPrompt = (title, defaultValue) => uiModal({ title, withInput: true, defa
 const uiConfirm = (title) => uiModal({ title, withInput: false });
 
 /* ---------- startup: 等待 pywebview 注入 api，浏览器预览时回退到演示数据 ---------- */
+// pywebview creates window.pywebview.api as an object BEFORE attaching each method
+// proxy, so `api && api.boot` can be an object with no boot yet. Only start once
+// boot is actually callable.
+function apiReady() {
+  return !!(window.pywebview && window.pywebview.api && typeof window.pywebview.api.boot === "function");
+}
+
 function start() {
   if (window.__fathomBooted) return;
   window.__fathomBooted = true;
@@ -1505,14 +1512,19 @@ function start() {
     setSaveState("error", "启动失败", String(error.message || error));
   });
 }
-if (window.pywebview && window.pywebview.api) {
-  start();
-} else {
-  window.addEventListener("pywebviewready", start);
-  setTimeout(() => {
-    if (!window.__fathomBooted) {
-      if (!window.pywebview) installDemoApi();
-      if (window.pywebview && window.pywebview.api) start();
-    }
-  }, 1500);
+
+// Poll until boot is a real function (covers the window where api exists but its
+// method proxies haven't been attached), then start. pywebviewready also triggers it.
+let __bootPolls = 0;
+function tryStart() {
+  if (window.__fathomBooted) return;
+  if (apiReady()) { start(); return; }
+  if (++__bootPolls > 100) {  // ~10s: no real backend — fall back to the demo API
+    if (!window.pywebview) installDemoApi();
+    if (apiReady()) start();
+    return;
+  }
+  setTimeout(tryStart, 100);
 }
+window.addEventListener("pywebviewready", tryStart);
+tryStart();

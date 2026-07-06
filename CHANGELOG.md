@@ -1,5 +1,15 @@
 # 更新记录 / Changelog
 
+## v0.1.80
+
+中文：
+
+- **修复：启动报错 `window.pywebview.api.boot is not a function`、启动失败**。根因：pywebview 会**先建好 `window.pywebview.api` 对象、稍后才把各个方法（`boot` 等）挂上去**，而旧代码只判断 `api` 对象存在就立刻 `start()`，此时 `boot` 还没挂上 → 报“不是函数”。现在改成**轮询等到 `typeof api.boot === 'function'` 才启动**（每 100ms 一次，同时监听 `pywebviewready`），约 10 秒仍无真实后端才回退到浏览器演示数据。
+
+English:
+
+- **Fixed: startup error `window.pywebview.api.boot is not a function` / launch failure**. Root cause: pywebview **creates the `window.pywebview.api` object before attaching its method proxies** (like `boot`), but the old code called `start()` as soon as the `api` object merely existed — when `boot` wasn't attached yet. Startup now **polls until `typeof api.boot === 'function'`** (every 100ms, plus the `pywebviewready` event) before booting, and only falls back to the browser demo data if no real backend appears within ~10s.
+
 ## v0.1.79
 
 中文：
