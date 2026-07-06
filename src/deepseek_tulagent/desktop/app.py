@@ -595,19 +595,21 @@ def main() -> None:
         text_select=True,
     )
     api.bind_window(window)
-    # Try common GUI backends in turn so a missing default backend gives a clear,
-    # actionable message instead of an opaque startup crash.
+    # Try common GUI backends in turn so a missing/broken default backend gives a clear,
+    # actionable message instead of an opaque crash. Any failure skips to the next backend
+    # (a raised-on-first-error loop showed up as "crashes twice then works").
+    last_error: Exception | None = None
     for kwargs in ({}, {"gui": "edgechromium"}, {"gui": "qt"}, {"gui": "gtk"}):
         try:
             webview.start(debug=False, **kwargs)
             return
-        except (KeyError, ValueError, ImportError, ModuleNotFoundError):
-            continue  # backend not available — try the next one
-        except Exception as exc:
-            raise SystemExit(f"桌面端启动失败：{exc}") from exc
+        except Exception as exc:  # backend unavailable/broken — try the next one
+            last_error = exc
+            continue
     raise SystemExit(
         "找不到可用的界面后端。Windows 请安装 Microsoft Edge WebView2 运行时；"
         "Linux 请安装 gtk（python3-gi / gir1.2-webkit2）或 Qt（pip install pyqt6 qtpy）。"
+        + (f"\n最后一个错误：{last_error}" if last_error else "")
     )
 
 

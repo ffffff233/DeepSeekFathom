@@ -670,6 +670,22 @@ function renderMarkdown(src) {
     blocks.push(`<pre class="code"><div class="codeHead"><span>${escapeHtml(lang || "code")}</span><button class="copyBtn" type="button">复制</button></div><code>${highlightCode(clean, lang)}</code></pre>`);
     return `@@FB${i}@@`;
   });
+  // protect math ($$…$$, \[…\], $…$, \(…\)) and render it to readable Unicode/HTML,
+  // so formulas read like math, not raw LaTeX (code blocks above are already shielded)
+  src = src.replace(/\$\$([\s\S]+?)\$\$|\\\[([\s\S]+?)\\\]/g, (m, a, b) => {
+    const i = blocks.length;
+    blocks.push(`<div class="mathBlock">${renderMath(a != null ? a : b)}</div>`);
+    return `@@FB${i}@@`;
+  });
+  src = src.replace(/\$([^\n$]+?)\$|\\\(([\s\S]+?)\\\)/g, (m, a, b) => {
+    const inner = a != null ? a : b;
+    // $…$ is ambiguous with currency ("$5 和 $10"); only treat it as math when it has a
+    // LaTeX signal. \(…\) is always math.
+    if (a != null && !/[\\^_{}]/.test(inner)) return m;
+    const i = blocks.length;
+    blocks.push(`<span class="mathInline">${renderMath(inner)}</span>`);
+    return `@@FB${i}@@`;
+  });
   const lines = src.split("\n");
   let html = "";
   let list = null;
@@ -697,7 +713,7 @@ function renderMarkdown(src) {
         body.push(splitCells(lines[j]));
         j++;
       }
-      html += '<div class="mdTableWrap"><table class="mdTable"><thead><tr>' +
+      html += '<div class="mdTableWrap"><button class="tableCopyBtn" type="button" title="复制表格">' + icon("copy", 13) + '</button><table class="mdTable"><thead><tr>' +
         head.map((c) => `<th>${inline(c)}</th>`).join("") + "</tr></thead><tbody>" +
         body.map((row) => "<tr>" + head.map((_, k) => `<td>${inline(row[k] || "")}</td>`).join("") + "</tr>").join("") +
         "</tbody></table></div>";
@@ -726,6 +742,35 @@ function renderMarkdown(src) {
       /^https?:\/\//i.test(href) ? `<a href="${href}" target="_blank" rel="noreferrer">${label}</a>` : m);
     return t;
   }
+}
+
+// Render a LaTeX-ish math string to readable Unicode/HTML (no heavy library): Greek
+// letters, common operators, \frac, √, and super/subscripts as <sup>/<sub>.
+const MATH_SYMBOLS = {
+  "\\alpha":"α","\\beta":"β","\\gamma":"γ","\\delta":"δ","\\epsilon":"ε","\\varepsilon":"ε","\\zeta":"ζ","\\eta":"η","\\theta":"θ","\\iota":"ι","\\kappa":"κ","\\lambda":"λ","\\mu":"μ","\\nu":"ν","\\xi":"ξ","\\pi":"π","\\rho":"ρ","\\sigma":"σ","\\tau":"τ","\\phi":"φ","\\varphi":"φ","\\chi":"χ","\\psi":"ψ","\\omega":"ω",
+  "\\Gamma":"Γ","\\Delta":"Δ","\\Theta":"Θ","\\Lambda":"Λ","\\Xi":"Ξ","\\Pi":"Π","\\Sigma":"Σ","\\Phi":"Φ","\\Psi":"Ψ","\\Omega":"Ω",
+  "\\times":"×","\\cdot":"·","\\div":"÷","\\pm":"±","\\mp":"∓","\\leq":"≤","\\le":"≤","\\geq":"≥","\\ge":"≥","\\neq":"≠","\\ne":"≠","\\approx":"≈","\\equiv":"≡","\\sim":"∼","\\propto":"∝",
+  "\\infty":"∞","\\partial":"∂","\\nabla":"∇","\\sum":"∑","\\prod":"∏","\\int":"∫","\\oint":"∮","\\sqrt":"√",
+  "\\rightarrow":"→","\\to":"→","\\leftarrow":"←","\\Rightarrow":"⇒","\\Leftarrow":"⇐","\\leftrightarrow":"↔","\\Leftrightarrow":"⇔","\\mapsto":"↦",
+  "\\in":"∈","\\notin":"∉","\\subset":"⊂","\\subseteq":"⊆","\\supset":"⊃","\\cup":"∪","\\cap":"∩","\\emptyset":"∅","\\forall":"∀","\\exists":"∃","\\neg":"¬","\\wedge":"∧","\\vee":"∨",
+  "\\ldots":"…","\\cdots":"⋯","\\dots":"…","\\angle":"∠","\\degree":"°","\\prime":"′",
+};
+function renderMath(tex) {
+  let s = String(tex || "");
+  s = s.replace(/\\left|\\right|\\displaystyle|\\!|\\,|\\;|\\:|\\quad|\\qquad/g, " ");
+  // \frac{a}{b} -> (a)/(b), \sqrt{x} -> √(x)
+  s = s.replace(/\\frac\s*\{([^{}]*)\}\s*\{([^{}]*)\}/g, "($1)/($2)");
+  s = s.replace(/\\sqrt\s*\{([^{}]*)\}/g, "√($1)");
+  s = s.replace(/\\text\s*\{([^{}]*)\}/g, "$1");
+  for (const [k, v] of Object.entries(MATH_SYMBOLS)) s = s.split(k).join(v);
+  s = escapeHtml(s);
+  // superscripts / subscripts: ^{...} ^x  _{...} _x
+  s = s.replace(/\^\{([^{}]*)\}/g, (m, g) => `<sup>${g}</sup>`);
+  s = s.replace(/\^(\w)/g, (m, g) => `<sup>${g}</sup>`);
+  s = s.replace(/_\{([^{}]*)\}/g, (m, g) => `<sub>${g}</sub>`);
+  s = s.replace(/_(\w)/g, (m, g) => `<sub>${g}</sub>`);
+  s = s.replace(/[{}]/g, "");  // drop leftover grouping braces
+  return s;
 }
 
 const HL_KEYWORDS = {
@@ -1216,6 +1261,12 @@ $("messages").addEventListener("click", (e) => {
     copyToClipboard(code.textContent, copyBtn, "已复制", "复制");
     return;
   }
+  const tableCopyBtn = e.target.closest(".tableCopyBtn");
+  if (tableCopyBtn) {
+    const table = tableCopyBtn.closest(".mdTableWrap").querySelector("table");
+    copyToClipboard(tableToMarkdown(table), tableCopyBtn, null, null);
+    return;
+  }
   const act = e.target.closest(".msgAct");
   if (!act) return;
   const msg = act.closest(".message");
@@ -1226,6 +1277,18 @@ $("messages").addEventListener("click", (e) => {
   else if (act.classList.contains("branch")) doBranch(src);
   else if (act.classList.contains("edit")) doEdit(raw, src, msg);
 });
+
+function tableToMarkdown(table) {
+  const rowText = (tr) => "| " + [...tr.children].map((c) => c.textContent.trim()).join(" | ") + " |";
+  const head = table.querySelector("thead tr");
+  const lines = [];
+  if (head) {
+    lines.push(rowText(head));
+    lines.push("| " + [...head.children].map(() => "---").join(" | ") + " |");
+  }
+  table.querySelectorAll("tbody tr").forEach((tr) => lines.push(rowText(tr)));
+  return lines.join("\n");
+}
 
 function copyToClipboard(text, btn, okLabel, resetLabel) {
   navigator.clipboard.writeText(text).then(() => {
@@ -1249,6 +1312,24 @@ function removeLastExchange() {
   while (node) { const next = node.nextSibling; node.remove(); node = next; }
   state.currentAssistant = null;
   state.currentTool = null;
+}
+
+// snapshot everything AFTER an anchor user message (answer, tool cards, later turns) so
+// a version can restore the WHOLE tail, not just one bubble's text
+function tailHTMLFrom(anchorUserEl) {
+  let html = "";
+  let n = anchorUserEl.nextElementSibling;
+  while (n) { html += n.outerHTML; n = n.nextElementSibling; }
+  return html;
+}
+
+// replace an anchor's whole tail with a version's saved prompt + tail HTML
+function applyVersion(anchorUserEl, version) {
+  const bubble = anchorUserEl.querySelector(".bubble");
+  if (bubble && version.prompt != null) { bubble.dataset.raw = version.prompt; renderBubble(bubble); }
+  let n = anchorUserEl.nextElementSibling;
+  while (n) { const nx = n.nextElementSibling; n.remove(); n = nx; }
+  if (version.tailHTML) anchorUserEl.insertAdjacentHTML("afterend", version.tailHTML);
 }
 
 /* ---------- approval request card (Codex approvalRequestCard: 受限模式弹批准) ---------- */
@@ -1310,23 +1391,27 @@ async function doRetry(src) {
   const target = src != null ? box.querySelector(`.message.assistant[data-src="${src}"]`)
                              : [...box.querySelectorAll(".message.assistant")].pop();
   if (!target) return;
-  // snapshot the (userPrompt, answer) pair being replaced so the version pager on the
-  // USER message can flip back to it. Find the user message that starts this turn.
+  // find the user message that starts this turn, and snapshot the FULL tail being
+  // replaced (old answer + tool cards + any later turns) so the version pager can bring
+  // all of it back — not just one answer bubble's text.
   let userEl = target.previousElementSibling;
   while (userEl && !(userEl.classList && userEl.classList.contains("message") && userEl.classList.contains("user"))) userEl = userEl.previousElementSibling;
-  let versions = [];
-  try { versions = JSON.parse((userEl && userEl.dataset.versions) || "[]"); } catch (_) {}
+  const priorVersions = (userEl && userEl.__versions) ? userEl.__versions.slice() : [];
+  const replacedVersion = {
+    prompt: userEl ? (userEl.querySelector(".bubble").dataset.raw || "") : "",
+    tailHTML: userEl ? tailHTMLFrom(userEl) : "",
+  };
   state.pendingVersions = {
-    userPrompt: userEl ? (userEl.querySelector(".bubble").dataset.raw || "") : "",
-    prior: versions,
-    replacedAnswer: target.querySelector(".bubble").dataset.raw || "",
+    versions: priorVersions.length ? priorVersions : [replacedVersion],
+    newPrompt: replacedVersion.prompt,  // retry keeps the same prompt
   };
   removeTurnFrom(target);
   state.stickToBottom = true;
   setRunning(true);
   try {
     await updateRuntime();
-    const result = await window.pywebview.api.retry(src != null ? { srcIndex: src } : {});
+    const retry = await apiMethod("retry");
+    const result = await retry(src != null ? { srcIndex: src } : {});
     if (!result.ok) throw new Error(result.error || "unknown error");
   } catch (error) {
     setRunning(false);
@@ -1335,34 +1420,33 @@ async function doRetry(src) {
   }
 }
 
-/* Codex-style response versions: after a retry, the ‹ i/n › arrows live on the USER
-   message; flipping shows that attempt's answer (and, since answers may differ in
-   count, hides/reveals the messages of the newest attempt). Each version stores the
-   answer text so we swap the answer bubble in place. */
+/* Codex-style response versions: after a retry/edit, the ‹ i/n › arrows live on the USER
+   message; each version is a full snapshot of the turn's prompt AND its entire tail
+   (answer, tool cards, later turns), so flipping restores everything — never leaves a
+   dangling half-conversation. */
 function attachVersionPager() {
   const snap = state.pendingVersions;
   state.pendingVersions = null;
   if (!snap) return;
   const box = $("messages");
-  const answerEl = [...box.querySelectorAll(".message.assistant")].pop();
-  if (!answerEl) return;
-  let userEl = answerEl.previousElementSibling;
-  while (userEl && !(userEl.classList && userEl.classList.contains("message") && userEl.classList.contains("user"))) userEl = userEl.previousElementSibling;
+  // the new turn's user message is the last user message in the transcript
+  const userEl = [...box.querySelectorAll(".message.user")].pop();
   if (!userEl) return;
-  const answers = (snap.prior || []).concat([answerEl.querySelector(".bubble").dataset.raw || ""]);
-  // edit mode also flips the USER prompt between versions
-  const prompts = snap.editMode ? (snap.prompts || []).concat([snap.newPrompt || (userEl.querySelector(".bubble").dataset.raw || "")]) : null;
-  userEl.dataset.versions = JSON.stringify(prompts ? snap.prompts : (snap.prior || []));
-  let index = answers.length - 1;
+  const newVersion = {
+    prompt: snap.newPrompt != null ? snap.newPrompt : (userEl.querySelector(".bubble").dataset.raw || ""),
+    tailHTML: tailHTMLFrom(userEl),
+  };
+  const versions = (snap.versions || []).concat([newVersion]);
+  userEl.__versions = versions;
+  let index = versions.length - 1;
+
   let pager = userEl.querySelector(".versionPager");
   if (!pager) {
     pager = document.createElement("span");
     pager.className = "versionPager";
     userEl.querySelector(".msgActions").prepend(pager);
   }
-  const answerBubble = answerEl.querySelector(".bubble");
-  const userBubble = userEl.querySelector(".bubble");
-  const total = prompts ? prompts.length : answers.length;
+  const total = versions.length;
   const render = () => {
     pager.innerHTML =
       `<button class="vBtn prev" title="上一版本"${index === 0 ? " disabled" : ""}>${icon("chevron", 12)}</button>` +
@@ -1373,10 +1457,10 @@ function attachVersionPager() {
     const btn = e.target.closest(".vBtn");
     if (!btn || btn.disabled) return;
     index += btn.classList.contains("prev") ? -1 : 1;
-    answerBubble.dataset.raw = answers[Math.min(index, answers.length - 1)] || "";
-    renderBubble(answerBubble);
-    if (prompts) { userBubble.dataset.raw = prompts[index] || ""; renderBubble(userBubble); }
+    applyVersion(userEl, versions[index]);
+    userEl.__versions = versions;  // survive the tail swap
     render();
+    markMessageActions();
   };
   render();
 }
@@ -1427,25 +1511,21 @@ function doEdit(text, src, msg) {
     const next = area.value.trim();
     if (!next) return;
     restore();
-    // snapshot the prior (prompt, answer) so the ‹ i/n › pager appears on the new
-    // user message after re-run — flip back to the original question and its answer
-    const priorPrompt = bubble.dataset.raw || "";
-    let priorAnswerEl = msg.nextElementSibling;
-    while (priorAnswerEl && !(priorAnswerEl.classList && priorAnswerEl.classList.contains("message") && priorAnswerEl.classList.contains("assistant"))) priorAnswerEl = priorAnswerEl.nextElementSibling;
-    let prevVersions = [];
-    try { prevVersions = JSON.parse(msg.dataset.versions || "[]"); } catch (_) {}
+    // snapshot the full prior turn (old prompt + its whole tail) so the ‹ i/n › pager on
+    // the new user message can flip back to the original question AND everything under it
+    const priorVersions = (msg.__versions) ? msg.__versions.slice() : [];
+    const replacedVersion = { prompt: bubble.dataset.raw || "", tailHTML: tailHTMLFrom(msg) };
     state.pendingVersions = {
-      editMode: true,
-      prompts: prevVersions.length ? prevVersions : [priorPrompt],
+      versions: priorVersions.length ? priorVersions : [replacedVersion],
       newPrompt: next,
-      prior: [priorAnswerEl ? (priorAnswerEl.querySelector(".bubble").dataset.raw || "") : ""],
     };
     removeTurnFrom(msg);
     state.stickToBottom = true;
     setRunning(true);
     try {
       await updateRuntime();
-      const result = await window.pywebview.api.edit_resend(
+      const editResend = await apiMethod("edit_resend");
+      const result = await editResend(
         src != null ? { prompt: next, srcIndex: src } : { prompt: next });
       if (!result.ok) throw new Error(result.error || "unknown error");
     } catch (error) {

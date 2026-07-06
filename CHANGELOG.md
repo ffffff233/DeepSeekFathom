@@ -1,5 +1,23 @@
 # 更新记录 / Changelog
 
+## v0.1.86
+
+中文：
+
+- **修复（致命）：编辑/重试后切回上一版本，会把该版本下面的消息删掉**。之前版本切换只换了**一个回复气泡的文字**，没保存那一版的其余消息——所以回到上一版时，它下面的内容就没了。现在**每个版本都完整快照整条“尾巴”**（该回合的回复、工具卡片、以及后面的所有消息），切版本时整段恢复，不再丢消息。重试和编辑重发都改成这套。
+- **修复：工具前引子那条消息的“复制”也被我一起藏掉了**。上一版把引子消息的所有操作都隐藏了，导致复制也没了。现在**引子消息保留“复制”**，只隐藏重试/开分支（那两个属于本回合的最终回复）。
+- **新增：AI 输出表格时，右上角出现“复制”按钮**，一键把整张表复制成 Markdown。
+- **新增：数学公式渲染**。`$$…$$`、`\[…\]`、`$…$`、`\(…\)` 里的 LaTeX 会渲染成人能看懂的样子（希腊字母、`×≤≥∑√∞→`、`\frac` 变 `(a)/(b)`、上下标变正确的大小写位置），不再是一堆只有机器看得懂的符号。`$…$` 会智能避开货币（`$5 和 $10` 不会被当公式）。
+- **修复：启动时会崩溃两次才能用**。启动挨个尝试界面后端时，之前遇到某类错误会直接抛出（表现为“崩溃两次”）；现在任何一个后端失败都**跳到下一个**，全失败才给出安装指引。
+
+English:
+
+- **Fixed (critical): paging back to a previous version after edit/retry deleted the messages under it**. Version switching only swapped a single answer bubble's text and never saved the rest of that version's messages — so going back lost everything below it. Each version now **snapshots the entire tail** (the turn's reply, tool cards, and all later messages) and restores it wholesale. Applied to both retry and edit-resend.
+- **Fixed: the pre-tool narration message also lost its Copy button**. The previous release hid all actions on that message; it now **keeps Copy** and only hides retry/branch (which belong to the turn's final reply).
+- **Added: a Copy button on AI tables** (top-right), copying the whole table as Markdown.
+- **Added: math rendering**. LaTeX in `$$…$$`, `\[…\]`, `$…$`, `\(…\)` renders to human-readable math (Greek letters, `×≤≥∑√∞→`, `\frac`→`(a)/(b)`, proper super/subscripts) instead of raw machine symbols; `$…$` avoids currency (`$5 和 $10` isn't treated as a formula).
+- **Fixed: launch crashed twice before working**. When trying GUI backends in turn, certain errors were re-raised immediately (seen as "crashes twice"); any backend failure now **falls through to the next**, with install guidance only if all fail.
+
 ## v0.1.85
 
 中文：

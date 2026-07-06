@@ -206,7 +206,10 @@ body.is-running .pulse { animation: pulseDot 1s ease-in-out infinite; }
 .message.user .msgAct.edit { display: inline-grid; }
 /* pre-tool narration inside a turn is not a standalone reply — no copy/retry/branch,
    so one turn shows one set of actions (on its final reply), not two */
-.message.assistant.intermediate .msgActions { display: none; }
+/* pre-tool narration inside a turn keeps Copy but not retry/branch (those belong to the
+   turn's final reply), so one turn shows one actionable reply */
+.message.assistant.intermediate .msgAct.retry,
+.message.assistant.intermediate .msgAct.branch { display: none; }
 
 /* retry version pager: ‹ i/n › */
 .versionPager { display: inline-flex; align-items: center; gap: 2px; margin-right: 4px; color: var(--text-4); font-size: 11px; font-family: var(--mono); }
@@ -243,7 +246,16 @@ body.is-running .pulse { animation: pulseDot 1s ease-in-out infinite; }
 code.inline { font-family: var(--mono); font-size: 12px; background: var(--hover-strong); padding: 1px 5px; border-radius: 4px; color: var(--text); }
 
 /* markdown tables */
-.mdTableWrap { overflow-x: auto; margin: 10px 0; border: 1px solid var(--line); border-radius: var(--r-row); }
+.mdTableWrap { position: relative; overflow-x: auto; margin: 10px 0; border: 1px solid var(--line); border-radius: var(--r-row); }
+.tableCopyBtn { position: absolute; top: 6px; right: 6px; z-index: 1; display: inline-grid; place-items: center; width: 26px; height: 26px; border: 1px solid var(--line); background: var(--elevated); color: var(--text-3); border-radius: var(--r-sm); cursor: pointer; opacity: 0; transition: opacity .12s, color .12s; }
+.mdTableWrap:hover .tableCopyBtn { opacity: 1; }
+.tableCopyBtn:hover { color: var(--text); }
+.tableCopyBtn.copied { color: var(--ok); }
+
+/* math: readable formulas rendered from LaTeX */
+.mathBlock { margin: 10px 0; padding: 8px 12px; overflow-x: auto; text-align: center; font-size: 15px; background: var(--bg-under); border-radius: var(--r-row); font-family: "STIX Two Math", "Cambria Math", var(--sans); }
+.mathInline { font-family: "STIX Two Math", "Cambria Math", var(--sans); white-space: nowrap; }
+.mathBlock sup, .mathInline sup, .mathBlock sub, .mathInline sub { font-size: 0.75em; }
 .mdTable { border-collapse: collapse; width: 100%; font-size: 12.5px; }
 .mdTable th, .mdTable td { padding: 6px 12px; text-align: left; border-bottom: 1px solid var(--line); }
 .mdTable th { color: var(--text-2); font-weight: 600; background: var(--hover); white-space: nowrap; }
