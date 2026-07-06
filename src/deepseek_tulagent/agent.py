@@ -456,7 +456,56 @@ def parse_tool_call(text: str) -> tuple[str, dict[str, Any]] | None:
     labelled = parse_labelled_tool_call(stripped)
     if labelled:
         return labelled
+    xml = parse_xml_tool_call(stripped)
+    if xml:
+        return xml
     return parse_action_shell_block(stripped)
+
+
+# Hermes/Qwen/GLM/Kimi-style tool calls wrapped in <tool_call>…</tool_call> tags.
+_TOOL_TAG_RE = re.compile(r"(?is)<tool_call\b[^>]*>(.*?)</tool_call>")
+_TOOL_TAG_OPEN_RE = re.compile(r"(?is)<tool_call\b[^>]*>(.*)$")
+
+
+def parse_xml_tool_call(text: str) -> tuple[str, dict[str, Any]] | None:
+    """Parse a <tool_call>…</tool_call> block (also tolerating an unterminated tag from a
+    truncated stream). The inner payload may be JSON ({"name","arguments"}), or a
+    name-then-JSON / name-then-key=value form."""
+    match = _TOOL_TAG_RE.search(text) or _TOOL_TAG_OPEN_RE.search(text)
+    if not match:
+        return None
+    inner = match.group(1).strip()
+    if not inner:
+        return None
+    for candidate in [inner, *extract_json_objects(inner)]:
+        try:
+            data = json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+        parsed = normalize_tool_call(data)
+        if parsed:
+            return parsed
+    # name-then-body form: "write_file\n{...}" or "write_file\ncmd=ls"
+    lines = inner.splitlines()
+    if lines:
+        name_match = re.match(r"^([A-Za-z_][\w-]*)\s*$", lines[0].strip())
+        if name_match:
+            rest = "\n".join(lines[1:]).strip()
+            for candidate in [rest, *extract_json_objects(rest)]:
+                try:
+                    data = json.loads(candidate)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(data, dict):
+                    return name_match.group(1), data
+            kv: dict[str, Any] = {}
+            for line in lines[1:]:
+                kv_match = re.match(r"^([A-Za-z_][\w-]*)\s*=\s*(.*)$", line.strip())
+                if kv_match:
+                    kv[kv_match.group(1)] = kv_match.group(2).strip()
+            if kv:
+                return name_match.group(1), kv
+    return None
 
 
 def parse_labelled_tool_call(text: str) -> tuple[str, dict[str, Any]] | None:
@@ -641,6 +690,10 @@ def promises_more_work(text: str) -> bool:
 
 
 def plainify_assistant_text(text: str) -> str:
+    # never surface a raw tool-call tag as prose (e.g. a stream that ended mid-tag and
+    # failed to parse) — drop closed blocks and any dangling opener
+    text = _TOOL_TAG_RE.sub("", text)
+    text = _TOOL_TAG_OPEN_RE.sub("", text)
     parts = re.split(r"(```.*?```)", text, flags=re.DOTALL)
     cleaned: list[str] = []
     for part in parts:
@@ -657,6 +710,12 @@ def should_hold_stream_output(text: str) -> bool:
     stripped = text.lstrip()
     if not stripped:
         return True
+    # A leading '<' may be the start of a <tool_call> tag building up char-by-char.
+    # Hold while the buffer is still a prefix of "<tool_call" or already opens one.
+    tag = "<tool_call"
+    head = stripped[: len(tag)].lower()
+    if stripped[:1] == "<" and (head.startswith(tag[: len(head)]) or head == tag):
+        return len(stripped) < 32000
     tool_prefixes = (
         "{",
         "```",
@@ -680,12 +739,15 @@ def safe_stream_emit_length(text: str) -> int:
     complete JSON that doesn't normalize to a tool).
     """
     last = None
-    for match in re.finditer(r"(?m)^[ \t]*(\{|```)", text):
+    for match in re.finditer(r"(?mi)^[ \t]*(\{|```|<tool_call)", text):
         last = match
     if last is None:
         return len(text)
     start = last.start()
     segment = text[start:].strip()
+    if segment.lower().startswith("<tool_call"):
+        # a tool-call tag (open or closed) is never chat prose — always hold it back
+        return start
     if segment.startswith("```"):
         if segment.count("```") >= 2:  # fence closed
             inner = re.sub(r"^```[\w-]*\s*|\s*```.*$", "", segment, flags=re.DOTALL).strip()
@@ -714,10 +776,13 @@ def strip_tool_call_display(text: str) -> str:
             pass
         return whole
 
+    # drop <tool_call>…</tool_call> blocks and any dangling unterminated opener
+    out = _TOOL_TAG_RE.sub("", text)
+    out = _TOOL_TAG_OPEN_RE.sub("", out)
     out = re.sub(
         r"```(?:json)?\s*(\{.*?\})\s*```",
         lambda m: _drop_if_tool(m.group(1), m.group(0)),
-        text,
+        out,
         flags=re.DOTALL,
     )
     for candidate in extract_json_objects(out):

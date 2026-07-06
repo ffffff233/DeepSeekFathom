@@ -91,6 +91,35 @@ def test_plainify_assistant_text_removes_decorative_stars():
     assert "echo *.py" in cleaned
 
 
+def test_parse_xml_tool_call_variants():
+    from deepseek_tulagent.agent import should_hold_stream_output, safe_stream_emit_length, strip_tool_call_display
+
+    # Hermes/Qwen name+arguments JSON inside <tool_call> tags
+    v1 = '<tool_call>\n{"name": "write_file", "arguments": {"path": "a.txt", "content": "hi"}}\n</tool_call>'
+    assert parse_tool_call(v1) == ("write_file", {"path": "a.txt", "content": "hi"})
+
+    # name-then-JSON form
+    v2 = '<tool_call>write_file\n{"path": "b.txt", "content": "x"}\n</tool_call>'
+    assert parse_tool_call(v2) == ("write_file", {"path": "b.txt", "content": "x"})
+
+    # inline, {"tool":...} shape, with prose before it
+    v4 = '我来写文件。\n<tool_call>{"tool":"run_shell","arguments":{"command":"ls"}}</tool_call>'
+    assert parse_tool_call(v4) == ("run_shell", {"command": "ls"})
+
+    # streaming: a leading '<' (possibly building toward <tool_call>) is held back
+    assert should_hold_stream_output("<tool_call") is True
+    assert should_hold_stream_output("<html>hi") is False
+
+    # prose then a tool tag: only the prose is safe to emit
+    t = "我来写文件。\n<tool_call>{\"name\":\"write_file\""
+    assert t[: safe_stream_emit_length(t)] == "我来写文件。\n"
+
+    # the raw tag never survives into displayed prose
+    assert strip_tool_call_display(v4) == "我来写文件。"
+    # a stream that ended mid-tag is scrubbed rather than shown raw
+    assert "<tool_call" not in plainify_assistant_text('<tool_call>\n{"name":"write_file"')
+
+
 def test_parse_action_bash_block_as_shell_tool():
     call = parse_tool_call("我现在检查仓库。\n\n```bash\nprintf repo-ok\n```")
     assert call == ("run_shell", {"command": "printf repo-ok"})

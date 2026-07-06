@@ -1,5 +1,18 @@
 # 更新记录 / Changelog
 
+## v0.1.79
+
+中文：
+
+- **修复：`<tool_call>` 标签式工具调用被当正文漏出来、然后又莫名其妙中断**。根因：你网关上的模型（glm、kimi、minimax 等）用的是 Hermes/Qwen 风格的 `<tool_call>…</tool_call>` 标签格式，而我们的解析器、流式截流、正文清洗**四处都不认这种标签**——所以参数先当普通文本流了出来，等到最后才检测到是工具调用、把已经流出去的内容一截，就成了你看到的“先输出参数、又莫名中断”。现在四处全部支持 `<tool_call>` 标签：
+  - **解析**：`<tool_call>` 里可以是 `{"name","arguments"}` JSON、`{"tool":...}` JSON、或“名字换行+JSON / 名字换行+key=value”几种写法，都能识别成工具调用。
+  - **流式截流**：输入框里一旦冒出 `<`（可能正在拼 `<tool_call>`）就先扣住不显示，确认不是才放行，标签内容永不泄露进聊天。
+  - **正文清洗**：结尾把 `<tool_call>…</tool_call>`（含被截断的半个标签）整块抹掉，绝不把裸标签当正文显示。
+
+English:
+
+- **Fixed: `<tool_call>` tag-style tool calls leaked as prose, then the stream cut off**. Root cause: models on your gateway (glm, kimi, minimax, …) emit Hermes/Qwen-style `<tool_call>…</tool_call>` tags, which our parser, stream-hold, and prose-scrubber **all failed to recognize** — so the arguments streamed out as text, and only at end-of-stream did we detect the call and truncate what had already shown. All four spots now handle `<tool_call>` tags: the parser accepts `{"name","arguments"}` / `{"tool":...}` JSON and name-then-body forms inside the tag; streaming holds back a leading `<` that might be building a tag; and the scrubber removes `<tool_call>…</tool_call>` blocks (including a truncated half-tag) so a raw tag never shows as prose.
+
 ## v0.1.78
 
 中文：
