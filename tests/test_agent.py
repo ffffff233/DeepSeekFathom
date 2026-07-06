@@ -182,6 +182,10 @@ def test_agent_delegates_to_subagent_with_isolated_context(tmp_path: Path):
     result = TuLAgent(settings(tmp_path), mode="root", client=client).run("主任务秘密：委派检查")
     assert result.answer == "主代理总结：已收到子代理结果。"
     assert client.subagent_saw_parent_prompt is False
+    # the delegated subagent must NOT create its own on-disk conversation: only the
+    # parent's session file should exist in the sessions directory
+    session_files = list((tmp_path / ".deepseek-tulagent" / "sessions").glob("*.jsonl"))
+    assert len(session_files) == 1, session_files
 
 
 def test_subagent_treats_thinking_mode_in_mode_field_as_thinking(tmp_path: Path):

@@ -353,7 +353,15 @@ class TuLAgent:
             f"Task: {task}\n"
             "Return a concise result for the parent agent: findings, evidence, and recommended next step."
         )
-        result = subagent.run(sub_prompt, max_tool_rounds=max_rounds, should_cancel=should_cancel, on_event=sub_on_event)
+        result = subagent.run(
+            sub_prompt,
+            max_tool_rounds=max_rounds,
+            should_cancel=should_cancel,
+            on_event=sub_on_event,
+            # ephemeral session: a delegated subagent must not create its own on-disk
+            # conversation in the sidebar
+            session=Session(self.settings.workspace, persist=False),
+        )
         if on_event:
             # carry the subagent's full final summary so its card shows the complete
             # result, not just "rounds=N"

@@ -1,5 +1,15 @@
 # 更新记录 / Changelog
 
+## v0.1.77
+
+中文：
+
+- **修复：子代理会莫名其妙多开一个对话目录**。根因：子代理通过 `run()` 运行时没传 session，`run()` 就自己新建了一个会**写盘到 `sessions/` 目录**的会话，于是它作为一个独立对话冒进了侧边栏。现在给子代理一个**内存态、不落盘**的会话（`Session(..., persist=False)`），委派子代理不再生成自己的对话文件。（此前已经产生的残留文件可以在侧边栏里手动删掉。）
+
+English:
+
+- **Fixed: a delegated subagent spawned its own conversation in the sidebar**. Root cause: the subagent ran via `run()` without a session, so `run()` created a fresh one that **persisted to the `sessions/` directory** and appeared as a standalone conversation. Subagents now get an **in-memory, non-persisted** session (`Session(..., persist=False)`), so delegation no longer creates a conversation file. (Any stray files already created can be deleted from the sidebar.)
+
 ## v0.1.76
 
 中文：

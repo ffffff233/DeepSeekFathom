@@ -28,6 +28,9 @@ class Session:
     created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     messages: list[Message] = field(default_factory=list)
     storage_path: Path | None = None
+    # In-memory-only session (subagents): kept out of the on-disk sessions/ directory so
+    # a delegated subagent never shows up as its own conversation in the sidebar.
+    persist: bool = True
 
     @property
     def path(self) -> Path:
@@ -37,6 +40,8 @@ class Session:
 
     def append(self, message: Message) -> None:
         self.messages.append(message)
+        if not self.persist:
+            return
         self.path.parent.mkdir(parents=True, exist_ok=True)
         event = {"session_id": self.session_id, "created_at": self.created_at, "message": _message_record(message)}
         with self.path.open("a", encoding="utf-8") as handle:
@@ -48,6 +53,8 @@ class Session:
         Used to truncate a conversation (retry / edit-and-branch): the JSONL file is
         rewritten from self.messages instead of appended to.
         """
+        if not self.persist:
+            return
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.path.open("w", encoding="utf-8") as handle:
             for message in self.messages:
