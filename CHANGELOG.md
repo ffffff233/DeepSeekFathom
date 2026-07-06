@@ -1,5 +1,15 @@
 # 更新记录 / Changelog
 
+## v0.1.76
+
+中文：
+
+- **修复：“思考中”加载指示又大又粗、还贴着侧边栏**。之前 shimmer 直接贴在消息容器左边、字号偏大偏粗。现在让它跟消息气泡在**同一条 760px 居中列里**（`padding: 2px 24px`，左对齐到气泡），字号收到 12px、字重 400，圆点也调小，低调不抢眼。
+
+English:
+
+- **Fixed: the "思考中" loading indicator was too large/bold and flush against the sidebar**. It now sits in the **same centered 760px column as the message bubbles** (`padding: 2px 24px`, aligned to the bubble), with a smaller 12px / weight-400 label and smaller dots — subtle instead of shouty.
+
 ## v0.1.75
 
 中文（对照 Codex 的 thinking-shimmer 加载指示）：

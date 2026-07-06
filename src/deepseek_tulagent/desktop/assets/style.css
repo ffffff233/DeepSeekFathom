@@ -458,21 +458,26 @@ dialog.miniModal menu { display: flex; justify-content: flex-end; gap: 8px; marg
 
 /* ---------- thinking shimmer: Codex-style loading indicator while the model works ---------- */
 .thinkingShimmer {
+  /* sit in the same centered column as message bubbles, not flush to the sidebar */
+  max-width: 760px;
+  width: 100%;
+  margin: 2px auto 4px;
+  padding: 2px 24px;
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin: 6px 2px 8px;
-  padding: 2px 0;
-  font-size: 13px;
+  gap: 7px;
+  font-size: 12px;
   line-height: 1.4;
   user-select: none;
 }
 .thinkingShimmer .shimmerText {
+  font-weight: 400;
+  letter-spacing: 0.1px;
   background: linear-gradient(
     90deg,
     var(--text-4) 0%,
     var(--text-4) 35%,
-    var(--text) 50%,
+    var(--text-2) 50%,
     var(--text-4) 65%,
     var(--text-4) 100%
   );
@@ -487,8 +492,8 @@ dialog.miniModal menu { display: flex; justify-content: flex-end; gap: 8px; marg
   gap: 3px;
 }
 .thinkingShimmer .shimmerDots i {
-  width: 4px;
-  height: 4px;
+  width: 3px;
+  height: 3px;
   border-radius: 50%;
   background: var(--text-3);
   animation: shimmerBlink 1.4s ease-in-out infinite;
