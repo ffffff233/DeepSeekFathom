@@ -1556,8 +1556,17 @@ function markMessageActions() {
 // Demote the most recent assistant bubble to pre-tool narration: it's part of this
 // turn, not a standalone reply, so it should carry no copy/retry/branch actions.
 function markLastAssistantIntermediate() {
-  const assistants = $("messages").querySelectorAll(".message.assistant:not(.intermediate)");
-  if (assistants.length) assistants[assistants.length - 1].classList.add("intermediate");
+  const box = $("messages");
+  const assistants = box.querySelectorAll(".message.assistant:not(.intermediate)");
+  if (!assistants.length) return;
+  const last = assistants[assistants.length - 1];
+  // only demote narration from THIS turn: the bubble must sit after the latest user
+  // message. A reply before it is the PREVIOUS turn's final answer — demoting that was
+  // why earlier replies lost retry/branch when the next turn began with a tool call.
+  const users = box.querySelectorAll(".message.user");
+  const lastUser = users.length ? users[users.length - 1] : null;
+  if (lastUser && !(lastUser.compareDocumentPosition(last) & Node.DOCUMENT_POSITION_FOLLOWING)) return;
+  last.classList.add("intermediate");
 }
 
 function readFileAsDataUrl(file) {
@@ -1626,10 +1635,15 @@ function apiReady() {
 }
 
 function start() {
-  if (window.__fathomBooted) return;
-  window.__fathomBooted = true;
-  boot().catch((error) => {
-    setSaveState("error", "启动失败", String(error.message || error));
+  if (window.__fathomBooting || window.__fathomBooted) return;
+  window.__fathomBooting = true;
+  boot().then(() => {
+    window.__fathomBooted = true;  // only mark done on SUCCESS
+  }).catch((error) => {
+    // a transient failure (e.g. an api method not attached yet) must not lock startup
+    // forever — release the flags so the poller retries instead of "crashes then works"
+    window.__fathomBooting = false;
+    setSaveState("error", "启动中…", String(error.message || error));
   });
 }
 

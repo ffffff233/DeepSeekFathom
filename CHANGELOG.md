@@ -1,5 +1,17 @@
 # 更新记录 / Changelog
 
+## v0.1.87
+
+中文：
+
+- **修复：上一条消息的复制/重试/开分支消失**。根因：新一轮如果**一上来就调用工具**（还没吐正文），我们的“把工具前引子降级为中间态”逻辑会误伤到**上一轮的最终回复**，把它的操作按钮一起去掉。现在只降级**属于本轮**的引子（气泡必须排在最新那条用户消息之后），上一轮的回复保持可复制/重试/开分支。
+- **修复：启动“崩溃两次才能用”**。前端启动只要 `boot()` 第一次失败（常见于 pywebview 的 api 方法还没挂全）就把 `__fathomBooted` 永久置位、再也不重试。现在**只有启动成功才置位**；失败则释放标志，让轮询器继续重试直到方法就绪——不再需要点两下。
+
+English:
+
+- **Fixed: copy/retry/branch vanished from the previous message**. When a new turn **started with a tool call** (before any prose), the “demote pre-tool narration to intermediate” logic wrongly hit the **previous turn's final reply**, stripping its actions. It now only demotes narration **belonging to the current turn** (the bubble must come after the latest user message), so the prior reply keeps copy/retry/branch.
+- **Fixed: “crashes twice before it works” on launch**. Startup set `__fathomBooted` permanently on the first `boot()` attempt, so an early failure (common while pywebview is still attaching api methods) never retried. It now **marks booted only on success**; on failure it releases the flag so the poller keeps retrying until the methods are ready — no more clicking twice.
+
 ## v0.1.86
 
 中文：
