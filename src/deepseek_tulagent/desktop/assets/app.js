@@ -317,8 +317,11 @@ function setRunning(running) {
   state.running = running;
   $("send").hidden = running;
   $("cancel").hidden = !running;
-  $("prompt").disabled = running;
-  $("attach").disabled = running;
+  // Keep the composer editable while a turn runs (Codex-style: compose your next
+  // message meanwhile). Send is already guarded by `if (state.running) return`, so an
+  // enabled box can't double-send — and you never get locked out if an event is missed.
+  $("prompt").disabled = false;
+  $("attach").disabled = false;
   document.body.classList.toggle("is-running", running);
 }
 

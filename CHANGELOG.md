@@ -1,5 +1,19 @@
 # 更新记录 / Changelog
 
+## v0.1.84
+
+中文：
+
+- **修复：发送消息后输入框被锁死、打不了字**。之前运行时会 `disabled` 掉输入框，一旦某个结束事件没到、或整轮卡住，你就再也输入不了。现在**运行期间保持输入框可编辑**（Codex 风格，可以先把下一条消息打好）；发送本身已有 `if (state.running) return` 防重复，所以不会误发，也永远不会被锁死。
+- **修复：工具调用解析成功后，正文残留单个 `}` / `<>` / `<`**。模型有时在工具 JSON 外多套一个括号（`…}}}`、`[{…]`）或在 `<tool_call>` 标签外多一个尖括号（`</tool_call>>`），解析没问题，但清洗后会剩一个孤零零的括号被当正文显示。现在**把紧贴被删工具块的多余括号/尖括号一起吃掉**，并清掉只剩括号的空行与空 `<>`；同时**绝不动正文里合法的 `a < b`、`<div>`、`{}`、`{100}`**。
+- **修复：模型用我们的“标签式”工具格式（`Tool:`/`工具:` + `参数:`/`key=value`）时，工具参数被当正文说出来**。之前正文清洗只认 JSON 和 `<tool_call>`，不认我们自己的标签格式——于是这种调用的参数整段漏成文字。现在清洗和流式截流都覆盖标签格式：识别到就从标签处整块切掉，只保留前面的正文；而只是把“工具”当普通词提到的句子不受影响。
+
+English:
+
+- **Fixed: the composer locked up after sending — couldn't type**. The input was `disabled` while running, so a missed end-event or a stuck turn locked you out. The composer now **stays editable during a turn** (Codex-style — compose your next message); send is already guarded by `if (state.running) return`, so it can't double-send and never gets stuck disabled.
+- **Fixed: a stray `}` / `<>` / `<` left as prose after a tool call parsed**. Models sometimes wrap the tool JSON in an extra brace (`…}}}`, `[{…]`) or the `<tool_call>` tag in an extra angle bracket (`</tool_call>>`); parsing was fine but a lone bracket was left showing as text. The scrubber now **consumes brackets/angle-brackets adjacent to the removed tool block**, clears bracket-only lines and empty `<>`, while **leaving legit prose `a < b`, `<div>`, `{}`, `{100}` untouched**.
+- **Fixed: labelled tool format (`Tool:`/`工具:` + `参数:`/`key=value`) leaked its parameters as prose**. The scrubber only handled JSON and `<tool_call>`, not our own labelled format, so those calls streamed out as text. Both the scrubber and the stream-hold now cover the labelled format — cut from the label onward, keeping the prose before it — while a sentence that merely mentions “工具/tool” as a word is left alone.
+
 ## v0.1.83
 
 中文：

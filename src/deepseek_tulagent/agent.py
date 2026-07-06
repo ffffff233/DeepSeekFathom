@@ -463,8 +463,8 @@ def parse_tool_call(text: str) -> tuple[str, dict[str, Any]] | None:
 
 
 # Hermes/Qwen/GLM/Kimi-style tool calls wrapped in <tool_call>…</tool_call> tags.
-_TOOL_TAG_RE = re.compile(r"(?is)<tool_call\b[^>]*>(.*?)</tool_call>")
-_TOOL_TAG_OPEN_RE = re.compile(r"(?is)<tool_call\b[^>]*>(.*)$")
+_TOOL_TAG_RE = re.compile(r"(?is)<+\s*tool_call\b[^>]*>(.*?)</\s*tool_call\s*>+")
+_TOOL_TAG_OPEN_RE = re.compile(r"(?is)<+\s*tool_call\b[^>]*>(.*)$")
 
 
 def parse_xml_tool_call(text: str) -> tuple[str, dict[str, Any]] | None:
@@ -746,6 +746,10 @@ def safe_stream_emit_length(text: str) -> int:
     )
     if specific:
         return specific.start()
+    # 1b) our labelled format at the start of a line (Tool:/工具: name)
+    labelled = re.search(r"(?im)^[ \t]*(?:tool|工具)[ \t]*:[ \t]*[A-Za-z_][\w-]*[ \t]*$", text)
+    if labelled:
+        return labelled.start()
     # 2) otherwise a line starting with '{' or a code fence may begin a tool call
     last = None
     for match in re.finditer(r"(?m)^[ \t]*(\{|```)", text):
@@ -785,6 +789,16 @@ def strip_tool_call_display(text: str) -> str:
     # drop <tool_call>…</tool_call> blocks and any dangling unterminated opener
     out = _TOOL_TAG_RE.sub("", text)
     out = _TOOL_TAG_OPEN_RE.sub("", out)
+    # scrub any remaining bare tool_call tag fragment (with extra angle brackets) and
+    # empty <> pairs left behind — but never touch legit prose like "a < b"
+    out = re.sub(r"(?i)<+\s*/?\s*tool_call\b[^>]*>*", "", out)
+    out = re.sub(r"<\s*>", "", out)
+    # our labelled format (Tool:/工具: + arguments:/参数:/key=value) — if the model uses
+    # it, the label and everything after it is the tool call, not prose. Cut it out so
+    # the raw tool parameters never show as text; keep the prose that precedes it.
+    label_match = re.search(r"(?im)^[ \t]*(?:tool|工具)[ \t]*:[ \t]*[A-Za-z_][\w-]*[ \t]*$", out)
+    if label_match and parse_labelled_tool_call(out[label_match.start():]):
+        out = out[: label_match.start()]
     out = re.sub(
         r"```(?:json)?\s*(\{.*?\})\s*```",
         lambda m: _drop_if_tool(m.group(1), m.group(0)),
@@ -792,9 +806,21 @@ def strip_tool_call_display(text: str) -> str:
         flags=re.DOTALL,
     )
     for candidate in extract_json_objects(out):
-        cleaned = _drop_if_tool(candidate, candidate)
-        if cleaned == "":
-            out = out.replace(candidate, "", 1)
+        if _drop_if_tool(candidate, candidate) == "":
+            pos = out.find(candidate)
+            if pos == -1:
+                continue
+            end = pos + len(candidate)
+            # models sometimes wrap the tool JSON in an extra brace/bracket (…}}} or
+            # [{…]); consume brackets/whitespace immediately adjacent to the removed
+            # object so no orphan bracket is left dangling as prose
+            while pos > 0 and out[pos - 1] in "{[ \t":
+                pos -= 1
+            while end < len(out) and out[end] in "}] \t":
+                end += 1
+            out = out[:pos] + out[end:]
+    # also scrub any line that is now only brackets/angle brackets
+    out = re.sub(r"(?m)^[ \t]*[{}\[\]<>]+[ \t]*$\n?", "", out)
     return plainify_assistant_text(out).strip()
 
 

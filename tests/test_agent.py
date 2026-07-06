@@ -138,6 +138,30 @@ def test_stream_holds_mid_line_tool_calls():
     assert safe_stream_emit_length(t3) == len(t3)
 
 
+def test_strip_leaves_no_bracket_or_tag_residue():
+    """Parsing succeeds but a stray brace/angle-bracket must not be left as prose."""
+    from deepseek_tulagent.agent import strip_tool_call_display as strip
+
+    # extra trailing brace after the tool JSON
+    assert strip('现在执行。\n{"tool":"run_shell","arguments":{"command":"ls"}}}') == "现在执行。"
+    # extra angle bracket after a </tool_call>
+    assert strip('好的。<tool_call>{"name":"read_file","arguments":{"path":"x"}}</tool_call>>') == "好的。"
+    # empty <> pair and lone bracket lines
+    assert strip("执行。<tool_call>{\"name\":\"x\",\"arguments\":{}}</tool_call>\n<") == "执行。"
+    # legit prose with < > and braces is untouched (no tool call present)
+    assert strip("判断 a < b 且 c > d，用 {} 表示空集") == "判断 a < b 且 c > d，用 {} 表示空集"
+
+
+def test_strip_removes_labelled_tool_format():
+    """Our labelled Tool:/工具: format must be stripped from display too, not just JSON."""
+    from deepseek_tulagent.agent import strip_tool_call_display as strip
+
+    assert strip('好的，我来运行命令。\nTool: run_shell\nArguments: {"command":"ls"}') == "好的，我来运行命令。"
+    assert strip("我检查一下。\n工具: read_file\n参数: {\"path\":\"x\"}") == "我检查一下。"
+    # a message that merely mentions 工具 as a word is not a tool call
+    assert strip("工具很好用，我们来讨论一下。") == "工具很好用，我们来讨论一下。"
+
+
 def test_parse_action_bash_block_as_shell_tool():
     call = parse_tool_call("我现在检查仓库。\n\n```bash\nprintf repo-ok\n```")
     assert call == ("run_shell", {"command": "printf repo-ok"})
