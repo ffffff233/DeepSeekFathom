@@ -920,6 +920,36 @@ def test_workspace_absolute_path_inside_workspace_is_allowed(tmp_path: Path):
     assert target.read_text(encoding="utf-8") == "ok"
 
 
+def test_restricted_mode_blocks_outside_workspace(tmp_path: Path):
+    import pytest
+
+    ws = tmp_path / "proj"
+    ws.mkdir()
+    outside = tmp_path / "outside.txt"
+    outside.write_text("secret", encoding="utf-8")
+    tools = ToolRegistry(ws, policy=ApprovalPolicy.from_mode("agent"))
+    with pytest.raises(ToolError, match="escapes workspace"):
+        tools.run("read_file", {"path": str(outside)})
+
+
+def test_full_access_reaches_outside_workspace(tmp_path: Path):
+    """完全访问 / root lifts the workspace confinement — file tools reach anywhere,
+    matching the shell, and path display never crashes on outside paths."""
+    ws = tmp_path / "proj"
+    ws.mkdir()
+    outside = tmp_path / "elsewhere" / "note.txt"
+    outside.parent.mkdir()
+    outside.write_text("hello outside", encoding="utf-8")
+    tools = ToolRegistry(ws, policy=ApprovalPolicy.from_mode("root"))
+
+    read = tools.run("read_file", {"path": str(outside)})
+    assert read.ok and read.output == "hello outside"
+    written = tools.run("write_file", {"path": str(outside.parent / "new.txt"), "content": "x"})
+    assert written.ok and (outside.parent / "new.txt").read_text(encoding="utf-8") == "x"
+    listed = tools.run("list_files", {"path": str(outside.parent)})
+    assert listed.ok and "note.txt" in listed.output
+
+
 def test_clone_repo_uses_github_archive_fallback(monkeypatch, tmp_path: Path):
     archive_bytes = io.BytesIO()
     with zipfile.ZipFile(archive_bytes, "w") as archive:

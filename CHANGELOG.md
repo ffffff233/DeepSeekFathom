@@ -1,5 +1,15 @@
 # 更新记录 / Changelog
 
+## v0.1.85
+
+中文：
+
+- **修复：完全访问模式下的“工作区限制”**。之前不管什么权限档，文件工具（`read_file`/`write_file`/`list_files`/`search_text`/`download_url`/`apply_patch` 等）都被硬限制在 workspace 目录里，访问外面就报 `Path escapes workspace`——可 `run_shell` 却能随便 `cat /etc/hosts`，前后矛盾，气人。现在**完全访问（root）/ yolo 档解除工作区限制**，文件工具可以像 shell 一样访问任意路径（与 Codex 的完全访问一致）；路径展示也做了兜底，访问外部路径时显示绝对路径、不再崩。**受限（agent）/ 只读（plan）等档位仍然把文件限制在工作区内**，安全不变。
+
+English:
+
+- **Fixed: the workspace confinement in full-access mode**. File tools (`read_file`/`write_file`/`list_files`/`search_text`/`download_url`/`apply_patch`, …) were hard-confined to the workspace in every tier — reaching outside threw `Path escapes workspace` — yet `run_shell` could freely `cat /etc/hosts`, an inconsistent and annoying gap. Full-access (**root**) / yolo now **lift the confinement** so file tools reach any path like the shell does (matching Codex's full-access), and path display falls back to absolute paths outside the workspace instead of crashing. **Restricted (agent) / read-only (plan)** tiers still keep files inside the workspace — security unchanged.
+
 ## v0.1.84
 
 中文：

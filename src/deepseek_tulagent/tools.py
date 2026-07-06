@@ -71,6 +71,10 @@ class ToolRegistry:
         )
         self.allow_write = self.policy.allow_write
         self.allow_shell = self.policy.allow_shell
+        # Full-access tiers (完全访问 / root, yolo) lift the workspace confinement so file
+        # tools can reach anywhere — matching the shell, which was never path-confined, and
+        # Codex's full-access mode. Restricted tiers keep files inside the workspace.
+        self.unconfined = self.policy.name in {"root", "yolo"}
         self._tools: dict[str, ToolHandler] = {
             "list_files": self.list_files,
             "search_text": self.search_text,
@@ -103,11 +107,21 @@ class ToolRegistry:
         raw_path = normalize_user_path(raw_path)
         candidate = Path(raw_path).expanduser()
         path = candidate.resolve() if candidate.is_absolute() else (self.workspace / raw_path).resolve()
+        if self.unconfined:
+            return path  # 完全访问 / root: reach anywhere, like the shell already can
         try:
             path.relative_to(self.workspace)
         except ValueError as exc:
             raise ToolError(f"Path escapes workspace: {raw_path}") from exc
         return path
+
+    def _display_path(self, path: Path) -> str:
+        """Workspace-relative path for display, or the absolute path when outside it
+        (full-access mode) so we never crash on relative_to()."""
+        try:
+            return str(path.relative_to(self.workspace))
+        except ValueError:
+            return str(path)
 
     def read_file(self, arguments: dict[str, Any]) -> ToolResult:
         path = self.resolve_workspace_path(require_str(arguments, "path"))
@@ -118,8 +132,15 @@ class ToolRegistry:
     def list_files(self, arguments: dict[str, Any]) -> ToolResult:
         root = self.resolve_workspace_path(str(arguments.get("path", ".")))
         max_entries = int(arguments.get("max_entries", 300))
+        # inside the workspace, show workspace-relative paths; when listing an outside
+        # directory (full-access mode), show paths relative to that directory
+        try:
+            root.relative_to(self.workspace)
+            base = self.workspace
+        except ValueError:
+            base = root if root.is_dir() else root.parent
         if root.is_file():
-            return ToolResult(True, str(root.relative_to(self.workspace)))
+            return ToolResult(True, self._display_path(root))
         entries: list[str] = []
         for path in sorted(root.rglob("*")):
             if len(entries) >= max_entries:
@@ -127,7 +148,11 @@ class ToolRegistry:
                 break
             if should_skip(path):
                 continue
-            entries.append(str(path.relative_to(self.workspace)) + ("/" if path.is_dir() else ""))
+            try:
+                rel = str(path.relative_to(base))
+            except ValueError:
+                rel = str(path)
+            entries.append(rel + ("/" if path.is_dir() else ""))
         return ToolResult(True, "\n".join(entries))
 
     def search_text(self, arguments: dict[str, Any]) -> ToolResult:
@@ -176,7 +201,7 @@ class ToolRegistry:
             try:
                 for line_no, line in enumerate(file_path.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
                     if query in line:
-                        rel = file_path.relative_to(self.workspace)
+                        rel = self._display_path(file_path)
                         matches.append(f"{rel}:{line_no}: {line[:240]}")
                         if len(matches) >= max_matches:
                             break
@@ -209,7 +234,7 @@ class ToolRegistry:
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(tmp_path, path)
-        return ToolResult(True, f"Wrote {path.relative_to(self.workspace)}")
+        return ToolResult(True, f"Wrote {self._display_path(path)}")
 
     def run_shell(self, arguments: dict[str, Any]) -> ToolResult:
         if not self.allow_shell:
@@ -260,7 +285,7 @@ class ToolRegistry:
             raise ToolError(f"download exceeded max_bytes={max_bytes}")
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(data)
-        return ToolResult(True, f"Downloaded {len(data)} bytes to {path.relative_to(self.workspace)}")
+        return ToolResult(True, f"Downloaded {len(data)} bytes to {self._display_path(path)}")
 
     def clone_repo(self, arguments: dict[str, Any]) -> ToolResult:
         if not self.policy.allow_network or not self.allow_write:
@@ -272,7 +297,7 @@ class ToolRegistry:
         branch = str(arguments.get("branch") or "").strip()
         timeout = int(arguments.get("timeout", 120))
         if dest.exists() and any(dest.iterdir() if dest.is_dir() else [dest]):
-            return ToolResult(False, f"target exists and is not empty: {dest.relative_to(self.workspace)}")
+            return ToolResult(False, f"target exists and is not empty: {self._display_path(dest)}")
         dest.parent.mkdir(parents=True, exist_ok=True)
 
         attempts: list[str] = []
@@ -342,7 +367,7 @@ class ToolRegistry:
         log = log_path.open("ab")
         process = subprocess.Popen(command, cwd=self.workspace, shell=True, stdout=log, stderr=subprocess.STDOUT)
         pid_path.write_text(str(process.pid), encoding="utf-8")
-        return ToolResult(True, f"Started {name} pid={process.pid} log={log_path.relative_to(self.workspace)}")
+        return ToolResult(True, f"Started {name} pid={process.pid} log={self._display_path(log_path)}")
 
     def stop_service(self, arguments: dict[str, Any]) -> ToolResult:
         if not self.allow_shell:
