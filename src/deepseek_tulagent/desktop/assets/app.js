@@ -3,6 +3,7 @@ const state = {
   currentAssistant: null,
   currentTool: null,
   attachments: [],
+  images: [],
   events: 0,
   running: false,
   stickToBottom: true,
@@ -129,7 +130,10 @@ window.DeepSeekDesktop = {
       setRunning(true);
       state.stickToBottom = true;
       setSaveState("running", "运行中", "正在执行工具和模型");
-      addMessage("user", payload.prompt);
+      // send() already rendered the user message locally (with image thumbs); only
+      // add it here for turns started elsewhere (retry/edit/branch)
+      if (state.suppressLocalUserEcho) { state.suppressLocalUserEcho = false; }
+      else { addMessage("user", payload.prompt); }
       state.currentAssistant = null;
       state.currentTool = null;
       addEvent("thinking", "", `thinking mode: ${payload.thinking}`);
@@ -691,7 +695,7 @@ async function updateRuntime() {
 $("send").onclick = async () => {
   if (state.running) return;
   const raw = $("prompt").value.trim();
-  if (!raw && !state.attachments.length) return;
+  if (!raw && !state.attachments.length && !state.images.length) return;
   let outgoing = raw;
   if (raw) {
     const cmd = interpretPrompt(raw);
@@ -703,23 +707,44 @@ $("send").onclick = async () => {
   autoGrow();
   closeSlash();
   const attachments = state.attachments;
+  const images = state.images;
   state.attachments = [];
+  state.images = [];
   renderAttachments();
+  // show the user's message (with image thumbnails) immediately
+  addUserMessageWithImages(outgoing, images);
+  state.suppressLocalUserEcho = true;  // turn:start would double-add it
   state.stickToBottom = true;
   setRunning(true);
   try {
     await updateRuntime();
-    const result = await window.pywebview.api.send({ prompt: outgoing, attachments });
+    const result = await window.pywebview.api.send({ prompt: outgoing, attachments, images: images.map((i) => i.url) });
     if (!result.ok) throw new Error(result.error || "unknown error");
   } catch (error) {
     setRunning(false);
     addEvent("error", "发送失败", String(error.message || error));
     $("prompt").value = raw;
     state.attachments = attachments;
+    state.images = images;
     renderAttachments();
     autoGrow();
   }
 };
+
+function addUserMessageWithImages(text, images) {
+  const row = addMessage("user", text || "");
+  if (images && images.length) {
+    const strip = document.createElement("div");
+    strip.className = "msgImages";
+    images.forEach((img) => {
+      const el = document.createElement("img");
+      el.src = img.url;
+      strip.append(el);
+    });
+    row.querySelector(".bubble").append(strip);
+  }
+  return row;
+}
 
 function autoGrow() {
   const ta = $("prompt");
@@ -730,8 +755,15 @@ function autoGrow() {
 /* ---------- slash command menu (输入 / 调出命令与技能，Codex 风格) ---------- */
 const SLASH_COMMANDS = [
   { key: "/compact", desc: "压缩当前上下文", run: () => $("manualCompact").click() },
-  { key: "/subagent", desc: "插入子代理任务模板", insert: 'Use delegate_agent with name="researcher" task="' },
+  { key: "/subagent", desc: "派遣子代理执行子任务", insert: 'Use delegate_agent with name="researcher" task="' },
+  { key: "/review", desc: "代码审查子代理", insert: 'Use delegate_agent with name="reviewer" task="审查当前改动，找出缺陷并给出证据："' },
+  { key: "/test", desc: "运行测试并汇报", insert: "运行测试，汇报结果，若失败给出修复方案：" },
+  { key: "/explain", desc: "解释一段代码/文件", insert: "解释这段代码的作用、边界情况和潜在问题：" },
+  { key: "/image", desc: "添加图片（打开文件选择）", run: () => $("attach").click() },
   { key: "/new", desc: "开始新对话", run: () => $("newSession").click() },
+  { key: "/copyid", desc: "复制当前会话 ID", run: () => { const s = currentSessionId(); if (s) { copyToClipboard(s, null, null, null); toast("已复制会话 ID"); } else toast("暂无会话 ID"); } },
+  { key: "/branch", desc: "从最新回复开分支", run: () => doBranch() },
+  { key: "/test-connection", desc: "打开设置并测试连接", run: () => { $("settingsBtn").click(); setTimeout(() => $("testConn").click(), 200); } },
   { key: "/settings", desc: "打开 API 设置", run: () => $("settingsBtn").click() },
 ];
 
@@ -818,6 +850,13 @@ function interpretPrompt(text) {
   }
   const skill = (state.skills || []).find((s) => (s.name || "").toLowerCase() === name);
   if (skill) return { send: rest ? `Use skill ${skill.name}: ${rest}` : `Use skill ${skill.name}: ` };
+  // generic: any run-command from the slash menu (typed + Enter) runs locally
+  const cmd = SLASH_COMMANDS.find((c) => c.key.toLowerCase() === "/" + name);
+  if (cmd) {
+    if (cmd.run && !rest) { cmd.run(); return { handled: true }; }
+    if (cmd.insert !== undefined) return { send: rest ? cmd.insert + rest : cmd.insert };
+    if (cmd.run) { cmd.run(); return { handled: true }; }
+  }
   return { unknown: match[1] };
 }
 
@@ -831,6 +870,18 @@ function toast(message) {
 }
 
 $("prompt").addEventListener("input", () => { autoGrow(); updateSlash(); });
+// paste an image directly into the composer
+$("prompt").addEventListener("paste", async (e) => {
+  const items = e.clipboardData && e.clipboardData.items ? Array.from(e.clipboardData.items) : [];
+  const imgs = items.filter((it) => it.kind === "file" && (it.type || "").startsWith("image/"));
+  if (!imgs.length) return;
+  e.preventDefault();
+  for (const it of imgs) {
+    const file = it.getAsFile();
+    if (file) await uploadFile(file, `粘贴图片-${Date.now()}.png`);
+  }
+  renderAttachments();
+});
 $("prompt").addEventListener("blur", () => setTimeout(closeSlash, 150));
 $("slashMenu").addEventListener("mousedown", (e) => {
   const item = e.target.closest(".slashItem");
@@ -994,6 +1045,11 @@ $("fileInput").onchange = async (event) => {
 async function uploadFile(file, relPath) {
   try {
     const content = await readFileAsDataUrl(file);
+    // images ride along as vision input (kept as data URL); other files are saved to disk
+    if ((file.type || "").startsWith("image/")) {
+      state.images.push({ name: relPath || file.name || "image", url: content });
+      return;
+    }
     const saved = await window.pywebview.api.save_upload({ name: relPath || file.name, content });
     if (saved && saved.ok) state.attachments.push(saved);
   } catch (_) { /* skip unreadable file */ }
@@ -1303,12 +1359,21 @@ function readFileAsDataUrl(file) {
 }
 
 function renderAttachments() {
-  $("attachments").innerHTML = "";
-  state.attachments.forEach((file) => {
+  const box = $("attachments");
+  box.innerHTML = "";
+  state.images.forEach((img, i) => {
+    const chip = document.createElement("span");
+    chip.className = "chip imgChip";
+    chip.innerHTML = `<img src="${img.url}" alt=""><button class="chipX" title="移除">${icon("trash", 11)}</button>`;
+    chip.querySelector(".chipX").onclick = () => { state.images.splice(i, 1); renderAttachments(); };
+    box.append(chip);
+  });
+  state.attachments.forEach((file, i) => {
     const chip = document.createElement("span");
     chip.className = "chip";
-    chip.textContent = file.name;
-    $("attachments").append(chip);
+    chip.innerHTML = `<span>${escapeHtml(file.name)}</span><button class="chipX" title="移除">${icon("trash", 11)}</button>`;
+    chip.querySelector(".chipX").onclick = () => { state.attachments.splice(i, 1); renderAttachments(); };
+    box.append(chip);
   });
 }
 

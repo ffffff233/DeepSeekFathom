@@ -1,5 +1,32 @@
 # 更新记录 / Changelog
 
+## v0.1.72
+
+中文：
+
+- **图片支持（视觉）**：可以把图片**拖进**输入框、**粘贴**进输入框、或用「＋」选择；图片以缩略图挂在输入区，
+  发送后随消息一起发给模型（OpenAI/DeepSeek 用 `image_url`、Anthropic 用 base64 image block、
+  Gemini 用 inline_data 三种格式都已适配），你发的消息里也显示图片缩略图。图片只跟随当轮，不写进会话日志。
+- **拖拽更明确**：拖文件/文件夹到输入卡片高亮提示；图片自动识别为视觉输入，其它文件仍作附件上传。附件/图片
+  都能单独点 × 移除。
+- **更多 `/` 命令**：新增 `/review`（代码审查子代理）、`/test`、`/explain`、`/image`（选图）、`/branch`、
+  `/copyid`（复制会话 ID）、`/test-connection`（打开设置并测连接）等；命令列表与输入即时联动。
+- **启动更健壮**：找不到默认界面后端时依次尝试 edgechromium / qt / gtk，仍失败给出明确的中文安装提示，
+  不再莫名其妙崩。
+
+English:
+
+- **Image / vision support**: drag an image into the composer, paste it, or pick it via ＋; images show as
+  thumbnails in the input area and are sent to the model with the message (adapted per format —
+  OpenAI/DeepSeek `image_url`, Anthropic base64 image blocks, Gemini `inline_data`); your sent message shows
+  the thumbnails too. Images ride the current turn only and are not written to the session log.
+- **Clearer drag & drop**: dropping files/folders highlights the composer; images are auto-detected as vision
+  input while other files still upload as attachments. Each attachment/image has its own × to remove.
+- **More `/` commands**: added `/review` (code-review subagent), `/test`, `/explain`, `/image`, `/branch`,
+  `/copyid` (copy conversation ID), `/test-connection`, etc.; the menu and typed-command routing stay in sync.
+- **More robust startup**: if the default GUI backend is missing, it tries edgechromium / qt / gtk in turn and,
+  if all fail, shows a clear install hint instead of an opaque crash.
+
 ## v0.1.71
 
 中文：

@@ -307,7 +307,13 @@ pre.code code { display: block; padding: 12px 14px; font-family: var(--mono); fo
 .composer { flex-shrink: 0; padding: 8px 24px 16px; display: flex; flex-direction: column; gap: 8px; max-width: 808px; width: 100%; margin: 0 auto; }
 .attachments { display: flex; flex-wrap: wrap; gap: 6px; }
 .attachments:empty { display: none; }
-.chip { background: var(--elevated); border: 1px solid var(--line); color: var(--text-2); border-radius: 999px; padding: 3px 11px; font-size: 12px; }
+.chip { background: var(--elevated); border: 1px solid var(--line); color: var(--text-2); border-radius: 999px; padding: 3px 6px 3px 11px; font-size: 12px; display: inline-flex; align-items: center; gap: 5px; }
+.chip .chipX { display: inline-grid; place-items: center; background: none; border: none; color: var(--text-4); cursor: pointer; padding: 0; }
+.chip .chipX:hover { color: var(--danger); }
+.chip.imgChip { padding: 3px; border-radius: var(--r-sm); }
+.chip.imgChip img { width: 34px; height: 34px; object-fit: cover; border-radius: var(--r-sm); display: block; }
+.msgImages { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.msgImages img { max-width: 220px; max-height: 220px; border-radius: var(--r-row); border: 1px solid var(--line); display: block; }
 
 .composeCard {
   position: relative;

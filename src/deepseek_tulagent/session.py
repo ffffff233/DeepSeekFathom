@@ -9,6 +9,15 @@ from uuid import uuid4
 from .messages import Message
 
 
+def _message_record(message: Message) -> dict:
+    """Serialize a message for the session log, dropping non-persistable fields
+    (base64 image data) that would bloat the transcript."""
+    record = {"role": message.role, "content": message.content}
+    if message.name:
+        record["name"] = message.name
+    return record
+
+
 @dataclass
 class Session:
     workspace: Path
@@ -26,7 +35,7 @@ class Session:
     def append(self, message: Message) -> None:
         self.messages.append(message)
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        event = {"session_id": self.session_id, "created_at": self.created_at, "message": asdict(message)}
+        event = {"session_id": self.session_id, "created_at": self.created_at, "message": _message_record(message)}
         with self.path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(event, ensure_ascii=False) + "\n")
 
@@ -39,7 +48,7 @@ class Session:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.path.open("w", encoding="utf-8") as handle:
             for message in self.messages:
-                event = {"session_id": self.session_id, "created_at": self.created_at, "message": asdict(message)}
+                event = {"session_id": self.session_id, "created_at": self.created_at, "message": _message_record(message)}
                 handle.write(json.dumps(event, ensure_ascii=False) + "\n")
 
 

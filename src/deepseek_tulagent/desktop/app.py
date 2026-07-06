@@ -213,18 +213,22 @@ class DesktopApi:
             return {"ok": False, "error": "turn already running"}
         prompt = str(payload.get("prompt") or "").strip()
         attachments = payload.get("attachments") if isinstance(payload.get("attachments"), list) else []
-        if attachments:
+        images = [str(u) for u in (payload.get("images") or []) if isinstance(u, str) and u.startswith("data:")]
+        non_image = [item for item in attachments if isinstance(item, dict)]
+        if non_image:
             prompt += "\n\nAttached files:\n" + "\n".join(
-                f"- {item.get('name')}: {item.get('path')} ({item.get('size')} bytes)" for item in attachments if isinstance(item, dict)
+                f"- {item.get('name')}: {item.get('path')} ({item.get('size')} bytes)" for item in non_image
             )
-        if not prompt:
+        if images and not prompt:
+            prompt = "请看这张图片。"
+        if not prompt and not images:
             return {"ok": False, "error": "empty prompt"}
-        return self._start_turn(prompt)
+        return self._start_turn(prompt, images=images)
 
-    def _start_turn(self, prompt: str) -> dict[str, Any]:
+    def _start_turn(self, prompt: str, images: list[str] | None = None) -> dict[str, Any]:
         self._cancel_requested = False
         self._running = True
-        thread = threading.Thread(target=self._run_agent_turn, args=(prompt,), daemon=True)
+        thread = threading.Thread(target=self._run_agent_turn, args=(prompt, images or []), daemon=True)
         thread.start()
         return {"ok": True}
 
@@ -354,7 +358,7 @@ class DesktopApi:
         pending["event"].set()
         return {"ok": True}
 
-    def _run_agent_turn(self, prompt: str) -> None:
+    def _run_agent_turn(self, prompt: str, images: list[str] | None = None) -> None:
         with self._lock:
             turn_session_id = self.session.session_id if self.session else None
             try:
@@ -380,7 +384,7 @@ class DesktopApi:
                     mode=self.mode,
                     thinking=self.thinking.name,
                     approve=(lambda _n, _a: True) if self.mode in {"root", "yolo"} else self._request_approval,
-                ).run(prompt, stream=True, on_delta=delta, on_final=final, on_event=event, session=self.session)
+                ).run(prompt, stream=True, images=images or [], on_delta=delta, on_final=final, on_event=event, session=self.session)
                 # Only adopt the finished turn's session if the user hasn't switched to a
                 # different conversation meanwhile — otherwise the next send would land in
                 # the OLD conversation (context bleeding across chats).
@@ -528,7 +532,9 @@ def main() -> None:
     try:
         import webview
     except ImportError as exc:
-        raise SystemExit("Desktop mode requires pywebview. Install with: python -m pip install pywebview") from exc
+        raise SystemExit(
+            "桌面端需要 pywebview。安装：py -3 -m pip install --upgrade \"deepseek-tulagent[desktop]\""
+        ) from exc
 
     api = DesktopApi()
     window = webview.create_window(
@@ -541,7 +547,20 @@ def main() -> None:
         text_select=True,
     )
     api.bind_window(window)
-    webview.start(debug=False)
+    # Try common GUI backends in turn so a missing default backend gives a clear,
+    # actionable message instead of an opaque startup crash.
+    for kwargs in ({}, {"gui": "edgechromium"}, {"gui": "qt"}, {"gui": "gtk"}):
+        try:
+            webview.start(debug=False, **kwargs)
+            return
+        except (KeyError, ValueError, ImportError, ModuleNotFoundError):
+            continue  # backend not available — try the next one
+        except Exception as exc:
+            raise SystemExit(f"桌面端启动失败：{exc}") from exc
+    raise SystemExit(
+        "找不到可用的界面后端。Windows 请安装 Microsoft Edge WebView2 运行时；"
+        "Linux 请安装 gtk（python3-gi / gir1.2-webkit2）或 Qt（pip install pyqt6 qtpy）。"
+    )
 
 
 if __name__ == "__main__":

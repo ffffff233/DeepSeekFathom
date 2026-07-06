@@ -46,6 +46,58 @@ def normalize_format(value: str | None) -> str:
     return FORMAT_ALIASES.get((value or "deepseek").strip().lower(), "deepseek")
 
 
+def _split_data_url(data_url: str) -> tuple[str, str]:
+    """('image/png', '<base64>') from a data: URL; ('image/png', '') if not a data URL."""
+    if data_url.startswith("data:") and "," in data_url:
+        head, b64 = data_url.split(",", 1)
+        media = head[5:].split(";", 1)[0] or "image/png"
+        return media, b64
+    return "image/png", ""
+
+
+def openai_message(message: Message) -> dict[str, Any]:
+    """OpenAI/DeepSeek chat message; multimodal (content array) when it carries images."""
+    images = getattr(message, "images", None) or []
+    if not images:
+        return message.to_api()
+    parts: list[dict[str, Any]] = []
+    if message.content:
+        parts.append({"type": "text", "text": message.content})
+    for url in images:
+        parts.append({"type": "image_url", "image_url": {"url": url}})
+    payload: dict[str, Any] = {"role": message.role, "content": parts}
+    if message.name:
+        payload["name"] = message.name
+    return payload
+
+
+def anthropic_content(message: Message):
+    """Anthropic content: plain string, or blocks when the message carries images."""
+    images = getattr(message, "images", None) or []
+    if not images:
+        return message.content
+    blocks: list[dict[str, Any]] = []
+    for url in images:
+        media, b64 = _split_data_url(url)
+        if b64:
+            blocks.append({"type": "image", "source": {"type": "base64", "media_type": media, "data": b64}})
+    if message.content:
+        blocks.append({"type": "text", "text": message.content})
+    return blocks or message.content
+
+
+def gemini_parts(message: Message) -> list[dict[str, Any]]:
+    """Gemini parts: text + inline_data image blocks."""
+    parts: list[dict[str, Any]] = []
+    if message.content:
+        parts.append({"text": message.content})
+    for url in getattr(message, "images", None) or []:
+        media, b64 = _split_data_url(url)
+        if b64:
+            parts.append({"inline_data": {"mime_type": media, "data": b64}})
+    return parts or [{"text": message.content}]
+
+
 def _has_path(base_url: str) -> bool:
     """True if the URL has a real path beyond the host (so we shouldn't append /v1)."""
     from urllib.parse import urlparse
@@ -163,7 +215,7 @@ class DeepSeekClient:
         self._require_key()
         payload = {
             "model": self.settings.model,
-            "messages": [message.to_api() for message in messages],
+            "messages": [openai_message(message) for message in messages],
             "temperature": 0.2,
             "max_tokens": self._output_tokens(),
             "stream": stream,
@@ -281,7 +333,7 @@ class DeepSeekClient:
         payload: dict = {
             "model": self.settings.model,
             "max_tokens": self._output_tokens(),
-            "messages": [{"role": m.role, "content": m.content} for m in turns],
+            "messages": [{"role": m.role, "content": anthropic_content(m)} for m in turns],
             "stream": stream,
         }
         if system:
@@ -340,7 +392,7 @@ class DeepSeekClient:
         system, turns = split_system(messages)
         payload: dict = {
             "contents": [
-                {"role": "model" if m.role == "assistant" else "user", "parts": [{"text": m.content}]}
+                {"role": "model" if m.role == "assistant" else "user", "parts": gemini_parts(m)}
                 for m in turns
             ],
             "generationConfig": {"maxOutputTokens": self._output_tokens(), "temperature": 0.2},

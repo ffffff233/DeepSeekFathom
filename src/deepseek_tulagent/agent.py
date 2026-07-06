@@ -105,6 +105,7 @@ class TuLAgent:
         prompt: str,
         *,
         stream: bool = False,
+        images: list[str] | None = None,
         on_delta: Callable[[str], None] | None = None,
         on_final: Callable[[str], None] | None = None,
         on_event: Callable[[str], None] | None = None,
@@ -118,7 +119,7 @@ class TuLAgent:
         if not session.messages:
             for message in self._initial_messages():
                 session.append(message)
-        session.append(Message("user", prompt))
+        session.append(Message("user", prompt, images=list(images or [])))
 
         final_answer = ""
         rounds = 0
