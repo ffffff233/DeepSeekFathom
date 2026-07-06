@@ -310,7 +310,13 @@ function ensureIncludes(list, value) {
 }
 
 async function refreshSessions() {
-  const sessions = await window.pywebview.api.sessions();
+  let sessions;
+  try {
+    sessions = await window.pywebview.api.sessions();
+  } catch (_) {
+    return;  // api not ready yet — a later poll will populate the list
+  }
+  if (!Array.isArray(sessions)) return;
   const box = $("sessions");
   box.innerHTML = "";
   if (!sessions.length) {
@@ -917,6 +923,8 @@ $("cancel").onclick = async () => {
   addEvent("done", "已中断", "已停止当前回复");
   state.currentAssistant = null;
   state.currentTool = null;
+  // keep copy/retry/branch available on whatever was produced before the interrupt
+  markMessageActions();
   try { await window.pywebview.api.cancel(); } catch (_) {}
 };
 
@@ -984,7 +992,10 @@ $("newSession").onclick = async () => {
 $("refreshSessions").onclick = refreshSessions;
 // keep the sidebar list fresh without a manual click
 window.addEventListener("focus", () => { if (!state.running) refreshSessions(); });
-setInterval(() => { if (!state.running && !document.hidden) refreshSessions(); }, 8000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden && !state.running) refreshSessions(); });
+// several quick polls right after launch (api may attach late), then a steady beat
+[600, 1500, 3000].forEach((t) => setTimeout(() => refreshSessions(), t));
+setInterval(() => { if (!state.running && !document.hidden) refreshSessions(); }, 5000);
 
 /* ---------- conversation menu (top-right ⋮ — copy ID / rename / branch / new / delete) ---------- */
 function currentSessionId() {
@@ -1237,16 +1248,15 @@ function attachVersionPager() {
   state.pendingVersions = null;
   if (!snap) return;
   const box = $("messages");
-  // the just-produced answer is the last assistant bubble
   const answerEl = [...box.querySelectorAll(".message.assistant")].pop();
   if (!answerEl) return;
-  // the user message that owns this turn: nearest preceding user bubble
   let userEl = answerEl.previousElementSibling;
   while (userEl && !(userEl.classList && userEl.classList.contains("message") && userEl.classList.contains("user"))) userEl = userEl.previousElementSibling;
   if (!userEl) return;
   const answers = (snap.prior || []).concat([answerEl.querySelector(".bubble").dataset.raw || ""]);
-  // prior[] were previous answers; the current answer is the newest
-  userEl.dataset.versions = JSON.stringify(snap.prior || []);
+  // edit mode also flips the USER prompt between versions
+  const prompts = snap.editMode ? (snap.prompts || []).concat([snap.newPrompt || (userEl.querySelector(".bubble").dataset.raw || "")]) : null;
+  userEl.dataset.versions = JSON.stringify(prompts ? snap.prompts : (snap.prior || []));
   let index = answers.length - 1;
   let pager = userEl.querySelector(".versionPager");
   if (!pager) {
@@ -1255,18 +1265,21 @@ function attachVersionPager() {
     userEl.querySelector(".msgActions").prepend(pager);
   }
   const answerBubble = answerEl.querySelector(".bubble");
+  const userBubble = userEl.querySelector(".bubble");
+  const total = prompts ? prompts.length : answers.length;
   const render = () => {
     pager.innerHTML =
       `<button class="vBtn prev" title="上一版本"${index === 0 ? " disabled" : ""}>${icon("chevron", 12)}</button>` +
-      `<span class="vCount">${index + 1}/${answers.length}</span>` +
-      `<button class="vBtn next" title="下一版本"${index === answers.length - 1 ? " disabled" : ""}>${icon("chevron", 12)}</button>`;
+      `<span class="vCount">${index + 1}/${total}</span>` +
+      `<button class="vBtn next" title="下一版本"${index === total - 1 ? " disabled" : ""}>${icon("chevron", 12)}</button>`;
   };
   pager.onclick = (e) => {
     const btn = e.target.closest(".vBtn");
     if (!btn || btn.disabled) return;
     index += btn.classList.contains("prev") ? -1 : 1;
-    answerBubble.dataset.raw = answers[index];
+    answerBubble.dataset.raw = answers[Math.min(index, answers.length - 1)] || "";
     renderBubble(answerBubble);
+    if (prompts) { userBubble.dataset.raw = prompts[index] || ""; renderBubble(userBubble); }
     render();
   };
   render();
@@ -1318,6 +1331,19 @@ function doEdit(text, src, msg) {
     const next = area.value.trim();
     if (!next) return;
     restore();
+    // snapshot the prior (prompt, answer) so the ‹ i/n › pager appears on the new
+    // user message after re-run — flip back to the original question and its answer
+    const priorPrompt = bubble.dataset.raw || "";
+    let priorAnswerEl = msg.nextElementSibling;
+    while (priorAnswerEl && !(priorAnswerEl.classList && priorAnswerEl.classList.contains("message") && priorAnswerEl.classList.contains("assistant"))) priorAnswerEl = priorAnswerEl.nextElementSibling;
+    let prevVersions = [];
+    try { prevVersions = JSON.parse(msg.dataset.versions || "[]"); } catch (_) {}
+    state.pendingVersions = {
+      editMode: true,
+      prompts: prevVersions.length ? prevVersions : [priorPrompt],
+      newPrompt: next,
+      prior: [priorAnswerEl ? (priorAnswerEl.querySelector(".bubble").dataset.raw || "") : ""],
+    };
     removeTurnFrom(msg);
     state.stickToBottom = true;
     setRunning(true);
@@ -1327,6 +1353,7 @@ function doEdit(text, src, msg) {
         src != null ? { prompt: next, srcIndex: src } : { prompt: next });
       if (!result.ok) throw new Error(result.error || "unknown error");
     } catch (error) {
+      state.pendingVersions = null;
       setRunning(false);
       addEvent("error", "编辑重发失败", String(error.message || error));
     }

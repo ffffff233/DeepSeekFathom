@@ -387,6 +387,13 @@ class TuLAgent:
         return False
 
     def _with_internal_thinking(self, messages: list[Message], on_event: Callable[[str], None] | None = None) -> list[Message]:
+        # Thinking is delegated to the upstream reasoning/thinking API parameter (like
+        # Codex sends reasoning:{effort}). We no longer run a separate "deliberation"
+        # chat turn — that made the model emit tool-call JSON inside the private pass,
+        # which then leaked into the transcript. Set DSTUL_LOCAL_DELIBERATION=1 to
+        # re-enable the old behavior.
+        if os.getenv("DSTUL_LOCAL_DELIBERATION") != "1":
+            return messages
         if self.thinking.deliberation_passes <= 0:
             return messages
         notes: list[str] = []
@@ -440,16 +447,24 @@ def parse_labelled_tool_call(text: str) -> tuple[str, dict[str, Any]] | None:
     name = tool_match.group(1).strip()
     tail = text[tool_match.end():]
     args_match = re.search(r"(?is)(?:arguments|args|参数)\s*:\s*(\{.*\})", tail)
-    if not args_match:
-        return None
-    raw_args = args_match.group(1).strip()
-    for candidate in [raw_args, *extract_json_objects(raw_args)]:
-        try:
-            data = json.loads(candidate)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(data, dict):
-            return name, data
+    if args_match:
+        raw_args = args_match.group(1).strip()
+        for candidate in [raw_args, *extract_json_objects(raw_args)]:
+            try:
+                data = json.loads(candidate)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(data, dict):
+                return name, data
+    # also accept `key=value` argument lines (tool: run_shell\ncmd=ls)
+    kv: dict[str, Any] = {}
+    for line in tail.splitlines():
+        line = line.strip()
+        m = re.match(r"^([A-Za-z_][\w-]*)\s*=\s*(.*)$", line)
+        if m:
+            kv[m.group(1)] = m.group(2).strip()
+    if kv:
+        return name, kv
     return None
 
 

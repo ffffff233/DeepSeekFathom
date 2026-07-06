@@ -1401,7 +1401,10 @@ def test_auto_thinking_uses_model_choice(monkeypatch, tmp_path: Path):
     assert selected.name == "deep"
 
 
-def test_internal_thinking_runs_extra_model_pass(tmp_path: Path):
+def test_internal_thinking_runs_extra_model_pass(tmp_path: Path, monkeypatch):
+    # local deliberation is now opt-in (thinking is normally delegated to the upstream
+    # reasoning param); enable it explicitly for this legacy-behavior test
+    monkeypatch.setenv("DSTUL_LOCAL_DELIBERATION", "1")
     class ThinkingClient:
         def __init__(self):
             self.calls = 0

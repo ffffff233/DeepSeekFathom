@@ -1,5 +1,23 @@
 # 更新记录 / Changelog
 
+## v0.1.73
+
+中文（对照 Codex 的 reasoning 传参方式）：
+
+- **修复：思考里模型吐工具调用、思考本身有问题**。根因：我们之前在思考等级 ≥ Medium 时**额外跑一次“私下思考”对话**，模型在那次里会吐出工具 JSON，泄露进正文。Codex 不这么干——它只把思考作为**上游 API 参数**（`reasoning:{effort}` / `reasoning_effort`）传下去，推理由上游原生产出。现在改成同样做法：默认不再单独跑思考轮，思考交给上游 reasoning 参数（OpenAI 系也带上 `reasoning_effort`）。旧行为可用 `DSTUL_LOCAL_DELIBERATION=1` 恢复。
+- **修复：标签式工具调用被当文本输出**。`tool: run_shell` + `cmd=ls` 这种 `key=value` 参数格式之前解析器不认（返回 None），于是被当普通文本显示。现在支持 `key=value` 参数行，正确识别为工具调用。
+- **修复：中断对话后复制/重试/开分支全没了**。中断时现在保留已产出内容的操作按钮（复制、重试、开分支都在），不用等整轮结束。
+- **修复：编辑消息重发后没有左右箭头**。编辑并重发后，你的消息上会出现 ‹ 1/2 › 箭头，可在“原问题+原回答”和“新问题+新回答”之间来回切换。
+- **修复：侧边栏对话目录老要手动刷新**。`sessions()` 失败不再中断刷新；启动后 0.6s/1.5s/3s 连续补拉，之后每 5s 及窗口可见时自动刷新。
+
+English (matching how Codex passes reasoning upstream):
+
+- **Fixed: model emitted tool calls inside thinking / broken thinking**. We used to run a separate "private deliberation" chat turn at thinking ≥ Medium, where the model emitted tool JSON that leaked into the transcript. Codex instead passes thinking as an **upstream API param** (`reasoning:{effort}` / `reasoning_effort`) and lets the provider produce reasoning natively. Now we do the same: no separate deliberation turn by default (re-enable with `DSTUL_LOCAL_DELIBERATION=1`); OpenAI-family requests also carry `reasoning_effort`.
+- **Fixed: labelled tool calls shown as text**. `tool: run_shell` + `cmd=ls` (`key=value` args) previously failed to parse and was rendered as plain text; `key=value` argument lines are now recognized as tool calls.
+- **Fixed: interrupt wiped copy/retry/branch**. Interrupting now keeps the actions on whatever was produced.
+- **Fixed: no version arrows after edit-and-resend**. Editing a message then resending now shows ‹ 1/2 › arrows on your message, flipping between the old prompt+answer and the new one.
+- **Fixed: sidebar list needing a manual refresh**. `sessions()` failures no longer abort the refresh; several quick polls after launch, then every 5s and on window visibility.
+
 ## v0.1.72
 
 中文：

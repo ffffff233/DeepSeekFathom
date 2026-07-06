@@ -511,8 +511,13 @@ def extract_error_message(body: str) -> str:
 
 
 def apply_thinking_payload(payload: dict, settings: Settings) -> None:
-    if normalize_format(getattr(settings, "provider_format", "deepseek")) != "deepseek":
-        return
-    payload["thinking"] = {"type": "enabled" if settings.thinking_enabled else "disabled"}
-    if settings.thinking_enabled and settings.reasoning_effort:
-        payload["reasoning_effort"] = settings.reasoning_effort
+    fmt = normalize_format(getattr(settings, "provider_format", "deepseek"))
+    if fmt == "deepseek":
+        payload["thinking"] = {"type": "enabled" if settings.thinking_enabled else "disabled"}
+        if settings.thinking_enabled and settings.reasoning_effort:
+            payload["reasoning_effort"] = settings.reasoning_effort
+    elif fmt in {"openai", "openai-responses"}:
+        # OpenAI-compatible gateways commonly accept a top-level reasoning_effort; many
+        # ignore unknown params, so this is safe to send when thinking is on.
+        if settings.thinking_enabled and settings.reasoning_effort:
+            payload["reasoning_effort"] = settings.reasoning_effort
