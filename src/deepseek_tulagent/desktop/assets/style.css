@@ -288,6 +288,13 @@ pre.code code { display: block; padding: 12px 14px; font-family: var(--mono); fo
 .eventIcon { width: 16px; height: 16px; display: grid; place-items: center; color: var(--text-4); font-size: 11px; flex-shrink: 0; }
 .threadEvent.error summary, .threadEvent.error .eventIcon { color: var(--danger); }
 
+/* subagent group + nested rows (watch the subagent work, expand/collapse) */
+.subagentCard .subBody { padding: 4px 22px 8px 53px; display: flex; flex-direction: column; gap: 4px; }
+.subRow { display: flex; flex-direction: column; gap: 2px; border-left: 2px solid var(--line-heavy); padding: 3px 0 3px 10px; }
+.subLabel { font-family: var(--mono); font-size: 11.5px; color: var(--text-2); }
+.subRow.done .subLabel { color: var(--ok); }
+.subDetail { margin: 2px 0 0; font-family: var(--mono); font-size: 11px; color: var(--text-3); white-space: pre-wrap; word-break: break-word; max-height: 200px; overflow-y: auto; background: var(--bg-under); border-radius: var(--r-sm); padding: 6px 9px; }
+
 .threadEvent > pre { margin: 2px 0 6px; padding: 8px 12px; font-family: var(--mono); font-size: 11.5px; color: var(--text-3); white-space: pre-wrap; word-break: break-word; background: var(--hover); border-radius: var(--r-row); }
 
 .toolBody { padding: 2px 0 6px; display: flex; flex-direction: column; gap: 6px; }

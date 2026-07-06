@@ -158,7 +158,13 @@ window.DeepSeekDesktop = {
       scrollMessages();
     }
     if (event === "agent:event") {
-      if (payload.kind === "tool") {
+      const sub = payload.sub;  // set when this event came from inside a subagent
+      if (payload.kind === "subagentdone") {
+        markSubagentDone(payload.name);
+      } else if (sub) {
+        // nest the subagent's own activity under its group so you can watch it work
+        addSubEvent(sub, payload);
+      } else if (payload.kind === "tool") {
         // a tool card starts a new visual block — text after it must open a NEW
         // bubble below the card, not append to the bubble above it
         state.currentAssistant = null;
@@ -477,6 +483,54 @@ function addEvent(kind, name, detail) {
   $("messages").append(details);
   scrollMessages();
   mirror(`[${labelFor(kind)}] ${name || ""} ${detail || ""}`.trim());
+}
+
+/* ---------- subagent group: an expandable card that shows the subagent working ---------- */
+function subagentCard(name) {
+  let card = $("messages").querySelector(`.subagentCard[data-sub="${cssEscape(name)}"]:not(.done)`);
+  if (card) return card;
+  bumpEventCount();
+  const intro = document.querySelector(".empty, .intro");
+  if (intro) intro.remove();
+  card = document.createElement("details");
+  card.className = "threadEvent subagent subagentCard";
+  card.dataset.sub = name;
+  card.open = true;
+  card.innerHTML =
+    `<summary><span class="eventIcon">${icon("branch")}</span><span class="evLabel">子代理</span>` +
+    `<strong>${escapeHtml(name)}</strong><span class="evStatus">运行中</span>` +
+    `<span class="evChevron">${icon("chevron", 13)}</span></summary>` +
+    `<div class="subBody"></div>`;
+  $("messages").append(card);
+  scrollMessages();
+  return card;
+}
+
+function addSubEvent(name, payload) {
+  const body = subagentCard(name).querySelector(".subBody");
+  const row = document.createElement("div");
+  row.className = `subRow ${payload.kind}`;
+  const label = payload.kind === "tool" ? `⌘ ${payload.name || ""}`
+    : payload.kind === "done" ? `✓ ${payload.name || ""}`
+    : `${labelFor(payload.kind)} ${payload.name || ""}`;
+  row.innerHTML = `<span class="subLabel">${escapeHtml(label.trim())}</span>` +
+    (payload.detail ? `<pre class="subDetail">${escapeHtml(truncateForDisplay(String(payload.detail)))}</pre>` : "");
+  body.append(row);
+  scrollMessages();
+  mirror(`[子代理:${name}] ${label} ${payload.detail || ""}`.trim());
+}
+
+function markSubagentDone(name) {
+  const card = $("messages").querySelector(`.subagentCard[data-sub="${cssEscape(name)}"]:not(.done)`);
+  if (!card) return;
+  card.classList.add("done");
+  const status = card.querySelector(".evStatus");
+  if (status) { status.textContent = "完成"; status.classList.add("ok"); }
+  card.open = false;  // collapse when the subagent finishes; click to reopen
+}
+
+function cssEscape(s) {
+  return String(s).replace(/["\\\]]/g, "\\$&");
 }
 
 function mirror(line) {

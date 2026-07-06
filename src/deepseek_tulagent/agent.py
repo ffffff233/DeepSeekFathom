@@ -333,12 +333,20 @@ class TuLAgent:
             prefix = f"{index}/{total} " if total > 1 else ""
             on_event(f"subagent {prefix}{name} mode={mode} think={thinking} rounds={max_rounds}")
         subagent = TuLAgent(self.settings, mode=mode, thinking=thinking, client=self.client, approve=self.approve, ask_user=self.ask_user)
+        # forward the subagent's own events to the parent stream, tagged with its name,
+        # so the UI can show what the subagent is doing (opencode-style nested activity)
+        sub_on_event = None
+        if on_event:
+            def sub_on_event(text: str, _name=name) -> None:
+                on_event("subevent " + _name + "␟" + text)
         sub_prompt = (
             f"You are subagent `{name}`. Work in an isolated context.\n"
             f"Task: {task}\n"
             "Return a concise result for the parent agent: findings, evidence, and recommended next step."
         )
-        result = subagent.run(sub_prompt, max_tool_rounds=max_rounds, should_cancel=should_cancel)
+        result = subagent.run(sub_prompt, max_tool_rounds=max_rounds, should_cancel=should_cancel, on_event=sub_on_event)
+        if on_event:
+            on_event(f"subagentdone {name} rounds={result.rounds}")
         return {
             "name": name,
             "task": task,
@@ -394,6 +402,10 @@ class TuLAgent:
             note = self.client.chat(planning_messages).strip()
             if note:
                 notes.append(note[:6000])
+                if on_event:
+                    # surface the deliberation content so the UI can show internal thinking
+                    encoded = base64.b64encode(note[:6000].encode("utf-8")).decode("ascii")
+                    on_event(f"thinkingnote {index + 1}/{self.thinking.deliberation_passes} {encoded}")
         if not notes:
             return messages
         joined = "\n\n".join(f"Pass {index + 1}:\n{note}" for index, note in enumerate(notes))

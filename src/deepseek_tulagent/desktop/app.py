@@ -488,6 +488,24 @@ def parse_agent_event(text: str) -> dict[str, str]:
         return {"kind": "done", "name": name, "detail": output}
     if text.startswith("thinking pass "):
         return {"kind": "thinking", "name": "internal", "detail": text}
+    if text.startswith("thinkingnote "):
+        rest = text.removeprefix("thinkingnote ").strip()
+        label, _, b64 = rest.partition(" ")
+        note = ""
+        if b64:
+            try:
+                note = base64.b64decode(b64).decode("utf-8", "replace")
+            except Exception:
+                note = ""
+        return {"kind": "thinking", "name": f"内部思考 {label}", "detail": note}
+    if text.startswith("subevent "):
+        rest = text.removeprefix("subevent ")
+        sub_name, _, inner = rest.partition("␟")
+        inner_event = parse_agent_event(inner)
+        inner_event["sub"] = sub_name
+        return inner_event
+    if text.startswith("subagentdone "):
+        return {"kind": "subagentdone", "name": text.removeprefix("subagentdone ").split(" ")[0], "detail": text}
     if text.startswith("subagent "):
         return {"kind": "subagent", "name": "subagent", "detail": text}
     if text.startswith("skill "):

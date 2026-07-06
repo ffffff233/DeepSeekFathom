@@ -1,5 +1,26 @@
 # 更新记录 / Changelog
 
+## v0.1.71
+
+中文：
+
+- **内部思考现在能看到内容了**：思考等级 ≥「Medium」时的多轮内部推敲，之前只显示「thinking pass」占位、
+  内容被埋进 system 消息；现在把每一轮的思考内容通过事件发到前端，展开思考卡片即可阅读。
+- **子代理可观察、能进能出（学 opencode）**：派遣子代理后，子代理自己的工具调用 / 思考 / 完成事件会
+  **带名字转发到父级事件流**，在对话里聚合成一张「子代理 <名字>」卡片，展开就能看它正在干什么、跑了几步；
+  子代理结束时卡片标「完成」并自动收起，点一下随时再展开——不再「进去出不来」。
+
+English:
+
+- **Internal thinking now shows its content**: the multi-pass deliberation at thinking level ≥ Medium
+  previously showed only a "thinking pass" placeholder (content buried in a system message); each pass's
+  reasoning is now emitted to the UI, readable by expanding the thinking card.
+- **Subagents are observable and expand/collapse (opencode-style)**: a delegated subagent's own tool
+  calls / thinking / completion events are **forwarded to the parent stream tagged with its name** and
+  grouped into a "子代理 <name>" card — expand it to watch what the subagent is doing and how many steps
+  it ran; the card marks 完成 and auto-collapses when the subagent finishes, and reopens on click — no more
+  "can't get back out".
+
 ## v0.1.70
 
 中文（继续对齐 Codex）：
