@@ -10,11 +10,14 @@ from .messages import Message
 
 
 def _message_record(message: Message) -> dict:
-    """Serialize a message for the session log, dropping non-persistable fields
-    (base64 image data) that would bloat the transcript."""
+    """Serialize a message for the session log. Images (data-URLs) are persisted so
+    a reloaded conversation — or any follow-up turn, which reloads the session — can
+    still send them to a vision model, matching how Codex keeps attachments."""
     record = {"role": message.role, "content": message.content}
     if message.name:
         record["name"] = message.name
+    if message.images:
+        record["images"] = list(message.images)
     return record
 
 
@@ -92,11 +95,13 @@ class SessionStore:
                 if event.get("created_at"):
                     session.created_at = event["created_at"]
                 message = event.get("message") or {}
+                images = message.get("images")
                 session.messages.append(
                     Message(
                         role=message["role"],
                         content=message.get("content", ""),
                         name=message.get("name"),
+                        images=list(images) if isinstance(images, list) else [],
                     )
                 )
         return session

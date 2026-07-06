@@ -1012,13 +1012,23 @@ def test_desktop_manual_compact(monkeypatch, tmp_path: Path):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("DSTUL_CONFIG_HOME", str(tmp_path / "config-home"))
     api = desktop.DesktopApi()
+
+    # force the model-summary path to fall back to local truncation (no network)
+    class _NoNetClient:
+        def __init__(self, *a, **k):
+            pass
+
+        def chat(self, messages):
+            raise RuntimeError("no net")
+
+    monkeypatch.setattr(desktop, "DeepSeekClient", _NoNetClient)
     api.session = Session(tmp_path, session_id="s")
     api.session.messages = [Message("system", "system")] + [Message("user", "old " + "x" * 200) for _ in range(20)]
     result = api.compact()
     assert result["ok"] is True
     assert result["after"] > 0
     assert len(api.session.messages) < 21
-    assert "Auto-compressed earlier conversation context" in api.session.messages[1].content
+    assert "handoff summary" in api.session.messages[1].content
     assert isinstance(result["messages"], list)
 
 
@@ -1432,8 +1442,45 @@ def test_context_compaction_keeps_recent_messages(monkeypatch):
 
     compacted = compact_context_messages(messages, "tiny", force=True)
     assert len(compacted) < len(messages)
-    assert "Auto-compressed earlier conversation context" in compacted[1].content
+    assert "handoff summary" in compacted[1].content
     assert "old 19" in compacted[-1].content
+
+
+def test_context_compaction_uses_model_handoff_summary(monkeypatch):
+    from deepseek_tulagent.messages import Message
+    import deepseek_tulagent.agent as agent
+
+    messages = [Message("system", "system")]
+    messages.extend(Message("user", "old " + str(index) + " " + ("x" * 200)) for index in range(20))
+    monkeypatch.setattr(agent, "context_window_tokens", lambda _model: 200)
+
+    class SummaryClient:
+        def __init__(self):
+            self.saw_prompt = False
+
+        def chat(self, msgs):
+            # the last message must be the compaction instruction
+            self.saw_prompt = "CONTEXT CHECKPOINT COMPACTION" in msgs[-1].content
+            return "PROGRESS: did X. NEXT: do Y."
+
+    client = SummaryClient()
+    compacted = compact_context_messages(messages, "tiny", force=True, client=client)
+    assert client.saw_prompt
+    assert "PROGRESS: did X. NEXT: do Y." in compacted[1].content
+    # the model summary replaces local truncation entirely
+    assert "xxxxxxxxxx" not in compacted[1].content
+
+
+def test_session_persists_and_reloads_images(tmp_path: Path):
+    from deepseek_tulagent.messages import Message
+    from deepseek_tulagent.session import Session, SessionStore
+
+    img = "data:image/png;base64,iVBORw0KGgoAAAANS"
+    session = Session(tmp_path, session_id="img")
+    session.append(Message("user", "看这张图", images=[img]))
+
+    reloaded = SessionStore(tmp_path).load("img")
+    assert reloaded.messages[-1].images == [img]
 
 
 def test_auto_context_compaction_can_be_disabled(monkeypatch):

@@ -134,7 +134,7 @@ class TuLAgent:
             if pending_internal_prompt:
                 model_source_messages = model_source_messages + [Message("user", pending_internal_prompt)]
                 pending_internal_prompt = None
-            model_messages = compact_context_messages(model_source_messages, self.settings.model, on_event=on_event)
+            model_messages = compact_context_messages(model_source_messages, self.settings.model, on_event=on_event, client=self.client)
             if rounds == 1 and is_complex_task(prompt):
                 model_messages = model_messages + [Message("user", private_execution_hint())]
             model_messages = self._with_internal_thinking(model_messages, on_event=on_event)
@@ -267,7 +267,7 @@ class TuLAgent:
     ) -> str:
         if on_event:
             on_event("tool round limit reached; finalizing")
-        messages = compact_context_messages(session.messages, self.settings.model, on_event=on_event)
+        messages = compact_context_messages(session.messages, self.settings.model, on_event=on_event, client=self.client)
         messages = messages + [
             Message(
                 "user",
@@ -708,12 +708,35 @@ def strip_tool_call_display(text: str) -> str:
     return plainify_assistant_text(out).strip()
 
 
+COMPACTION_PROMPT = (
+    "You are performing a CONTEXT CHECKPOINT COMPACTION. The conversation above is being "
+    "handed off to another instance of yourself that will resume this exact task with no "
+    "other memory of it. Write a handoff summary — not a description of the conversation, but "
+    "the working state the next instance needs. Cover:\n"
+    "1. Current progress and key decisions made (what has been done and why).\n"
+    "2. Important context, constraints, files, commands, or user preferences.\n"
+    "3. What remains to be done, as clear next steps.\n"
+    "4. Any critical data, code, paths, IDs, or references needed to continue.\n"
+    "If the conversation already contains an earlier handoff summary, preserve its facts by "
+    "folding them into a cumulative 'Historical Context' section — never drop earlier entries. "
+    "Be concise, structured, and focused on letting the next instance seamlessly continue. "
+    "Respond with the summary only."
+)
+
+COMPACTION_SUMMARY_PREFIX = (
+    "Another instance of you worked on this task and produced the following handoff summary of "
+    "its progress and the current state. Treat it as established prior context and continue the "
+    "work from here; the most recent exact messages follow after it.\n\n"
+)
+
+
 def compact_context_messages(
     messages: list[Message],
     model: str,
     *,
     on_event: Callable[[str], None] | None = None,
     force: bool = False,
+    client: DeepSeekClient | None = None,
 ) -> list[Message]:
     if not force and os.getenv("DSTUL_AUTO_COMPACT", "1").lower() in {"0", "false", "no"}:
         return messages
@@ -732,17 +755,41 @@ def compact_context_messages(
     if not older:
         return messages
 
-    summary = summarize_messages_locally(older, max_chars=min(24000, max(4000, limit * 2)))
+    # Codex-style: hand the older history to the model to write a handoff summary, and
+    # replace it with that summary. Fall back to local truncation only if there is no
+    # client or the summary call fails, so compaction never breaks a turn.
+    summary = summarize_messages_with_model(older, client=client, on_event=on_event)
+    if not summary:
+        summary = summarize_messages_locally(older, max_chars=min(24000, max(4000, limit * 2)))
     compacted = head + [
-        Message(
-            "system",
-            "Auto-compressed earlier conversation context because the estimated context window was near the model limit. "
-            "Use this summary as prior context; recent exact messages follow.\n\n" + summary,
-        )
+        Message("system", COMPACTION_SUMMARY_PREFIX + summary)
     ] + recent
     if on_event:
         on_event(f"context compacted {estimated} -> {estimate_message_tokens(compacted)} est tokens")
     return compacted
+
+
+def summarize_messages_with_model(
+    messages: list[Message],
+    *,
+    client: DeepSeekClient | None,
+    on_event: Callable[[str], None] | None = None,
+) -> str:
+    """Ask the model to write a Codex-style handoff summary of `messages`. Returns an
+    empty string if no client is available or the call fails (caller falls back)."""
+    if client is None or not messages:
+        return ""
+    # Strip images from the transcript we summarize (keeps the summary call cheap and
+    # text-only); the summary is prose anyway.
+    transcript = [Message(m.role, m.content, name=m.name) for m in messages]
+    request = transcript + [Message("user", COMPACTION_PROMPT)]
+    try:
+        if on_event:
+            on_event("context compacting (model summary)")
+        summary = client.chat(request).strip()
+        return summary
+    except Exception:  # network / provider error — fall back to local summary
+        return ""
 
 
 def context_window_tokens(model: str) -> int:

@@ -98,6 +98,21 @@ def gemini_parts(message: Message) -> list[dict[str, Any]]:
     return parts or [{"text": message.content}]
 
 
+def responses_content(message: Message):
+    """OpenAI Responses `input` content: plain string, or a blocks array carrying
+    input_image parts when the message has images."""
+    images = getattr(message, "images", None) or []
+    if not images:
+        return message.content
+    kind = "output_text" if message.role == "assistant" else "input_text"
+    blocks: list[dict[str, Any]] = []
+    if message.content:
+        blocks.append({"type": kind, "text": message.content})
+    for url in images:
+        blocks.append({"type": "input_image", "image_url": url})
+    return blocks or message.content
+
+
 def _has_path(base_url: str) -> bool:
     """True if the URL has a real path beyond the host (so we shouldn't append /v1)."""
     from urllib.parse import urlparse
@@ -276,7 +291,7 @@ class DeepSeekClient:
         system, turns = split_system(messages)
         payload: dict = {
             "model": self.settings.model,
-            "input": [{"role": m.role, "content": m.content} for m in turns],
+            "input": [{"role": m.role, "content": responses_content(m)} for m in turns],
             "max_output_tokens": self._output_tokens(),
             "stream": stream,
         }

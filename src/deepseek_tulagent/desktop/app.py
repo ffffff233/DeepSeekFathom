@@ -192,7 +192,9 @@ class DesktopApi:
         if self.session is None:
             return {"ok": False, "error": "no active session"}
         before = estimate_message_tokens(self.session.messages)
-        self.session.messages = compact_context_messages(self.session.messages, self.settings.model, force=True)
+        self.session.messages = compact_context_messages(
+            self.session.messages, self.settings.model, force=True, client=DeepSeekClient(self.settings)
+        )
         after = estimate_message_tokens(self.session.messages)
         return {"ok": True, "before": before, "after": after, "messages": serialize_messages(self.session.messages)}
 

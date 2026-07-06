@@ -1,5 +1,19 @@
 # 更新记录 / Changelog
 
+## v0.1.74
+
+中文（对照 Codex 的图片持久化与上下文压缩）：
+
+- **修复：图片发过去 AI 读不到 / 换一轮就丢**。根因是之前**保存对话时把图片剥掉了**（怕撑大记录），而每轮结束又会从磁盘重载会话——于是第二轮起、以及重载对话后，图片就没了，模型自然读不到。现在**照 Codex 一样把图片一起持久化**（`session.py` 的 `_message_record`/`load` 都带上 data-URL），重载和后续轮都还在。
+- **修复：OpenAI Responses 格式发不出图片**。`responses` 的 `input` 之前只放纯文本，图片被丢掉；新增 `responses_content()` 生成 `input_image` 块，与 chat/Anthropic/Gemini 三种格式一致。
+- **重做：上下文压缩，改成 Codex 的“交接摘要”式**。之前是**本地把每条消息截到 1200 字再拼起来**——粗暴且丢信息。现在照 Codex 做**模型驱动的 handoff 摘要**：把较早的历史整体交给模型，用 “CONTEXT CHECKPOINT COMPACTION” 提示词生成一份结构化交接摘要（当前进度/关键决策、约束与偏好、待办下一步、关键数据引用；已有旧摘要则累积进“Historical Context”不丢），再用它替换旧历史、保留最近若干条原文。模型调用失败时才回退到原来的本地截断，保证压缩永不弄崩一轮对话。手动 `/compact` 也走同一条模型摘要路径。
+
+English (matching how Codex persists images and compacts context):
+
+- **Fixed: images unreadable by the model / lost after one turn**. Root cause: we **stripped images when saving the conversation** (to keep the log small), and every turn reloads the session from disk — so from the second turn on, and after reopening a conversation, the images were gone. Now images are **persisted like Codex keeps attachments** (`_message_record`/`load` carry the data-URLs), so they survive reloads and follow-up turns.
+- **Fixed: OpenAI Responses format dropped images**. The `responses` `input` was text-only; a new `responses_content()` emits `input_image` blocks, matching the chat/Anthropic/Gemini builders.
+- **Reworked: context compaction, now Codex-style handoff summary**. It used to **truncate each message to 1200 chars locally and concatenate** — crude and lossy. Now it does a **model-driven handoff summary** like Codex: the older history is handed to the model with a "CONTEXT CHECKPOINT COMPACTION" prompt asking for a structured handoff (current progress/key decisions, constraints/preferences, next steps, critical data/refs; an existing summary is folded cumulatively into "Historical Context" and never dropped), then replaces the old history while keeping the most recent messages verbatim. It falls back to the old local truncation only if the model call fails, so compaction never breaks a turn. Manual `/compact` uses the same model-summary path.
+
 ## v0.1.73
 
 中文（对照 Codex 的 reasoning 传参方式）：
