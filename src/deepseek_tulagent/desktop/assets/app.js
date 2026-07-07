@@ -19,6 +19,7 @@ const state = {
   pendingOutboundId: "",
   katexRenderToString: null,
   katexLoadPromise: null,
+  activeGoal: "",
 };
 
 const $ = (id) => document.getElementById(id);
@@ -962,7 +963,7 @@ $("send").onclick = async () => {
   try {
     await updateRuntime();
     const sendFn = await apiMethod("send");
-    const result = await sendFn({ prompt: outgoing, attachments, images: images.map((i) => i.url) });
+    const result = await sendFn({ prompt: outgoing, attachments, images: images.map((i) => i.url), goal: state.activeGoal || undefined });
     if (!result.ok) throw new Error(result.error || "unknown error");
     const stillVisibleOutbound = state.pendingOutboundId === outboundId;
     if (stillVisibleOutbound) state.pendingOutbound = false;
@@ -1010,25 +1011,21 @@ function autoGrow() {
   ta.style.height = Math.min(ta.scrollHeight, 200) + "px";
 }
 
-/* ---------- slash command menu (输入 / 调出命令与技能，Codex 风格) ---------- */
+/* ---------- slash command menu: small command palette, not a prompt-template dump ---------- */
 const SLASH_COMMANDS = [
+  { key: "/goal", desc: "查看当前目标", run: () => showGoal() },
+  { key: "/goal <text>", desc: "设置持续目标", insert: "/goal " },
+  { key: "/goal clear", desc: "清除持续目标", run: () => setGoal("") },
   { key: "/compact", desc: "压缩当前上下文", run: () => $("manualCompact").click() },
-  { key: "/subagent", desc: "派遣子代理执行子任务", insert: 'Use delegate_agent with name="researcher" task="' },
-  { key: "/review", desc: "代码审查子代理", insert: 'Use delegate_agent with name="reviewer" task="审查当前改动，找出缺陷并给出证据："' },
-  { key: "/test", desc: "运行测试并汇报", insert: "运行测试，汇报结果，若失败给出修复方案：" },
-  { key: "/explain", desc: "解释一段代码/文件", insert: "解释这段代码的作用、边界情况和潜在问题：" },
-  { key: "/image", desc: "添加图片（打开文件选择）", run: () => $("attach").click() },
   { key: "/new", desc: "开始新对话", run: () => $("newSession").click() },
-  { key: "/copyid", desc: "复制当前会话 ID", run: () => { const s = currentSessionId(); if (s) { copyToClipboard(s, null, null, null); toast("已复制会话 ID"); } else toast("暂无会话 ID"); } },
-  { key: "/branch", desc: "从最新回复开分支", run: () => doBranch() },
-  { key: "/test-connection", desc: "打开设置并测试连接", run: () => { $("settingsBtn").click(); setTimeout(() => $("testConn").click(), 200); } },
   { key: "/settings", desc: "打开 API 设置", run: () => $("settingsBtn").click() },
+  { key: "/copyid", desc: "复制当前会话 ID", run: () => { const s = currentSessionId(); if (s) { copyToClipboard(s, null, null, null); toast("已复制会话 ID"); } else toast("暂无会话 ID"); } },
 ];
 
 function slashCandidates(query) {
   const q = query.toLowerCase();
   const skills = (state.skills || []).map((s) => ({
-    key: "/" + s.name, desc: s.description || "技能", insert: `Use skill ${s.name}: `,
+    key: "/skill " + s.name, desc: s.description || "技能", insert: `Use skill ${s.name}: `,
   }));
   return SLASH_COMMANDS.concat(skills).filter((it) => it.key.toLowerCase().includes(q));
 }
@@ -1085,29 +1082,42 @@ function closeSlash() {
   if (menu) menu.hidden = true;
 }
 
-/* Route a leading-slash message: run app commands locally, expand skill/subagent
-   templates, and BLOCK unknown commands — a bare "/xxx" is never sent raw to the
-   model (which in root/yolo mode could act on it). Path-like text (/etc/hosts) and
-   非命令文本 fall through to a normal send. */
+function setGoal(goal) {
+  state.activeGoal = String(goal || "").trim();
+  toast(state.activeGoal ? `目标已设置：${state.activeGoal}` : "目标已清除");
+  setSaveState(
+    state.running ? "running" : (currentSessionId() ? "saved" : "idle"),
+    state.running ? "运行中" : (currentSessionId() ? "已保存" : "新会话"),
+    state.activeGoal ? `Goal: ${state.activeGoal}` : (currentSessionId() || "未保存")
+  );
+}
+
+function showGoal() {
+  toast(state.activeGoal ? `当前目标：${state.activeGoal}` : "当前没有持续目标");
+}
+
+/* Route a leading-slash message: run app commands locally, set modes, or expand
+   explicit skills. Unknown slash commands are blocked instead of being sent raw. */
 function interpretPrompt(text) {
   const match = text.match(/^\/([a-zA-Z][\w-]*)(?:\s+([\s\S]*))?$/);
   if (!match) return { send: text };
   const name = match[1].toLowerCase();
   const rest = (match[2] || "").trim();
+  if (name === "goal") {
+    if (!rest) { showGoal(); return { handled: true }; }
+    if (["clear", "off", "none"].includes(rest.toLowerCase())) setGoal("");
+    else setGoal(rest);
+    return { handled: true };
+  }
   if (name === "compact") { $("manualCompact").click(); return { handled: true }; }
   if (name === "new") { $("newSession").click(); return { handled: true }; }
   if (name === "settings") { $("settingsBtn").click(); return { handled: true }; }
-  if (name === "subagent") {
-    if (!rest) {
-      $("prompt").value = 'Use delegate_agent with name="researcher" task="';
-      $("prompt").focus();
-      autoGrow();
-      return { handled: true };
-    }
-    return { send: `Use delegate_agent with name="researcher" task="${rest}"` };
+  if (name === "skill") {
+    const [skillName, ...tail] = rest.split(/\s+/);
+    const skill = (state.skills || []).find((s) => (s.name || "").toLowerCase() === String(skillName || "").toLowerCase());
+    if (skill) return { send: tail.length ? `Use skill ${skill.name}: ${tail.join(" ")}` : `Use skill ${skill.name}: ` };
+    return { unknown: rest ? `skill ${skillName}` : "skill" };
   }
-  const skill = (state.skills || []).find((s) => (s.name || "").toLowerCase() === name);
-  if (skill) return { send: rest ? `Use skill ${skill.name}: ${rest}` : `Use skill ${skill.name}: ` };
   // generic: any run-command from the slash menu (typed + Enter) runs locally
   const cmd = SLASH_COMMANDS.find((c) => c.key.toLowerCase() === "/" + name);
   if (cmd) {

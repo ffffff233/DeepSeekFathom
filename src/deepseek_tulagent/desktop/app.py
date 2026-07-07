@@ -239,6 +239,7 @@ class DesktopApi:
         if self._running:
             return {"ok": False, "error": "turn already running"}
         prompt = str(payload.get("prompt") or "").strip()
+        goal = str(payload.get("goal") or "").strip() or None
         attachments = payload.get("attachments") if isinstance(payload.get("attachments"), list) else []
         images = [str(u) for u in (payload.get("images") or []) if isinstance(u, str) and u.startswith("data:")]
         non_image = [item for item in attachments if isinstance(item, dict)]
@@ -250,16 +251,16 @@ class DesktopApi:
             prompt = "请看这张图片。"
         if not prompt and not images:
             return {"ok": False, "error": "empty prompt"}
-        return self._start_turn(prompt, images=images)
+        return self._start_turn(prompt, images=images, goal=goal)
 
-    def _start_turn(self, prompt: str, images: list[str] | None = None) -> dict[str, Any]:
+    def _start_turn(self, prompt: str, images: list[str] | None = None, goal: str | None = None) -> dict[str, Any]:
         self._cancel_requested = False
         self._running = True
         if self.session is None:
             self.session = Session(self.settings.workspace)
         session_id = self.session.session_id
         turn_id = uuid4().hex
-        thread = threading.Thread(target=self._run_agent_turn, args=(prompt, images or [], session_id, turn_id), daemon=True)
+        thread = threading.Thread(target=self._run_agent_turn, args=(prompt, images or [], session_id, turn_id, goal), daemon=True)
         thread.start()
         return {"ok": True, "sessionId": session_id, "turnId": turn_id}
 
@@ -401,6 +402,7 @@ class DesktopApi:
         images: list[str] | None = None,
         turn_session_id: str | None = None,
         turn_id: str | None = None,
+        goal: str | None = None,
     ) -> None:
         with self._lock:
             turn_session_id = turn_session_id or (self.session.session_id if self.session else None)
@@ -437,7 +439,7 @@ class DesktopApi:
                     mode=self.mode,
                     thinking=self.thinking.name,
                     approve=(lambda _n, _a: True) if self.mode in {"root", "yolo"} else self._request_approval,
-                ).run(prompt, stream=True, images=images or [], on_delta=delta, on_final=final, on_event=event, session=self.session)
+                ).run(prompt, stream=True, images=images or [], on_delta=delta, on_final=final, on_event=event, session=self.session, goal=goal)
                 # Only adopt the finished turn's session if the user hasn't switched to a
                 # different conversation meanwhile — otherwise the next send would land in
                 # the OLD conversation (context bleeding across chats).

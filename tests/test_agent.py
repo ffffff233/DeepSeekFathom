@@ -1276,6 +1276,40 @@ def test_desktop_edit_resend_drops_old_tool_result_context(monkeypatch, tmp_path
     assert captured["messages"] == ["system"]
 
 
+def test_desktop_send_passes_goal_to_agent(monkeypatch, tmp_path: Path):
+    import time
+
+    import deepseek_tulagent.desktop.app as desktop
+    from deepseek_tulagent.agent import AgentResult
+    from deepseek_tulagent.session import Session
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("DSTUL_CONFIG_HOME", str(tmp_path / "config-home"))
+    api = desktop.DesktopApi()
+    api.session = Session(tmp_path, session_id="goal-session")
+    captured = {}
+
+    class FakeAgent:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def run(self, prompt, **kwargs):
+            captured["prompt"] = prompt
+            captured["goal"] = kwargs.get("goal")
+            return AgentResult(kwargs["session"].session_id, "目标已完成。", 1)
+
+    monkeypatch.setattr(desktop, "TuLAgent", FakeAgent)
+    result = api.send({"prompt": "继续", "goal": "完成部署"})
+    assert result["ok"] is True
+    deadline = time.time() + 2
+    while api._running and time.time() < deadline:
+        time.sleep(0.02)
+    assert api._running is False
+
+    assert captured["prompt"] == "继续"
+    assert captured["goal"] == "完成部署"
+
+
 def test_desktop_session_metadata_pin_and_rename(monkeypatch, tmp_path: Path):
     import deepseek_tulagent.desktop.app as desktop
     from deepseek_tulagent.messages import Message
