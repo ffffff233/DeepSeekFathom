@@ -1,5 +1,19 @@
 # 更新记录 / Changelog
 
+## v0.1.93
+
+中文：
+
+- **修复：新建/切换对话后上下文徽标沿用上一会话统计**。`new_session` / `resume` / `delete_session` 现在都会返回当前会话的 `context`，前端立即刷新右下角上下文/缓存显示，不再等到下一次发送消息才变。
+- **修复：不同会话的真实 usage 显示不会串到新会话**。新会话 context 立即归零；恢复旧会话时按该会话自己的 usage 或本地估算显示。
+- **同步：包版本和 README 安装链接更新到 `v0.1.93`**。
+
+English:
+
+- **Fixed: the context badge kept the previous conversation's stats after new/switch**. `new_session` / `resume` / `delete_session` now return the active `context`, and the frontend refreshes the bottom-right context/cache badge immediately instead of waiting for the next send.
+- **Fixed: real usage stats no longer visually bleed into a new conversation**. New chats reset the context badge immediately; resumed chats display their own usage or local estimate.
+- **Synced: package version and README install links are now `v0.1.93`**.
+
 ## v0.1.92
 
 中文：

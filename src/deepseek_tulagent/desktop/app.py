@@ -207,15 +207,20 @@ class DesktopApi:
         SessionStore(self.settings.workspace).delete(session_id)
         if self.session is not None and self.session.session_id == session_id:
             self.session = None
-        return {"ok": True, "sessions": self.sessions()}
+        return {"ok": True, "sessions": self.sessions(), "context": self.context_status()}
 
     def resume(self, session_id: str) -> dict[str, Any]:
         self.session = SessionStore(self.settings.workspace).load(session_id)
-        return {"ok": True, "sessionId": self.session.session_id, "messages": serialize_messages(self.session.messages)}
+        return {
+            "ok": True,
+            "sessionId": self.session.session_id,
+            "messages": serialize_messages(self.session.messages),
+            "context": self.context_status(),
+        }
 
     def new_session(self) -> dict[str, Any]:
         self.session = None
-        return {"ok": True}
+        return {"ok": True, "sessionId": None, "messages": [], "context": self.context_status()}
 
     def compact(self) -> dict[str, Any]:
         if self.session is None:

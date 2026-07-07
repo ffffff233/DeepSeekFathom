@@ -79,7 +79,7 @@ function installDemoApi() {
       }),
       models: async () => ({ ok: true, models: ["deepseek-v4-flash", "deepseek-v4-pro", "gpt-4o"] }),
       sessions: async () => ([{ session_id: "demo-session-0001", title: "检查项目并修复问题", updated_at: "today", pinned: true }]),
-      resume: async (sessionId) => ({ ok: true, sessionId, messages: [
+      resume: async (sessionId) => ({ ok: true, sessionId, context: { ok: true, tokens: 4200, inputTokens: 3000, outputTokens: 1200, cachedTokens: 1800, cachePercent: 60, limit: 1000000, threshold: 920000, percent: 0.4, source: "upstream", measure: "上游 usage", accurate: true, model: $("model")?.value || "deepseek-v4-flash", autoCompact: true }, messages: [
         { role: "user", content: "检查项目并修复问题" },
         { role: "tool", name: "run_shell", detail: "cmd=pytest -q", output: "8 passed in 0.42s" },
         { role: "assistant", content: "测试通过，仓库状态正常。" },
@@ -89,7 +89,7 @@ function installDemoApi() {
       delete_session: async () => ({ ok: true }),
       set_runtime: async (data) => ({ ...(await window.pywebview.api.boot()), model: data.model, mode: data.mode, thinking: data.thinking }),
       configure: async () => window.pywebview.api.boot(),
-      new_session: async () => ({ ok: true }),
+      new_session: async () => ({ ok: true, sessionId: null, messages: [], context: { ok: true, tokens: 0, inputTokens: 0, outputTokens: 0, cachedTokens: 0, cachePercent: 0, limit: 1000000, threshold: 920000, percent: 0, source: "deepseek", measure: "本地估算", accurate: false, model: $("model")?.value || "deepseek-v4-flash", autoCompact: true } }),
       compact: async () => ({ ok: true, before: 12000, after: 4200, context: { ok: true, tokens: 4200, inputTokens: 3000, outputTokens: 1200, cachedTokens: 1800, cachePercent: 60, limit: 1000000, threshold: 920000, percent: 0.4, source: "upstream", measure: "上游 usage", accurate: true, model: "deepseek-v4-flash", autoCompact: true }, messages: [{ role: "assistant", content: "上下文已压缩，保留最近消息。" }] }),
       context_status: async () => ({ ok: true, tokens: 4200, inputTokens: 3000, outputTokens: 1200, cachedTokens: 1800, cachePercent: 60, limit: 1000000, threshold: 920000, percent: 0.4, source: "upstream", measure: "上游 usage", accurate: true, model: $("model")?.value || "deepseek-v4-flash", autoCompact: true }),
       save_upload: async (file) => ({ ok: true, name: file.name, path: `/uploads/${file.name}`, size: 128 }),
@@ -499,6 +499,7 @@ async function refreshSessions() {
       if (state.boot) state.boot.sessionId = result.sessionId;
       setText("sessionState", result.sessionId.slice(0, 8));
       setSaveState("saved", "已恢复", result.sessionId);
+      updateContextBadge(result.context || null);
     };
     row.querySelector(".actPin").onclick = async (e) => {
       e.stopPropagation();
@@ -1314,7 +1315,7 @@ $("saveSettings").onclick = async (event) => {
   await boot();
 };
 $("newSession").onclick = async () => {
-  await window.pywebview.api.new_session();
+  const result = await window.pywebview.api.new_session();
   state.currentAssistant = null;
   state.currentTool = null;
   state.currentSessionId = "";
@@ -1330,6 +1331,7 @@ $("newSession").onclick = async () => {
   setText("eventMirror", "工具、思考和子代理事件会显示在这里。");
   setText("sessionState", "新会话");
   setSaveState("idle", "新会话", "未保存");
+  updateContextBadge(result.context || null);
   refreshSessions();
 };
 $("refreshSessions").onclick = refreshSessions;
@@ -1383,8 +1385,9 @@ convMenu.addEventListener("click", async (e) => {
     if (!sid) { toast("当前还没有会话"); return; }
     const ok = await uiConfirm("删除当前对话？此操作不可恢复。");
     if (!ok) return;
-    await window.pywebview.api.delete_session(sid);
+    const result = await window.pywebview.api.delete_session(sid);
     $("newSession").click();
+    updateContextBadge(result.context || null);
     await refreshSessions();
   }
 });

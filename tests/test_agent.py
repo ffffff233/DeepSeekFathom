@@ -1361,6 +1361,40 @@ def test_desktop_context_status_reports_usage(monkeypatch, tmp_path: Path):
     assert accurate["source"] == "upstream"
 
 
+def test_desktop_session_switch_returns_fresh_context(monkeypatch, tmp_path: Path):
+    import deepseek_tulagent.desktop.app as desktop
+    from deepseek_tulagent.messages import Message
+    from deepseek_tulagent.provider import UsageStats
+    from deepseek_tulagent.session import Session
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("DSTUL_CONFIG_HOME", str(tmp_path / "config-home"))
+    api = desktop.DesktopApi()
+    first = Session(tmp_path, session_id="first")
+    first.messages = [Message("system", "system"), Message("user", "old")]
+    first.rewrite()
+    second = Session(tmp_path, session_id="second")
+    second.messages = [Message("system", "system"), Message("user", "new " * 400)]
+    second.rewrite()
+    api.session = first
+    api._usage_by_session["first"] = UsageStats(input_tokens=5000, output_tokens=500, cached_input_tokens=2500, total_tokens=5500, source="upstream")
+
+    fresh = api.new_session()
+    assert fresh["context"]["sessionId"] is None
+    assert fresh["context"]["tokens"] == 0
+    assert fresh["context"]["accurate"] is False
+
+    resumed = api.resume("second")
+    assert resumed["context"]["sessionId"] == "second"
+    assert resumed["context"]["accurate"] is False
+    assert 0 < resumed["context"]["tokens"] < 5500
+
+    old = api.resume("first")
+    assert old["context"]["sessionId"] == "first"
+    assert old["context"]["accurate"] is True
+    assert old["context"]["tokens"] == 5500
+
+
 def test_desktop_turn_events_stay_bound_to_origin_session(monkeypatch, tmp_path: Path):
     import json
     import re
