@@ -66,6 +66,7 @@ class DesktopApi:
         self._approvals: dict[str, dict[str, Any]] = {}
         self._active_turn_session_id: str | None = None
         self._active_turn_id: str | None = None
+        self._pending_turn: dict[str, Any] | None = None
         self._last_usage = UsageStats()
         self._usage_total = UsageStats()
         self._usage_by_session: dict[str, UsageStats] = {}
@@ -291,8 +292,6 @@ class DesktopApi:
         return {"ok": True, "name": name, "path": str(path), "size": len(data)}
 
     def send(self, payload: dict[str, Any]) -> dict[str, Any]:
-        if self._running:
-            return {"ok": False, "error": "turn already running"}
         prompt = str(payload.get("prompt") or "").strip()
         goal = str(payload.get("goal") or "").strip() or None
         attachments = payload.get("attachments") if isinstance(payload.get("attachments"), list) else []
@@ -306,6 +305,10 @@ class DesktopApi:
             prompt = "请看这张图片。"
         if not prompt and not images:
             return {"ok": False, "error": "empty prompt"}
+        if self._running:
+            if self._cancel_requested:
+                return self._queue_turn_after_cancel(prompt, images=images, goal=goal)
+            return {"ok": False, "error": "turn already running"}
         return self._start_turn(prompt, images=images, goal=goal)
 
     def _start_turn(self, prompt: str, images: list[str] | None = None, goal: str | None = None) -> dict[str, Any]:
@@ -318,6 +321,46 @@ class DesktopApi:
         thread = threading.Thread(target=self._run_agent_turn, args=(prompt, images or [], session_id, turn_id, goal), daemon=True)
         thread.start()
         return {"ok": True, "sessionId": session_id, "turnId": turn_id}
+
+    def _queue_turn_after_cancel(self, prompt: str, images: list[str] | None = None, goal: str | None = None) -> dict[str, Any]:
+        if self.session is None:
+            self.session = Session(self.settings.workspace)
+        session_id = self.session.session_id
+        turn_id = uuid4().hex
+        self._pending_turn = {
+            "prompt": prompt,
+            "images": images or [],
+            "session_id": session_id,
+            "turn_id": turn_id,
+            "goal": goal,
+        }
+        return {"ok": True, "queued": True, "sessionId": session_id, "turnId": turn_id}
+
+    def _start_pending_turn_if_any(self) -> None:
+        pending = self._pending_turn
+        self._pending_turn = None
+        if not pending:
+            return
+        session_id = str(pending["session_id"])
+        if self.session is None or self.session.session_id != session_id:
+            try:
+                self.session = SessionStore(self.settings.workspace).load(session_id)
+            except FileNotFoundError:
+                self.session = Session(self.settings.workspace, session_id=session_id)
+        self._cancel_requested = False
+        self._running = True
+        thread = threading.Thread(
+            target=self._run_agent_turn,
+            args=(
+                str(pending["prompt"]),
+                list(pending["images"]),
+                session_id,
+                str(pending["turn_id"]),
+                pending.get("goal"),
+            ),
+            daemon=True,
+        )
+        thread.start()
 
     def _truncate_to_last_user(self, before_index: int | None = None) -> str | None:
         """Drop a user turn and everything after it; return that user prompt.
@@ -519,6 +562,7 @@ class DesktopApi:
                 self._cancel_requested = False
                 self._active_turn_session_id = None
                 self._active_turn_id = None
+                self._start_pending_turn_if_any()
 
     def _record_session_usage(self, session_id: str | None, usage: UsageStats) -> None:
         if not session_id or not usage.source:

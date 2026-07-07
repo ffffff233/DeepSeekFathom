@@ -17,6 +17,7 @@ const state = {
   activeTurnId: "",
   pendingOutbound: false,
   pendingOutboundId: "",
+  cancelPromise: null,
   katexRenderToString: null,
   katexLoadPromise: null,
   activeGoal: "",
@@ -1023,6 +1024,10 @@ $("send").onclick = async () => {
   const outboundId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
   state.pendingOutboundId = outboundId;
   try {
+    if (state.cancelPromise) {
+      await state.cancelPromise.catch(() => {});
+      state.cancelPromise = null;
+    }
     await updateRuntime();
     const sendFn = await apiMethod("send");
     const result = await sendFn({ prompt: outgoing, attachments, images: images.map((i) => i.url), goal: state.activeGoal || undefined });
@@ -1250,7 +1255,8 @@ $("cancel").onclick = async () => {
   state.currentTool = null;
   // keep copy/retry/branch available on whatever was produced before the interrupt
   markMessageActions();
-  try { await window.pywebview.api.cancel(); } catch (_) {}
+  state.cancelPromise = window.pywebview.api.cancel();
+  try { await state.cancelPromise; } catch (_) {}
 };
 
 ["thinking", "mode"].forEach((id) => $(id).addEventListener("change", updateRuntime));

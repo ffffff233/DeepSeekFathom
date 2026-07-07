@@ -1,5 +1,21 @@
 # 更新记录 / Changelog
 
+## v0.1.97
+
+中文：
+
+- **修复：桌面端中断回复后立刻发送新消息会报 `turn already running`**。后端现在会在旧 turn 正在取消时接受下一条消息并排队，旧线程收尾后自动启动新 turn。
+- **修复：中断按钮和发送按钮之间的竞态**。前端会等待 `cancel()` 请求先落到后端，再发送下一条消息，避免极快操作时后端还没进入取消状态。
+- **保持：旧 turn 的迟到事件继续按 `turnId/sessionId` 隔离**。取消后的旧输出不会串到新消息里。
+- **同步：包版本和 README 安装链接更新到 `v0.1.97`**。
+
+English:
+
+- **Fixed: sending immediately after interrupting a desktop reply could return `turn already running`**. The backend now queues the next message while the old turn is cancelling, then starts it automatically after cleanup.
+- **Fixed: race between the interrupt button and the next send**. The frontend waits for `cancel()` to reach the backend before sending the next message.
+- **Kept: late old-turn events remain isolated by `turnId/sessionId`** so cancelled output cannot bleed into the new message.
+- **Synced: package version and README install links are now `v0.1.97`**.
+
 ## v0.1.96
 
 中文：

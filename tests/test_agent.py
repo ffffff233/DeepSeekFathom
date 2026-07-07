@@ -1551,6 +1551,54 @@ def test_desktop_api_rejects_parallel_turn(monkeypatch, tmp_path: Path):
     assert cancelled["running"] is True
 
 
+def test_desktop_send_after_cancel_queues_next_turn(monkeypatch, tmp_path: Path):
+    import time
+    import threading
+
+    import deepseek_tulagent.desktop.app as desktop
+    from deepseek_tulagent.agent import AgentResult
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("DSTUL_CONFIG_HOME", str(tmp_path / "config-home"))
+    api = desktop.DesktopApi()
+    entered_first = threading.Event()
+    release_first = threading.Event()
+    prompts: list[str] = []
+
+    class FakeAgent:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def run(self, prompt, **kwargs):
+            prompts.append(prompt)
+            if prompt == "第一条":
+                entered_first.set()
+                assert release_first.wait(timeout=2)
+                kwargs["on_delta"]("迟到输出")
+            return AgentResult(kwargs["session"].session_id, "完成", 1)
+
+    monkeypatch.setattr(desktop, "TuLAgent", FakeAgent)
+
+    first = api.send({"prompt": "第一条"})
+    assert first["ok"] is True
+    assert entered_first.wait(timeout=2)
+    cancelled = api.cancel()
+    assert cancelled == {"ok": True, "running": True}
+
+    second = api.send({"prompt": "第二条"})
+    assert second["ok"] is True
+    assert second["queued"] is True
+    assert second["sessionId"] == first["sessionId"]
+    assert second["turnId"] != first["turnId"]
+
+    release_first.set()
+    deadline = time.time() + 3
+    while api._running and time.time() < deadline:
+        time.sleep(0.02)
+    assert api._running is False
+    assert prompts == ["第一条", "第二条"]
+
+
 def test_desktop_upload_saves_file(monkeypatch, tmp_path: Path):
     import deepseek_tulagent.desktop.app as desktop
 
