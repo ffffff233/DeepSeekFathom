@@ -73,6 +73,25 @@ RECOVER_AFTER_TOOL_FAILURE_PROMPT = (
     "Continue with one better tool call using the error details, or explicitly state that the task is blocked."
 )
 
+KNOWN_TOOL_NAMES = {
+    "ask_user",
+    "delegate_agent",
+    "list_files",
+    "search_text",
+    "git_status",
+    "read_file",
+    "write_file",
+    "run_shell",
+    "apply_patch",
+    "download_url",
+    "clone_repo",
+    "web_search",
+    "start_service",
+    "stop_service",
+    "service_status",
+}
+TOOL_CALL_META_KEYS = {"tool", "name", "type", "id", "function_call", "tool_calls", "arguments", "parameters", "args", "input"}
+
 
 @dataclass(frozen=True)
 class AgentResult:
@@ -218,7 +237,7 @@ class TuLAgent:
                 else:
                     result = self.tools.run(name, arguments)
                     content = result.to_message()
-            except (ToolError, ValueError, OSError, subprocess.SubprocessError) as exc:  # type: ignore[name-defined]
+            except (ToolError, ValueError, OSError, subprocess.SubprocessError, TypeError) as exc:  # type: ignore[name-defined]
                 content = json.dumps({"ok": False, "output": str(exc)}, ensure_ascii=False)
             if on_event:
                 _trimmed = trim_tool_content(content)
@@ -497,6 +516,9 @@ def parse_xml_tool_call(text: str) -> tuple[str, dict[str, Any]] | None:
     if lines:
         name_match = re.match(r"^([A-Za-z_][\w-]*)\s*$", lines[0].strip())
         if name_match:
+            name = name_match.group(1)
+            if name not in KNOWN_TOOL_NAMES:
+                return None
             rest = "\n".join(lines[1:]).strip()
             for candidate in [rest, *extract_json_objects(rest)]:
                 try:
@@ -504,14 +526,14 @@ def parse_xml_tool_call(text: str) -> tuple[str, dict[str, Any]] | None:
                 except json.JSONDecodeError:
                     continue
                 if isinstance(data, dict):
-                    return name_match.group(1), data
+                    return name, data
             kv: dict[str, Any] = {}
             for line in lines[1:]:
                 kv_match = re.match(r"^([A-Za-z_][\w-]*)\s*=\s*(.*)$", line.strip())
                 if kv_match:
                     kv[kv_match.group(1)] = kv_match.group(2).strip()
             if kv:
-                return name_match.group(1), kv
+                return name, kv
     return None
 
 
@@ -520,6 +542,8 @@ def parse_labelled_tool_call(text: str) -> tuple[str, dict[str, Any]] | None:
     if not tool_match:
         return None
     name = tool_match.group(1).strip()
+    if name not in KNOWN_TOOL_NAMES:
+        return None
     tail = text[tool_match.end():]
     args_match = re.search(r"(?is)(?:arguments|args|参数)\s*:\s*(\{.*\})", tail)
     if args_match:
@@ -749,11 +773,19 @@ def safe_stream_emit_length(text: str) -> int:
     # 1) specific, high-signal tool-call openers that may appear mid-line.
     # If the marker is inside a ```json fence, hold from the fence opener too — otherwise
     # the UI briefly renders an empty JSON/code box before the tool card appears.
-    specific = re.search(
-        r"(?i)<tool_call|\{\s*\"(?:tool|name|function_call|tool_calls|arguments|input)\"",
-        text,
-    )
-    if specific:
+    tag = re.search(r"(?i)<tool_call", text)
+    if tag:
+        return tag.start()
+    for specific in re.finditer(r"(?i)\{\s*\"(?:tool|name|function_call|tool_calls)\"", text):
+        objects = extract_json_objects(text[specific.start():])
+        if not objects:
+            return specific.start()
+        try:
+            data = json.loads(objects[0])
+        except json.JSONDecodeError:
+            return specific.start()
+        if not normalize_tool_call(data):
+            continue
         fence_start = text.rfind("```", 0, specific.start())
         if fence_start != -1:
             after = text[fence_start:specific.start()].lower()
@@ -1108,42 +1140,58 @@ def normalize_tool_call(data: Any) -> tuple[str, dict[str, Any]] | None:
     if not isinstance(data, dict):
         return None
     if isinstance(data.get("tool"), str):
-        return data["tool"], normalize_tool_arguments(data)
-    if isinstance(data.get("name"), str) and ("input" in data or "arguments" in data):
-        return data["name"], normalize_arguments(data.get("input", data.get("arguments", {})))
+        name = data["tool"]
+        arguments = normalize_tool_arguments(data)
+        return (name, arguments) if name in KNOWN_TOOL_NAMES and arguments is not None else None
+    if isinstance(data.get("name"), str) and ("input" in data or "arguments" in data or "parameters" in data or "args" in data):
+        name = data["name"]
+        arguments = normalize_arguments(data.get("input", data.get("arguments", data.get("parameters", data.get("args", {})))))
+        return (name, arguments) if name in KNOWN_TOOL_NAMES and arguments is not None else None
     function_call = data.get("function_call")
     if isinstance(function_call, dict) and isinstance(function_call.get("name"), str):
-        return function_call["name"], normalize_arguments(function_call.get("arguments", {}))
+        name = function_call["name"]
+        arguments = normalize_arguments(function_call.get("arguments", {}))
+        return (name, arguments) if name in KNOWN_TOOL_NAMES and arguments is not None else None
     tool_calls = data.get("tool_calls")
     if isinstance(tool_calls, list) and tool_calls:
         first = tool_calls[0]
         if isinstance(first, dict):
             function = first.get("function")
             if isinstance(function, dict) and isinstance(function.get("name"), str):
-                return function["name"], normalize_arguments(function.get("arguments", {}))
+                name = function["name"]
+                arguments = normalize_arguments(function.get("arguments", {}))
+                return (name, arguments) if name in KNOWN_TOOL_NAMES and arguments is not None else None
             if isinstance(first.get("name"), str):
-                return first["name"], normalize_arguments(first.get("arguments", first.get("input", {})))
+                name = first["name"]
+                arguments = normalize_arguments(first.get("arguments", first.get("input", first.get("parameters", first.get("args", {})))))
+                return (name, arguments) if name in KNOWN_TOOL_NAMES and arguments is not None else None
     return None
 
 
-def normalize_tool_arguments(data: dict[str, Any]) -> dict[str, Any]:
-    arguments = normalize_arguments(data.get("arguments", {}))
+def normalize_tool_arguments(data: dict[str, Any]) -> dict[str, Any] | None:
+    raw = data.get("arguments", data.get("parameters", data.get("args", None)))
+    if raw is None:
+        arguments = {key: value for key, value in data.items() if key not in TOOL_CALL_META_KEYS}
+    else:
+        arguments = normalize_arguments(raw)
+    if arguments is None:
+        return None
     for key in ("timeout", "max_results", "max_bytes", "max_matches"):
         if key in data and key not in arguments:
             arguments[key] = data[key]
     return arguments
 
 
-def normalize_arguments(value: Any) -> dict[str, Any]:
+def normalize_arguments(value: Any) -> dict[str, Any] | None:
     if isinstance(value, dict):
         return value
     if isinstance(value, str):
         try:
             decoded = json.loads(value)
         except json.JSONDecodeError:
-            return {}
-        return decoded if isinstance(decoded, dict) else {}
-    return {}
+            return None
+        return decoded if isinstance(decoded, dict) else None
+    return {} if value is None else None
 
 
 def normalize_subagent_specs(arguments: dict[str, Any]) -> list[dict[str, Any]]:

@@ -194,6 +194,29 @@ def test_stream_holds_mid_line_tool_calls():
     assert safe_stream_emit_length(t3) == len(t3)
 
 
+def test_unknown_name_input_json_is_not_treated_as_tool_call():
+    from deepseek_tulagent.agent import safe_stream_emit_length
+
+    text = '模型参数示例：{"name":"temperature","input":{"value":0.2},"arguments":"not a tool"}'
+    assert parse_tool_call(text) is None
+    assert safe_stream_emit_length(text) == len(text)
+
+
+def test_tool_call_requires_object_arguments():
+    assert parse_tool_call('{"tool":"run_shell","arguments":"echo should-not-run"}') is None
+    assert parse_tool_call('{"name":"run_shell","input":"echo should-not-run"}') is None
+
+
+def test_parse_top_level_tool_parameters_from_tool_fence():
+    call = parse_tool_call('```tool\n{"tool":"run_shell","command":"printf ok","timeout":15}\n```')
+    assert call == ("run_shell", {"command": "printf ok", "timeout": 15})
+
+
+def test_parse_parameters_alias_for_tool_arguments():
+    call = parse_tool_call('{"name":"write_file","parameters":{"path":"a.txt","content":"ok"}}')
+    assert call == ("write_file", {"path": "a.txt", "content": "ok"})
+
+
 def test_strip_leaves_no_bracket_or_tag_residue():
     """Parsing succeeds but a stray brace/angle-bracket must not be left as prose."""
     from deepseek_tulagent.agent import strip_tool_call_display as strip
@@ -992,6 +1015,18 @@ def test_yolo_mode_auto_approves_shell(tmp_path: Path):
     transcript = next((tmp_path / ".deepseek-tulagent" / "sessions").glob("*.jsonl")).read_text(encoding="utf-8")
     assert "ran" in transcript
     assert result.answer == "Shell ran."
+
+
+def test_agent_executes_tool_fence_with_top_level_parameters(tmp_path: Path):
+    client = FakeClient([
+        '```tool\n{"tool":"run_shell","command":"printf top-level-ok","timeout":5}\n```',
+        "done",
+    ])
+    result = TuLAgent(settings(tmp_path), mode="root", client=client).run("run shell")
+    transcript = next((tmp_path / ".deepseek-tulagent" / "sessions").glob("*.jsonl")).read_text(encoding="utf-8")
+    assert "top-level-ok" in transcript
+    assert "Missing string argument: command" not in transcript
+    assert result.answer == "done"
 
 
 def test_agent_mode_can_approve_selected_tool(tmp_path: Path):

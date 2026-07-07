@@ -1,5 +1,23 @@
 # 更新记录 / Changelog
 
+## v0.1.92
+
+中文：
+
+- **修复：真实 tool 调用的顶层参数被丢失**。兼容模型常见的 ```tool 代码块输出，例如 `{"tool":"run_shell","command":"...","timeout":15}`；`command/path/content` 等顶层字段现在会作为工具参数传入，不再只剩 `timeout` 并报 `Missing string argument: command`。
+- **新增：兼容 `parameters` / `args` 工具参数别名**。支持 `{"name":"write_file","parameters":{...}}` 等 OpenAI/Claude/Qwen/GLM 常见工具输出形态。
+- **收紧：tool 调用必须是已知工具且参数必须是对象**。避免把无效字符串参数变成 `{}` 后误执行；工具内部 `TypeError` 会变成工具失败结果，不再直接中断整轮。
+- **优化：流式扣留基于实际可解析工具判断**。完整 JSON 若不是可执行工具，不会继续被扣住或造成前端“先显示又撤回”的观感。
+- **同步：包版本和 README 安装链接更新到 `v0.1.92`**。
+
+English:
+
+- **Fixed: real tool-call top-level parameters were dropped**. Common ```tool outputs such as `{"tool":"run_shell","command":"...","timeout":15}` now pass `command/path/content` top-level fields into the tool instead of losing them and failing with `Missing string argument: command`.
+- **Added: `parameters` / `args` aliases for tool arguments**. Supports common OpenAI/Claude/Qwen/GLM-style shapes such as `{"name":"write_file","parameters":{...}}`.
+- **Tightened: tool calls must target known tools and use object arguments**. Invalid string arguments are no longer silently converted to `{}`; tool `TypeError`s become tool failure results instead of aborting the whole turn.
+- **Improved: streaming holdback now checks actual parseable tools**. Complete JSON that is not an executable tool is no longer held back or visually withdrawn.
+- **Synced: package version and README install links are now `v0.1.92`**.
+
 ## v0.1.91
 
 中文：
