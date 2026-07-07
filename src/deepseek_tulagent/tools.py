@@ -46,7 +46,7 @@ TOOL_DESCRIPTIONS = {
     "apply_patch": "gated write: apply a unified diff with git apply",
     "download_url": "gated network+write: download URL into workspace",
     "clone_repo": "gated network+write: clone a Git/GitHub repository with mirror and archive fallbacks",
-    "web_search": "network: query the configured local search engine and return result snippets",
+    "web_search": "network: search the web via Baidu/Bing/DuckDuckGo and return result snippets",
     "start_service": "gated shell: start background service with pid/log tracking",
     "stop_service": "gated shell: stop a tracked background service",
     "service_status": "read: inspect a tracked background service",
@@ -347,21 +347,17 @@ class ToolRegistry:
         timeout = int(arguments.get("timeout", 10))
         if looks_like_url(query):
             return fetch_direct_url(query, timeout=timeout)
-        search_url = string_or_none(arguments.get("search_url") or arguments.get("engine_url") or arguments.get("base_url"))
         options = {
             "language": string_or_none(arguments.get("language")) or "zh-CN",
-            "categories": string_or_none(arguments.get("categories")),
-            "time_range": string_or_none(arguments.get("time_range") or arguments.get("timeRange")),
+            "engines": string_or_none(arguments.get("engines") or arguments.get("engine") or arguments.get("search_engine")),
         }
-        results, diagnostics = run_local_web_search(query, max_results=max_results, timeout=timeout, search_url=search_url, options=options)
+        results, diagnostics = run_web_search(query, max_results=max_results, timeout=timeout, options=options)
         if not results:
             detail = "\n".join(diagnostics) if diagnostics else "no search sources attempted"
             return ToolResult(
                 False,
-                "local search engine unavailable or returned no results.\n"
+                "web search returned no parseable results.\n"
                 f"query: {query}\n"
-                "Start a local SearXNG-compatible engine and set DSTUL_SEARCH_URL, "
-                "or pass search_url, e.g. http://127.0.0.1:8080/search\n"
                 f"{detail}",
             )
         fetch_pages = int(arguments.get("fetch_pages", arguments.get("fetchPages", 0)) or 0)
@@ -632,7 +628,15 @@ def looks_like_url(value: str) -> bool:
 
 
 def fetch_text_url(url: str, *, timeout: int, max_bytes: int = 1_500_000) -> str:
-    request = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 DeepSeekTuL/0.1"})
+    request = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/126.0 Safari/537.36 DeepSeekTuL/0.1",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,application/json;q=0.8,*/*;q=0.7",
+            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.7",
+        },
+    )
     with urllib.request.urlopen(request, timeout=timeout) as response:
         return response.read(max_bytes).decode("utf-8", errors="replace")
 
@@ -751,6 +755,107 @@ def parse_local_search_results(body: str, max_results: int) -> list[str]:
     return results
 
 
+def web_search_engine_order(options: dict[str, str | None] | None = None) -> list[str]:
+    raw = string_or_none((options or {}).get("engines")) or string_or_none(os.getenv("DSTUL_SEARCH_ENGINES"))
+    requested = raw.split(",") if raw else ["baidu", "bing", "duckduckgo"]
+    aliases = {
+        "bd": "baidu",
+        "baidu": "baidu",
+        "百度": "baidu",
+        "bing": "bing",
+        "必应": "bing",
+        "ddg": "duckduckgo",
+        "duck": "duckduckgo",
+        "duckduckgo": "duckduckgo",
+    }
+    engines: list[str] = []
+    for item in requested:
+        normalized = aliases.get(item.strip().lower())
+        if normalized and normalized not in engines:
+            engines.append(normalized)
+    return engines
+
+
+def third_party_search_request_url(engine: str, query: str, options: dict[str, str | None] | None, max_results: int) -> str:
+    language = string_or_none((options or {}).get("language")) or "zh-CN"
+    if engine == "baidu":
+        params = {"wd": query, "rn": str(max_results), "ie": "utf-8"}
+        return "https://www.baidu.com/s?" + urllib.parse.urlencode(params)
+    if engine == "bing":
+        params = {"q": query, "count": str(max_results), "mkt": language, "setlang": language.split("-")[0]}
+        return "https://www.bing.com/search?" + urllib.parse.urlencode(params)
+    if engine == "duckduckgo":
+        kl = "cn-zh" if language.lower().startswith("zh") else "us-en"
+        params = {"q": query, "kl": kl}
+        return "https://html.duckduckgo.com/html/?" + urllib.parse.urlencode(params)
+    raise ValueError(f"unsupported search engine: {engine}")
+
+
+def run_web_search(
+    query: str,
+    *,
+    max_results: int,
+    timeout: int,
+    options: dict[str, str | None] | None = None,
+) -> tuple[list[str], list[str]]:
+    diagnostics: list[str] = []
+    seen: set[str] = set()
+    combined: list[str] = []
+    parsers = {
+        "baidu": parse_baidu_results,
+        "bing": parse_bing_results,
+        "duckduckgo": parse_duckduckgo_results,
+    }
+    labels = {
+        "baidu": "Baidu",
+        "bing": "Bing",
+        "duckduckgo": "DuckDuckGo",
+    }
+    engines = web_search_engine_order(options)
+    if not engines:
+        return [], ["no supported search engines requested; use baidu,bing,duckduckgo"]
+    for engine in engines:
+        url = third_party_search_request_url(engine, query, options, max_results)
+        try:
+            body = fetch_text_url(url, timeout=timeout)
+        except Exception as exc:
+            diagnostics.append(f"{engine}: request failed: {exc}")
+            continue
+        parsed = parsers[engine](body, max_results)
+        if not parsed:
+            diagnostics.append(f"{engine}: no parseable results")
+            continue
+        added = 0
+        for result in parsed:
+            key = result_url_key(result)
+            if key and key in seen:
+                continue
+            if key:
+                seen.add(key)
+            combined.append(f"[{labels[engine]}]\n{result}")
+            added += 1
+            if len([item for item in combined if search_result_has_snippet(item)]) >= max_results:
+                return prefer_snippet_results(combined, max_results), diagnostics
+        if added == 0:
+            diagnostics.append(f"{engine}: only duplicate results")
+    return prefer_snippet_results(combined, max_results), diagnostics
+
+
+def search_result_has_snippet(result: str) -> bool:
+    for line in result.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("[") or stripped.startswith("- ") or stripped.startswith(("http://", "https://")):
+            continue
+        return True
+    return False
+
+
+def prefer_snippet_results(results: list[str], max_results: int) -> list[str]:
+    with_snippets = [result for result in results if search_result_has_snippet(result)]
+    without_snippets = [result for result in results if not search_result_has_snippet(result)]
+    return (with_snippets + without_snippets)[:max_results]
+
+
 def fetch_result_pages(results: list[str], *, timeout: int, fetch_pages: int, page_chars: int) -> list[str]:
     pages: list[str] = []
     seen: set[str] = set()
@@ -824,6 +929,34 @@ def parse_duckduckgo_results(html: str, max_results: int) -> list[str]:
     return results
 
 
+def parse_baidu_results(html: str, max_results: int) -> list[str]:
+    results: list[str] = []
+    h3_matches = list(re.finditer(r"(?is)<h3[^>]*>\s*<a[^>]*href=[\"']([^\"']+)[\"'][^>]*>(.*?)</a>\s*</h3>", html))
+    for index, match in enumerate(h3_matches):
+        href = normalize_baidu_url(unescape(match.group(1)))
+        title = clean_html(match.group(2))
+        next_start = h3_matches[index + 1].start() if index + 1 < len(h3_matches) else min(len(html), match.end() + 3000)
+        block = html[match.end() : next_start]
+        snippet = ""
+        for pattern in (
+            r"(?is)<span[^>]*class=[\"'][^\"']*content-right_[^\"']*[\"'][^>]*>(.*?)</span>",
+            r"(?is)<div[^>]*class=[\"'][^\"']*c-abstract[^\"']*[\"'][^>]*>(.*?)</div>",
+            r"(?is)<span[^>]*class=[\"'][^\"']*c-abstract[^\"']*[\"'][^>]*>(.*?)</span>",
+            r"(?is)<div[^>]*class=[\"'][^\"']*c-span-last[^\"']*[\"'][^>]*>(.*?)</div>",
+            r"(?is)<span[^>]*class=[\"'][^\"']*c-color-text[^\"']*[\"'][^>]*>(.*?)</span>",
+        ):
+            snippet_match = re.search(pattern, block)
+            if snippet_match:
+                snippet = clean_html(snippet_match.group(1))
+                break
+        if not title and not href:
+            continue
+        results.append(f"- {title or href}\n  {href}\n  {snippet}".strip())
+        if len(results) >= max_results:
+            break
+    return results
+
+
 def parse_bing_results(html: str, max_results: int) -> list[str]:
     results: list[str] = []
     blocks = re.findall(r'<li class="b_algo".*?</li>', html, flags=re.DOTALL)
@@ -868,6 +1001,14 @@ def normalize_duckduckgo_url(url: str) -> str:
         target = query.get("uddg", [""])[0]
         if target.startswith(("http://", "https://")):
             return target
+    return url
+
+
+def normalize_baidu_url(url: str) -> str:
+    if url.startswith("//"):
+        return "https:" + url
+    if url.startswith("/"):
+        return "https://www.baidu.com" + url
     return url
 
 

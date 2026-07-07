@@ -1178,7 +1178,7 @@ def test_normalize_duckduckgo_redirect_url():
     assert normalize_duckduckgo_url(url) == "https://example.com/news?a=1"
 
 
-def test_web_search_uses_local_searxng(monkeypatch, tmp_path: Path):
+def test_web_search_uses_baidu_first(monkeypatch, tmp_path: Path):
     requested: list[str] = []
 
     class FakeResponse:
@@ -1197,23 +1197,24 @@ def test_web_search_uses_local_searxng(monkeypatch, tmp_path: Path):
     def fake_urlopen(request, timeout=10):
         url = request.full_url
         requested.append(url)
-        assert url.startswith("http://127.0.0.1:9999/search?")
-        assert "format=json" in url
+        assert url.startswith("https://www.baidu.com/s?")
+        assert "wd=%E6%B5%8B%E8%AF%95" in url
         return FakeResponse(
-            json.dumps({"results": [{"title": "标题", "url": "https://example.com/a", "content": "摘要"}]}, ensure_ascii=False)
+            '<html><h3 class="t"><a href="https://example.com/a">标题</a></h3>'
+            '<div class="c-abstract">摘要</div></html>'
         )
 
     monkeypatch.setattr("deepseek_tulagent.tools.urllib.request.urlopen", fake_urlopen)
-    monkeypatch.setenv("DSTUL_SEARCH_URL", "http://127.0.0.1:9999/search")
+    monkeypatch.delenv("DSTUL_SEARCH_ENGINES", raising=False)
     tools = ToolRegistry(tmp_path, policy=ApprovalPolicy.from_mode("root"))
-    result = tools.run("web_search", {"query": "测试", "max_results": 3})
+    result = tools.run("web_search", {"query": "测试", "max_results": 1})
     assert result.ok is True
-    assert "Local Search" in result.output
+    assert "Baidu" in result.output
     assert "https://example.com/a" in result.output
     assert len(requested) == 1
 
 
-def test_web_search_accepts_search_url_argument(monkeypatch, tmp_path: Path):
+def test_web_search_falls_back_from_baidu_to_bing(monkeypatch, tmp_path: Path):
     requested: list[str] = []
 
     class FakeResponse:
@@ -1232,19 +1233,24 @@ def test_web_search_accepts_search_url_argument(monkeypatch, tmp_path: Path):
     def fake_urlopen(request, timeout=10):
         url = request.full_url
         requested.append(url)
-        assert url.startswith("http://localhost:7777/search?")
-        return FakeResponse(json.dumps({"results": [{"title": "本地结果", "url": "https://example.com/b", "content": "本地摘要"}]}, ensure_ascii=False))
+        if "baidu.com" in url:
+            return FakeResponse("<html><body>captcha or empty</body></html>")
+        assert "bing.com/search?" in url
+        return FakeResponse(
+            '<html><li class="b_algo"><h2><a href="https://example.com/b">必应结果</a></h2>'
+            '<div class="b_caption"><p>必应摘要</p></div></li></html>'
+        )
 
     monkeypatch.setattr("deepseek_tulagent.tools.urllib.request.urlopen", fake_urlopen)
     tools = ToolRegistry(tmp_path, policy=ApprovalPolicy.from_mode("root"))
-    result = tools.run("web_search", {"query": "测试", "max_results": 3, "search_url": "http://localhost:7777"})
+    result = tools.run("web_search", {"query": "测试", "max_results": 1})
     assert result.ok is True
-    assert "Local Search" in result.output
+    assert "Bing" in result.output
     assert "https://example.com/b" in result.output
-    assert len(requested) == 1
+    assert len(requested) == 2
 
 
-def test_web_search_passes_local_engine_options(monkeypatch, tmp_path: Path):
+def test_web_search_accepts_engine_override(monkeypatch, tmp_path: Path):
     captured = {}
 
     class FakeResponse:
@@ -1255,9 +1261,13 @@ def test_web_search_passes_local_engine_options(monkeypatch, tmp_path: Path):
             return False
 
         def read(self, _limit=-1):
-            return json.dumps({"results": [{"title": "新闻", "url": "https://example.com/news", "content": "摘要"}]}, ensure_ascii=False).encode()
+            return (
+                '<html><li class="b_algo"><h2><a href="https://example.com/news">新闻</a></h2>'
+                '<div class="b_caption"><p>摘要</p></div></li></html>'
+            ).encode()
 
     def fake_urlopen(request, timeout=10):
+        assert "bing.com/search?" in request.full_url
         parsed = urllib.parse.urlparse(request.full_url)
         captured.update(urllib.parse.parse_qs(parsed.query))
         return FakeResponse()
@@ -1268,20 +1278,23 @@ def test_web_search_passes_local_engine_options(monkeypatch, tmp_path: Path):
         "web_search",
         {
             "query": "测试",
-            "search_url": "http://localhost:7777/search",
+            "engines": "bing",
             "language": "zh-TW",
-            "categories": "news,it",
-            "time_range": "day",
         },
     )
     assert result.ok is True
-    assert captured["language"] == ["zh-TW"]
-    assert captured["categories"] == ["news,it"]
-    assert captured["time_range"] == ["day"]
+    assert captured["mkt"] == ["zh-TW"]
+    assert captured["setlang"] == ["zh"]
+    assert "Bing" in result.output
 
 
-def test_web_search_supports_yacy_json(monkeypatch, tmp_path: Path):
+def test_web_search_supports_duckduckgo_fallback(monkeypatch, tmp_path: Path):
+    requested: list[str] = []
+
     class FakeResponse:
+        def __init__(self, body: str):
+            self.body = body.encode("utf-8")
+
         def __enter__(self):
             return self
 
@@ -1289,17 +1302,27 @@ def test_web_search_supports_yacy_json(monkeypatch, tmp_path: Path):
             return False
 
         def read(self, _limit=-1):
-            return json.dumps(
-                {"channels": [{"items": [{"title": "YaCy 结果", "link": "https://example.com/y", "description": "YaCy 摘要"}]}]},
-                ensure_ascii=False,
-            ).encode()
+            return self.body
 
-    monkeypatch.setattr("deepseek_tulagent.tools.urllib.request.urlopen", lambda *_args, **_kwargs: FakeResponse())
+    def fake_urlopen(request, timeout=10):
+        requested.append(request.full_url)
+        if "duckduckgo.com" not in request.full_url:
+            return FakeResponse("<html></html>")
+        return FakeResponse(
+            '<div class="result__body"><a rel="nofollow" class="result__a" '
+            'href="https://duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Fddg">DDG 结果</a>'
+            '<div class="result__snippet">DDG 摘要</div></div></div>'
+        )
+
+    monkeypatch.setattr("deepseek_tulagent.tools.urllib.request.urlopen", fake_urlopen)
     tools = ToolRegistry(tmp_path, policy=ApprovalPolicy.from_mode("root"))
-    result = tools.run("web_search", {"query": "测试", "search_url": "http://localhost:8090/yacysearch.json"})
+    result = tools.run("web_search", {"query": "测试", "max_results": 1})
     assert result.ok is True
-    assert "YaCy 结果" in result.output
-    assert "https://example.com/y" in result.output
+    assert "DuckDuckGo" in result.output
+    assert "https://example.com/ddg" in result.output
+    assert any("baidu.com" in url for url in requested)
+    assert any("bing.com" in url for url in requested)
+    assert any("duckduckgo.com" in url for url in requested)
 
 
 def test_web_search_can_fetch_top_result_pages(monkeypatch, tmp_path: Path):
@@ -1321,15 +1344,20 @@ def test_web_search_can_fetch_top_result_pages(monkeypatch, tmp_path: Path):
     def fake_urlopen(request, timeout=10):
         url = request.full_url
         requested.append(url)
-        if "localhost:7777" in url:
-            return FakeResponse(json.dumps({"results": [{"title": "A", "url": "https://example.com/a", "content": "摘要"}]}))
+        if "bing.com" in url:
+            return FakeResponse(
+                '<html><li class="b_algo"><h2><a href="https://example.com/a">A</a></h2>'
+                '<div class="b_caption"><p>摘要</p></div></li></html>'
+            )
         if url == "https://example.com/robots.txt":
             return FakeResponse("User-agent: *\nAllow: /\n")
+        if "baidu.com" in url:
+            return FakeResponse("<html></html>")
         return FakeResponse("<html><title>A page</title><body><main>正文内容 " + ("x" * 200) + "</main></body></html>")
 
     monkeypatch.setattr("deepseek_tulagent.tools.urllib.request.urlopen", fake_urlopen)
     tools = ToolRegistry(tmp_path, policy=ApprovalPolicy.from_mode("root"))
-    result = tools.run("web_search", {"query": "测试", "search_url": "http://localhost:7777/search", "fetch_pages": 1})
+    result = tools.run("web_search", {"query": "测试", "engines": "bing", "fetch_pages": 1})
     assert result.ok is True
     assert "[Fetched Page]" in result.output
     assert "正文内容" in result.output
@@ -1352,31 +1380,36 @@ def test_web_search_respects_robots_when_fetching_pages(monkeypatch, tmp_path: P
 
     def fake_urlopen(request, timeout=10):
         url = request.full_url
-        if "localhost:7777" in url:
-            return FakeResponse(json.dumps({"results": [{"title": "A", "url": "https://example.com/a", "content": "摘要"}]}))
+        if "bing.com" in url:
+            return FakeResponse(
+                '<html><li class="b_algo"><h2><a href="https://example.com/a">A</a></h2>'
+                '<div class="b_caption"><p>摘要</p></div></li></html>'
+            )
         if url == "https://example.com/robots.txt":
             return FakeResponse("User-agent: *\nDisallow: /\n")
         raise AssertionError(f"page should not be fetched when robots blocks it: {url}")
 
     monkeypatch.setattr("deepseek_tulagent.tools.urllib.request.urlopen", fake_urlopen)
     tools = ToolRegistry(tmp_path, policy=ApprovalPolicy.from_mode("root"))
-    result = tools.run("web_search", {"query": "测试", "search_url": "http://localhost:7777/search", "fetch_pages": 1})
+    result = tools.run("web_search", {"query": "测试", "engines": "bing", "fetch_pages": 1})
     assert result.ok is True
     assert "skipped by robots.txt" in result.output
     assert "正文内容" not in result.output
 
 
-def test_web_search_fails_without_local_engine(monkeypatch, tmp_path: Path):
+def test_web_search_reports_all_engine_failures(monkeypatch, tmp_path: Path):
     def fake_urlopen(request, timeout=10):
-        raise OSError("connection refused")
+        raise OSError("network blocked")
 
-    monkeypatch.delenv("DSTUL_SEARCH_URL", raising=False)
+    monkeypatch.delenv("DSTUL_SEARCH_ENGINES", raising=False)
     monkeypatch.setattr("deepseek_tulagent.tools.urllib.request.urlopen", fake_urlopen)
     tools = ToolRegistry(tmp_path, policy=ApprovalPolicy.from_mode("root"))
     result = tools.run("web_search", {"query": "测试", "max_results": 3})
     assert result.ok is False
-    assert "local search engine unavailable" in result.output
-    assert "DSTUL_SEARCH_URL" in result.output
+    assert "web search returned no parseable results" in result.output
+    assert "baidu: request failed" in result.output
+    assert "bing: request failed" in result.output
+    assert "duckduckgo: request failed" in result.output
 
 
 def test_web_search_reads_direct_url(monkeypatch, tmp_path: Path):

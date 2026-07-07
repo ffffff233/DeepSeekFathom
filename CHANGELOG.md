@@ -1,5 +1,23 @@
 # 更新记录 / Changelog
 
+## v0.1.96
+
+中文：
+
+- **重做：`web_search` 改回第三方多引擎搜索**。默认按 `Baidu -> Bing -> DuckDuckGo` 尝试，支持工具参数 `engines` 或环境变量 `DSTUL_SEARCH_ENGINES` 覆盖顺序。
+- **新增：Baidu HTML 结果解析和多引擎降级诊断**。Baidu 无结果或被拦截时自动继续 Bing/DuckDuckGo；全部失败时列出每个引擎的请求/解析失败原因。
+- **优化：搜索结果去重和中文默认体验**。搜索请求默认使用中文区域参数和浏览器 UA，结果按 URL 去重，减少空结果、重复结果和跑偏。
+- **保留：合规抓取护栏**。`fetch_pages` 仍默认关闭；开启后和直读 URL 一样检查 `robots.txt`，正文只返回短摘录。
+- **同步：系统提示、README、包版本和安装链接更新到 `v0.1.96`**。
+
+English:
+
+- **Reworked: `web_search` now uses third-party multi-engine search again**. It defaults to `Baidu -> Bing -> DuckDuckGo`, with `engines` or `DSTUL_SEARCH_ENGINES` overrides.
+- **Added: Baidu HTML parsing and multi-engine fallback diagnostics**. If Baidu is empty or blocked, Bing/DuckDuckGo are tried automatically; full failures report per-engine request/parse reasons.
+- **Improved: deduplication and Chinese-first defaults**. Requests use Chinese locale defaults plus a browser-like UA, and results are deduplicated by URL.
+- **Kept: compliance guardrails**. `fetch_pages` remains opt-in; direct URL reads and page enrichment check `robots.txt` and return only short excerpts.
+- **Synced: system prompt, README, package version, and install links are now `v0.1.96`**.
+
 ## v0.1.95
 
 中文：
