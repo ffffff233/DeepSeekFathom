@@ -14,6 +14,7 @@ from html import unescape
 import re
 import urllib.parse
 import urllib.request
+import urllib.robotparser
 import zipfile
 
 from .policy import ApprovalPolicy
@@ -365,8 +366,8 @@ class ToolRegistry:
             )
         fetch_pages = int(arguments.get("fetch_pages", arguments.get("fetchPages", 0)) or 0)
         if fetch_pages > 0:
-            page_limit = int(arguments.get("page_chars", arguments.get("pageChars", 1200)) or 1200)
-            results.extend(fetch_result_pages(results, timeout=timeout, fetch_pages=min(fetch_pages, 5), page_chars=max(200, min(page_limit, 4000))))
+            page_limit = int(arguments.get("page_chars", arguments.get("pageChars", 800)) or 800)
+            results.extend(fetch_result_pages(results, timeout=timeout, fetch_pages=min(fetch_pages, 5), page_chars=max(200, min(page_limit, 1600))))
         return ToolResult(True, "\n\n".join(results))
 
     def start_service(self, arguments: dict[str, Any]) -> ToolResult:
@@ -636,6 +637,22 @@ def fetch_text_url(url: str, *, timeout: int, max_bytes: int = 1_500_000) -> str
         return response.read(max_bytes).decode("utf-8", errors="replace")
 
 
+def can_fetch_url(url: str, *, timeout: int) -> tuple[bool, str]:
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return False, "unsupported URL"
+    robots_url = urllib.parse.urlunparse((parsed.scheme, parsed.netloc, "/robots.txt", "", "", ""))
+    parser = urllib.robotparser.RobotFileParser()
+    parser.set_url(robots_url)
+    try:
+        robots_text = fetch_text_url(robots_url, timeout=timeout, max_bytes=200_000)
+    except Exception as exc:
+        return True, f"robots unavailable: {exc}"
+    parser.parse(robots_text.splitlines())
+    allowed = parser.can_fetch("DeepSeekTuL", url)
+    return allowed, "robots allowed" if allowed else "blocked by robots.txt"
+
+
 def local_search_url_candidates(search_url: str | None = None) -> list[str]:
     configured = string_or_none(search_url) or string_or_none(os.getenv("DSTUL_SEARCH_URL"))
     if configured:
@@ -742,6 +759,10 @@ def fetch_result_pages(results: list[str], *, timeout: int, fetch_pages: int, pa
         if not url or url in seen:
             continue
         seen.add(url)
+        allowed, reason = can_fetch_url(url, timeout=timeout)
+        if not allowed:
+            pages.append(f"[Fetched Page]\n- skipped by robots.txt\n  {url}\n  {reason}")
+            continue
         try:
             html = fetch_text_url(url, timeout=timeout, max_bytes=800_000)
         except Exception as exc:
@@ -765,6 +786,9 @@ def result_url_key(result: str) -> str:
 
 
 def fetch_direct_url(url: str, *, timeout: int) -> ToolResult:
+    allowed, reason = can_fetch_url(url, timeout=timeout)
+    if not allowed:
+        return ToolResult(False, f"direct URL fetch skipped by robots.txt for {url}: {reason}")
     try:
         html = fetch_text_url(url, timeout=timeout)
     except Exception as exc:

@@ -1323,6 +1323,8 @@ def test_web_search_can_fetch_top_result_pages(monkeypatch, tmp_path: Path):
         requested.append(url)
         if "localhost:7777" in url:
             return FakeResponse(json.dumps({"results": [{"title": "A", "url": "https://example.com/a", "content": "摘要"}]}))
+        if url == "https://example.com/robots.txt":
+            return FakeResponse("User-agent: *\nAllow: /\n")
         return FakeResponse("<html><title>A page</title><body><main>正文内容 " + ("x" * 200) + "</main></body></html>")
 
     monkeypatch.setattr("deepseek_tulagent.tools.urllib.request.urlopen", fake_urlopen)
@@ -1332,6 +1334,36 @@ def test_web_search_can_fetch_top_result_pages(monkeypatch, tmp_path: Path):
     assert "[Fetched Page]" in result.output
     assert "正文内容" in result.output
     assert any(url == "https://example.com/a" for url in requested)
+
+
+def test_web_search_respects_robots_when_fetching_pages(monkeypatch, tmp_path: Path):
+    class FakeResponse:
+        def __init__(self, body: str):
+            self.body = body.encode("utf-8")
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self, _limit=-1):
+            return self.body
+
+    def fake_urlopen(request, timeout=10):
+        url = request.full_url
+        if "localhost:7777" in url:
+            return FakeResponse(json.dumps({"results": [{"title": "A", "url": "https://example.com/a", "content": "摘要"}]}))
+        if url == "https://example.com/robots.txt":
+            return FakeResponse("User-agent: *\nDisallow: /\n")
+        raise AssertionError(f"page should not be fetched when robots blocks it: {url}")
+
+    monkeypatch.setattr("deepseek_tulagent.tools.urllib.request.urlopen", fake_urlopen)
+    tools = ToolRegistry(tmp_path, policy=ApprovalPolicy.from_mode("root"))
+    result = tools.run("web_search", {"query": "测试", "search_url": "http://localhost:7777/search", "fetch_pages": 1})
+    assert result.ok is True
+    assert "skipped by robots.txt" in result.output
+    assert "正文内容" not in result.output
 
 
 def test_web_search_fails_without_local_engine(monkeypatch, tmp_path: Path):
@@ -1349,6 +1381,9 @@ def test_web_search_fails_without_local_engine(monkeypatch, tmp_path: Path):
 
 def test_web_search_reads_direct_url(monkeypatch, tmp_path: Path):
     class FakeResponse:
+        def __init__(self, body: bytes):
+            self.body = body
+
         def __enter__(self):
             return self
 
@@ -1356,14 +1391,37 @@ def test_web_search_reads_direct_url(monkeypatch, tmp_path: Path):
             return False
 
         def read(self, _limit=-1):
-            return b"<html><head><title>Page Title</title></head><body><h1>Hello</h1><p>Body text</p></body></html>"
+            return self.body
 
-    monkeypatch.setattr("deepseek_tulagent.tools.urllib.request.urlopen", lambda *_args, **_kwargs: FakeResponse())
+    def fake_urlopen(request, timeout=10):
+        if request.full_url == "https://example.com/robots.txt":
+            return FakeResponse(b"User-agent: *\nAllow: /\n")
+        return FakeResponse(b"<html><head><title>Page Title</title></head><body><h1>Hello</h1><p>Body text</p></body></html>")
+
+    monkeypatch.setattr("deepseek_tulagent.tools.urllib.request.urlopen", fake_urlopen)
     tools = ToolRegistry(tmp_path, policy=ApprovalPolicy.from_mode("root"))
     result = tools.run("web_search", {"query": "https://example.com/page"})
     assert result.ok is True
     assert "Page Title" in result.output
     assert "Body text" in result.output
+
+
+def test_web_search_direct_url_respects_robots(monkeypatch, tmp_path: Path):
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self, _limit=-1):
+            return b"User-agent: *\nDisallow: /\n"
+
+    monkeypatch.setattr("deepseek_tulagent.tools.urllib.request.urlopen", lambda *_args, **_kwargs: FakeResponse())
+    tools = ToolRegistry(tmp_path, policy=ApprovalPolicy.from_mode("root"))
+    result = tools.run("web_search", {"query": "https://example.com/page"})
+    assert result.ok is False
+    assert "robots.txt" in result.output
 
 
 def test_skill_store_discovers_and_creates_workspace_skills(tmp_path: Path):
