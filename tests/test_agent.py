@@ -280,6 +280,51 @@ def test_subagent_treats_thinking_mode_in_mode_field_as_thinking(tmp_path: Path)
     assert result.answer == "主代理收到。"
 
 
+def test_subagent_inherits_parent_mode_and_accepts_thinking_field(tmp_path: Path):
+    class DelegateClient:
+        def __init__(self):
+            self.calls = 0
+            self.subagent_system = ""
+
+        def chat(self, messages):
+            self.calls += 1
+            if self.calls == 1:
+                return '{"tool":"delegate_agent","arguments":{"name":"debugger","task":"检查 shell 权限","thinking":"deep","max_rounds":1}}'
+            if self.calls == 2:
+                self.subagent_system = messages[0].content
+                return "子代理看到 root/deep。"
+            return "主代理收到。"
+
+    client = DelegateClient()
+    result = TuLAgent(settings(tmp_path), mode="root", thinking="fast", client=client).run("委派检查权限")
+    assert result.answer == "主代理收到。"
+    assert "Current mode: root" in client.subagent_system
+    assert "Policy: write=True, shell=True, network=True, confirmation=False." in client.subagent_system
+    assert "Thinking mode: deep." in client.subagent_system
+
+
+def test_subagent_honors_explicit_mode_and_thinking(tmp_path: Path):
+    class DelegateClient:
+        def __init__(self):
+            self.calls = 0
+            self.subagent_system = ""
+
+        def chat(self, messages):
+            self.calls += 1
+            if self.calls == 1:
+                return '{"tool":"delegate_agent","arguments":{"name":"reviewer","task":"只读检查","mode":"review","thinking":"balanced","max_rounds":1}}'
+            if self.calls == 2:
+                self.subagent_system = messages[0].content
+                return "子代理看到 review/balanced。"
+            return "主代理收到。"
+
+    client = DelegateClient()
+    TuLAgent(settings(tmp_path), mode="root", thinking="fast", client=client).run("委派只读检查")
+    assert "Current mode: review" in client.subagent_system
+    assert "Policy: write=False, shell=True, network=False, confirmation=True." in client.subagent_system
+    assert "Thinking mode: balanced." in client.subagent_system
+
+
 def test_agent_delegates_to_multiple_subagents_in_one_tool_call(tmp_path: Path):
     class MultiDelegateClient:
         def __init__(self):
@@ -340,7 +385,8 @@ def test_agent_delegate_respects_cancel_before_subagent_runs(tmp_path: Path):
 
 def test_normalize_subagent_mode_and_thinking_handles_swapped_mode():
     assert normalize_subagent_mode_and_thinking("fast", None, parent_mode="root", parent_thinking="careful") == ("root", "fast")
-    assert normalize_subagent_mode_and_thinking("nonsense", "bad", parent_mode="root", parent_thinking="careful") == ("plan", "careful")
+    assert normalize_subagent_mode_and_thinking("nonsense", "bad", parent_mode="root", parent_thinking="careful") == ("root", "careful")
+    assert normalize_subagent_mode_and_thinking(None, "deep", parent_mode="root", parent_thinking="careful") == ("root", "deep")
 
 
 def test_normalize_subagent_specs_accepts_agents_and_tasks():

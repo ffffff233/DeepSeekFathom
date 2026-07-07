@@ -1,5 +1,19 @@
 # 更新记录 / Changelog
 
+## v0.1.90
+
+中文：
+
+- **修复：子代理默认被降级到 `plan` 导致 shell 被禁用**。`delegate_agent` 现在在未显式指定 `mode` 时继承父会话权限；父会话是 `root/yolo` 时，子代理也具备对应 shell/write/network 能力，不会再误报“受到 shell 策略限制”。
+- **新增：子代理可单独设置权限和思考档位**。`delegate_agent` 支持 `mode`/`permission(s)` 和 `thinking`/`think`，也支持 `agents=[...]` 一次派遣多个子代理；每个子代理都可单独指定 `mode`、`thinking`、`max_rounds`。`mode:"fast"` 这类旧写法仍兼容为 thinking 档位。
+- **调整：工具前置叙述不再显示复制/重试/分支按钮**。中间态消息不是最终回复，不再出现额外 Copy 按钮，也减少工具卡片前的动作行空隙。
+
+English:
+
+- **Fixed: delegated subagents defaulted to `plan`, disabling shell access**. `delegate_agent` now inherits the parent permission mode when `mode` is omitted; a parent running in `root/yolo` delegates subagents with matching shell/write/network capability instead of triggering a false shell-policy limitation.
+- **Added: per-subagent permission and reasoning controls**. `delegate_agent` accepts `mode`/`permission(s)` and `thinking`/`think`, including `agents=[...]` batch delegation; each subagent can set its own `mode`, `thinking`, and `max_rounds`. Legacy `mode:"fast"` style thinking selection remains compatible.
+- **Changed: pre-tool narration no longer shows copy/retry/branch actions**. Intermediate narration is not a final answer, so it no longer creates an extra Copy button or action-row gap before the tool card.
+
 ## v0.1.89
 
 中文：

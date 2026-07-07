@@ -24,7 +24,7 @@ You can answer normally or request exactly one tool call by returning a single J
 
 Available tools:
 - ask_user(question, options?, allow_manual?, placeholder?): ask the user to choose from structured options or type a custom answer; use this when the next step needs the user's preference
-- delegate_agent(name, task, mode?, think?, max_rounds?) or delegate_agent(agents=[{name, task, mode?, think?, max_rounds?}, ...]): run one or more isolated subagents and return summaries
+- delegate_agent(name, task, mode?, thinking?/think?, max_rounds?) or delegate_agent(agents=[{name, task, mode?, thinking?/think?, max_rounds?}, ...]): run one or more isolated subagents and return summaries. mode controls permissions (plan/review/agent/trusted/yolo/root); thinking controls reasoning effort (instant/fast/balanced/deep/ultra/etc.). Omitted values inherit the parent agent.
 - list_files(path?, max_entries?)
 - search_text(query, path?, max_matches?)
 - git_status(timeout?)
@@ -54,8 +54,8 @@ Rules:
   `curl -fsS --connect-timeout 5 https://api.ipify.org || curl -fsS --connect-timeout 5 https://ifconfig.me || curl -fsS --connect-timeout 5 https://checkip.amazonaws.com`
   then verify the service with `ss -tlnp`, local `curl`, and firewall status (`ufw status` or iptables/nftables when available).
 - For text search, prefer a narrow path and small max_matches. Broad searches can time out.
-- Use delegate_agent proactively for multi-branch investigation, independent review, verification, research, or long workflows that can be split into focused subtasks. For multiple independent tasks, call delegate_agent once with an agents array. Good subagent names: researcher, reviewer, verifier, implementer, debugger.
-- When delegating, give each subagent a narrow task and ask for evidence plus a recommended next step. Do not delegate trivial one-step tasks.
+- Use delegate_agent proactively for multi-branch investigation, independent review, verification, research, or long workflows that can be split into focused subtasks. For multiple independent tasks, call delegate_agent once with an agents array (up to 8 subagents). Good subagent names: researcher, reviewer, verifier, implementer, debugger.
+- When delegating, give each subagent a narrow task and ask for evidence plus a recommended next step. Set mode/thinking per subagent when it needs different permissions or reasoning depth. Do not delegate trivial one-step tasks.
 - If a web_search result is empty, irrelevant, or failed and the user asked to search, request one more web_search with a clearer query instead of saying you will search again.
 - If no tool is needed, answer directly.
 - After tool results, continue until the task is complete or clearly blocked.
@@ -333,8 +333,8 @@ class TuLAgent:
             raise ToolError("delegate_agent requires task")
         name = str(spec.get("name") or f"subagent-{index}").strip()[:40] or f"subagent-{index}"
         mode, thinking = normalize_subagent_mode_and_thinking(
-            spec.get("mode"),
-            spec.get("think"),
+            spec.get("mode", spec.get("permission", spec.get("permissions"))),
+            spec.get("thinking", spec.get("think")),
             parent_mode=self.mode,
             parent_thinking=self.thinking.name,
         )
@@ -1112,14 +1112,14 @@ def normalize_subagent_mode_and_thinking(
 ) -> tuple[str, str]:
     valid_modes = {"plan", "review", "agent", "trusted", "yolo", "root"}
     valid_thinking = set(ThinkingMode.names())
-    mode = str(mode_value or "plan").strip().lower()
+    mode = str(mode_value or parent_mode).strip().lower()
     thinking = str(think_value or parent_thinking).strip().lower()
 
     if mode in valid_thinking and mode not in valid_modes:
         thinking = mode
         mode = parent_mode if parent_mode in valid_modes else "plan"
     elif mode not in valid_modes:
-        mode = "plan"
+        mode = parent_mode if parent_mode in valid_modes else "plan"
 
     if thinking not in valid_thinking:
         thinking = parent_thinking if parent_thinking in valid_thinking else "fast"
