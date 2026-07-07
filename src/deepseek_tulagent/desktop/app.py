@@ -14,7 +14,7 @@ from ..agent import TuLAgent, compact_context_messages, context_window_info, est
 from ..config import Settings, get_settings, merge_file_config
 from ..messages import Message
 from ..policy import ThinkingMode
-from ..provider import DeepSeekClient, apply_thinking_payload
+from ..provider import DeepSeekClient, UsageStats, apply_thinking_payload
 from ..session import Session, SessionStore
 from ..skills import SkillStore
 
@@ -66,6 +66,9 @@ class DesktopApi:
         self._approvals: dict[str, dict[str, Any]] = {}
         self._active_turn_session_id: str | None = None
         self._active_turn_id: str | None = None
+        self._last_usage = UsageStats()
+        self._usage_total = UsageStats()
+        self._usage_by_session: dict[str, UsageStats] = {}
 
     def bind_window(self, window: Any) -> None:
         self.window = window
@@ -218,23 +221,38 @@ class DesktopApi:
         if self.session is None:
             return {"ok": False, "error": "no active session"}
         before = estimate_message_tokens(self.session.messages)
+        client = DeepSeekClient(self.settings)
         self.session.messages = compact_context_messages(
-            self.session.messages, self.settings.model, force=True, client=DeepSeekClient(self.settings)
+            self.session.messages, self.settings.model, force=True, client=client
         )
+        self._record_session_usage(self.session.session_id, getattr(client, "usage", UsageStats()))
         after = estimate_message_tokens(self.session.messages)
         return {"ok": True, "before": before, "after": after, "messages": serialize_messages(self.session.messages), "context": self.context_status()}
 
     def context_status(self) -> dict[str, Any]:
         messages = self.session.messages if self.session else []
-        tokens = estimate_message_tokens(messages) if messages else 0
-        input_tokens = estimate_message_tokens([m for m in messages if m.role in {"system", "user"}]) if messages else 0
-        output_tokens = estimate_message_tokens([m for m in messages if m.role == "assistant"]) if messages else 0
-        cached_tokens = estimate_cached_context_tokens(messages)
         info = context_window_info(self.settings.model)
         limit = int(info["tokens"])
         threshold = int(limit * 0.92)
+        session_id = self.session.session_id if self.session else ""
+        usage = self._usage_by_session.get(session_id) if session_id else None
+        accurate = bool(usage and usage.source)
+        if accurate and usage:
+            input_tokens = usage.input_tokens
+            output_tokens = usage.output_tokens
+            tokens = usage.total_tokens or (input_tokens + output_tokens)
+            cached_tokens = usage.cached_input_tokens
+            source = usage.source
+        else:
+            tokens = estimate_message_tokens(messages) if messages else 0
+            input_messages = [m for m in messages if m.role in {"system", "user"}]
+            output_messages = [m for m in messages if m.role == "assistant"]
+            input_tokens = estimate_message_tokens(input_messages) if input_messages else 0
+            output_tokens = estimate_message_tokens(output_messages) if output_messages else 0
+            cached_tokens = 0
+            source = info.get("source", "fallback")
         percent = round((tokens / limit * 100), 1) if limit else 0
-        cache_percent = round((cached_tokens / tokens * 100), 1) if tokens else 0
+        cache_percent = round((cached_tokens / input_tokens * 100), 1) if input_tokens else 0
         return {
             "ok": True,
             "tokens": tokens,
@@ -245,8 +263,11 @@ class DesktopApi:
             "limit": limit,
             "threshold": threshold,
             "percent": percent,
-            "source": info.get("source", "fallback"),
+            "source": source,
+            "accurate": accurate,
+            "measure": "上游 usage" if accurate else "本地估算",
             "model": self.settings.model,
+            "sessionId": session_id or None,
             "autoCompact": True,
             "nearLimit": tokens >= int(limit * 0.75),
             "needsCompact": tokens >= threshold,
@@ -463,12 +484,16 @@ class DesktopApi:
                         raise RuntimeError("turn cancelled")
                     emit_turn("agent:event", parse_agent_event(text))
 
+                client = DeepSeekClient(self.settings)
                 result = TuLAgent(
                     self.settings,
                     mode=self.mode,
                     thinking=self.thinking.name,
+                    client=client,
                     approve=(lambda _n, _a: True) if self.mode in {"root", "yolo"} else self._request_approval,
                 ).run(prompt, stream=True, images=images or [], on_delta=delta, on_final=final, on_event=event, session=self.session, goal=goal)
+                self._last_usage = client.usage
+                self._record_session_usage(result.session_id, client.usage)
                 # Only adopt the finished turn's session if the user hasn't switched to a
                 # different conversation meanwhile — otherwise the next send would land in
                 # the OLD conversation (context bleeding across chats).
@@ -489,6 +514,13 @@ class DesktopApi:
                 self._cancel_requested = False
                 self._active_turn_session_id = None
                 self._active_turn_id = None
+
+    def _record_session_usage(self, session_id: str | None, usage: UsageStats) -> None:
+        if not session_id or not usage.source:
+            return
+        self._usage_total.merge(usage)
+        bucket = self._usage_by_session.setdefault(session_id, UsageStats())
+        bucket.merge(usage)
 
     def _emit(self, event: str, payload: dict[str, Any]) -> None:
         if self.window is None:

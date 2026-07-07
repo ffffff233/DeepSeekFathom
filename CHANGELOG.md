@@ -8,6 +8,7 @@
 - **新增：子代理可单独设置权限和思考档位**。`delegate_agent` 支持 `mode`/`permission(s)` 和 `thinking`/`think`，也支持 `agents=[...]` 一次派遣多个子代理；每个子代理都可单独指定 `mode`、`thinking`、`max_rounds`。`mode:"fast"` 这类旧写法仍兼容为 thinking 档位。
 - **调整：工具前置叙述不再显示复制/重试/分支按钮**。中间态消息不是最终回复，不再出现额外 Copy 按钮，也减少工具卡片前的动作行空隙。
 - **新增：桌面输入框右下角上下文/缓存显示**。默认显示中文短文案“上下文 xx%”，点击向上弹出详情，显示输入估算、输出估算、上下文总量、缓存估算、自动压缩阈值和模型窗口来源；手动/自动压缩和运行中状态会同步更新。
+- **修复：上下文统计不再把估算伪装成真实缓存**。桌面端现在优先读取上游 `usage` 里的输入 token、输出 token、总 token 和 cached input tokens；OpenAI Chat 流式会请求 `include_usage`。上游未返回 `usage` 时明确标记“本地估算”，缓存显示“未返回”。
 - **更新：模型上下文窗口识别覆盖最新国际和国内主流模型**。支持从模型名解析 `32k/128k/200k/256k/1m`，并补充 GPT-5.x、Claude 5/4.x、Gemini 3/2.5、DeepSeek V4、Qwen3.7/3.6、Kimi K2.6、GLM-5.2/5.1/4.7、MiniMax M3/M2.x、Doubao、Hunyuan、ERNIE、Yi、Baichuan、InternLM、StepFun 等映射。
 - **优化：桌面端会话重放和事件缓存提高**。恢复对话时最多重放 320 条可见消息，事件镜像保留 600 行，减少长对话切换后的上下文视图丢失感。
 - **同步：包版本和 README 安装链接更新到 `v0.1.90`**。
@@ -18,6 +19,7 @@ English:
 - **Added: per-subagent permission and reasoning controls**. `delegate_agent` accepts `mode`/`permission(s)` and `thinking`/`think`, including `agents=[...]` batch delegation; each subagent can set its own `mode`, `thinking`, and `max_rounds`. Legacy `mode:"fast"` style thinking selection remains compatible.
 - **Changed: pre-tool narration no longer shows copy/retry/branch actions**. Intermediate narration is not a final answer, so it no longer creates an extra Copy button or action-row gap before the tool card.
 - **Added: desktop composer context/cache indicator**. It shows a compact Chinese “上下文 xx%” badge; clicking it opens an upward popover with input estimate, output estimate, total context, cache estimate, auto-compaction threshold, and model-window source.
+- **Fixed: context stats no longer present estimates as real cache usage**. The desktop now prefers upstream `usage` for input tokens, output tokens, total tokens, and cached input tokens; OpenAI Chat streaming requests `include_usage`. If upstream does not return `usage`, the UI explicitly marks stats as a local estimate and shows cache as unavailable.
 - **Updated: model context-window detection for current global and China model families**. Model names with `32k/128k/200k/256k/1m` are parsed directly, with mappings for GPT-5.x, Claude 5/4.x, Gemini 3/2.5, DeepSeek V4, Qwen3.7/3.6, Kimi K2.6, GLM-5.2/5.1/4.7, MiniMax M3/M2.x, Doubao, Hunyuan, ERNIE, Yi, Baichuan, InternLM, StepFun, and more.
 - **Improved: desktop transcript/event cache limits**. Resumed conversations now replay up to 320 visible messages and the event mirror keeps 600 lines.
 - **Synced: package version and README install links are now `v0.1.90`**.

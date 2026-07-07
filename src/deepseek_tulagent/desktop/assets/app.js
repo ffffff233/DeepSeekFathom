@@ -70,7 +70,7 @@ function installDemoApi() {
         },
         compatFormats: ["deepseek", "openai", "openai-responses", "gemini", "anthropic"],
         formatLabels: { deepseek: "DeepSeek", openai: "OpenAI (Chat)", "openai-responses": "OpenAI (Responses·最新)", gemini: "Google Gemini", anthropic: "Anthropic Claude" },
-        context: { ok: true, tokens: 4200, inputTokens: 3000, outputTokens: 1200, cachedTokens: 2800, cachePercent: 66.7, limit: 1000000, threshold: 920000, percent: 0.4, source: "deepseek", model: "deepseek-v4-flash", autoCompact: true },
+        context: { ok: true, tokens: 4200, inputTokens: 3000, outputTokens: 1200, cachedTokens: 1800, cachePercent: 60, limit: 1000000, threshold: 920000, percent: 0.4, source: "upstream", measure: "上游 usage", accurate: true, model: "deepseek-v4-flash", autoCompact: true },
         skills: [
           { name: "repo-debug", description: "调试仓库时先运行测试" },
           { name: "code-review", description: "审阅改动，找出缺陷" },
@@ -90,8 +90,8 @@ function installDemoApi() {
       set_runtime: async (data) => ({ ...(await window.pywebview.api.boot()), model: data.model, mode: data.mode, thinking: data.thinking }),
       configure: async () => window.pywebview.api.boot(),
       new_session: async () => ({ ok: true }),
-      compact: async () => ({ ok: true, before: 12000, after: 4200, context: { ok: true, tokens: 4200, inputTokens: 3000, outputTokens: 1200, cachedTokens: 2800, cachePercent: 66.7, limit: 1000000, threshold: 920000, percent: 0.4, source: "deepseek", model: "deepseek-v4-flash", autoCompact: true }, messages: [{ role: "assistant", content: "上下文已压缩，保留最近消息。" }] }),
-      context_status: async () => ({ ok: true, tokens: 4200, inputTokens: 3000, outputTokens: 1200, cachedTokens: 2800, cachePercent: 66.7, limit: 1000000, threshold: 920000, percent: 0.4, source: "deepseek", model: $("model")?.value || "deepseek-v4-flash", autoCompact: true }),
+      compact: async () => ({ ok: true, before: 12000, after: 4200, context: { ok: true, tokens: 4200, inputTokens: 3000, outputTokens: 1200, cachedTokens: 1800, cachePercent: 60, limit: 1000000, threshold: 920000, percent: 0.4, source: "upstream", measure: "上游 usage", accurate: true, model: "deepseek-v4-flash", autoCompact: true }, messages: [{ role: "assistant", content: "上下文已压缩，保留最近消息。" }] }),
+      context_status: async () => ({ ok: true, tokens: 4200, inputTokens: 3000, outputTokens: 1200, cachedTokens: 1800, cachePercent: 60, limit: 1000000, threshold: 920000, percent: 0.4, source: "upstream", measure: "上游 usage", accurate: true, model: $("model")?.value || "deepseek-v4-flash", autoCompact: true }),
       save_upload: async (file) => ({ ok: true, name: file.name, path: `/uploads/${file.name}`, size: 128 }),
       send: async ({ prompt }) => {
         const D = window.DeepSeekDesktop;
@@ -382,19 +382,20 @@ function updateContextBadge(ctx) {
   setText("ctxInput", fmtTokens(ctx.inputTokens));
   setText("ctxOutput", fmtTokens(ctx.outputTokens));
   setText("ctxUsage", `${fmtTokens(ctx.tokens)} / ${fmtTokens(ctx.limit)}`);
-  setText("ctxCache", `${fmtTokens(ctx.cachedTokens)} / ${ctx.cachePercent || 0}%`);
+  setText("ctxCache", ctx.accurate ? `${fmtTokens(ctx.cachedTokens)} / ${ctx.cachePercent || 0}%` : "未返回");
   setText("ctxThreshold", fmtTokens(ctx.threshold));
-  setText("ctxSource", sourceLabel(ctx.source));
-  setText("ctxHint", ctx.needsCompact ? "已达到自动压缩阈值，下一轮会压缩旧消息。" : "达到阈值前会自动压缩旧消息。");
+  setText("ctxSource", ctx.accurate ? (ctx.measure || "上游 usage") : "本地估算");
+  const basis = ctx.accurate ? "来自上游 usage；缓存为 cached input tokens。" : "上游未返回 usage；输入、输出和上下文为本地估算，缓存不伪造。";
+  setText("ctxHint", ctx.needsCompact ? `已达到自动压缩阈值。${basis}` : basis);
   const bar = $("ctxBarFill");
   if (bar) bar.style.width = `${pct}%`;
   const pop = $("ctxPopover");
   if (pop) pop.className = `ctxPopover ${level}`;
-  badge.title = "点击查看输入、输出、上下文和缓存统计";
+  badge.title = ctx.accurate ? "点击查看上游 usage 统计" : "点击查看本地估算统计";
 }
 
 function sourceLabel(source) {
-  const labels = { openai: "OpenAI", anthropic: "Claude", google: "Gemini", deepseek: "DeepSeek", qwen: "通义千问", moonshot: "Kimi", zhipu: "智谱 GLM", minimax: "MiniMax", "model-name": "模型名", fallback: "保守估算" };
+  const labels = { upstream: "上游 usage", openai: "OpenAI", anthropic: "Claude", google: "Gemini", deepseek: "DeepSeek", qwen: "通义千问", moonshot: "Kimi", zhipu: "智谱 GLM", minimax: "MiniMax", "model-name": "模型名", fallback: "保守估算" };
   return labels[source] || source || "估算";
 }
 

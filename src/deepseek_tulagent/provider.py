@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from dataclasses import dataclass
 import json
 from typing import Iterator
 
@@ -42,8 +43,75 @@ _DEEPSEEK_DEFAULT = "https://api.deepseek.com"
 _OUTPUT_CAP = 32000
 
 
+@dataclass
+class UsageStats:
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cached_input_tokens: int = 0
+    total_tokens: int = 0
+    source: str = ""
+
+    def merge(self, other: "UsageStats") -> None:
+        if not other.source:
+            return
+        self.input_tokens += other.input_tokens
+        self.output_tokens += other.output_tokens
+        self.cached_input_tokens += other.cached_input_tokens
+        self.total_tokens += other.total_tokens or (other.input_tokens + other.output_tokens)
+        self.source = other.source
+
+    def absorb_snapshot(self, other: "UsageStats") -> None:
+        """Keep the latest non-zero fields for one upstream request.
+
+        Streaming APIs may emit usage across multiple events. Those values are normally
+        request snapshots, not increments, so they must be merged into totals only once.
+        """
+        if not other.source:
+            return
+        self.input_tokens = other.input_tokens or self.input_tokens
+        self.output_tokens = other.output_tokens or self.output_tokens
+        self.cached_input_tokens = other.cached_input_tokens or self.cached_input_tokens
+        self.total_tokens = other.total_tokens or self.total_tokens
+        self.source = other.source
+
+
 def normalize_format(value: str | None) -> str:
     return FORMAT_ALIASES.get((value or "deepseek").strip().lower(), "deepseek")
+
+
+def parse_usage_stats(data: dict, source: str) -> UsageStats:
+    usage = data.get("usage") if isinstance(data, dict) else None
+    if not isinstance(usage, dict):
+        nested = data.get("response") if isinstance(data, dict) else None
+        if isinstance(nested, dict):
+            usage = nested.get("usage")
+    if not isinstance(usage, dict):
+        nested = data.get("message") if isinstance(data, dict) else None
+        if isinstance(nested, dict):
+            usage = nested.get("usage")
+    if not isinstance(usage, dict):
+        usage = data.get("usageMetadata") if isinstance(data, dict) else None
+    if not isinstance(usage, dict):
+        return UsageStats()
+
+    def intval(*keys: str) -> int:
+        for key in keys:
+            value = usage.get(key)
+            if isinstance(value, (int, float)):
+                return int(value)
+        return 0
+
+    input_tokens = intval("prompt_tokens", "input_tokens", "inputTokens", "promptTokenCount")
+    output_tokens = intval("completion_tokens", "output_tokens", "outputTokens", "candidatesTokenCount")
+    total_tokens = intval("total_tokens", "totalTokens", "totalTokenCount")
+    cached = 0
+    for key in ("prompt_tokens_details", "input_tokens_details", "inputTokenDetails"):
+        details = usage.get(key)
+        if isinstance(details, dict):
+            cached += int(details.get("cached_tokens") or details.get("cachedTokens") or 0)
+    # Anthropic reports cache creation/read separately; "cached input" means read hits.
+    cached += intval("cache_read_input_tokens")
+    return UsageStats(input_tokens, output_tokens, cached, total_tokens, source)
 
 
 def _split_data_url(data_url: str) -> tuple[str, str]:
@@ -150,6 +218,13 @@ class DeepSeekClient:
         self.timeout = timeout or settings.request_timeout
         self._client: httpx.Client | None = None
         self.format = normalize_format(getattr(settings, "provider_format", "deepseek"))
+        self.usage = UsageStats()
+
+    def _record_usage(self, data: dict, source: str = "upstream") -> None:
+        self.usage.merge(parse_usage_stats(data, source))
+
+    def _usage_snapshot(self, data: dict, source: str = "upstream") -> UsageStats:
+        return parse_usage_stats(data, source)
 
     # ---- shared http ----
     def _http(self) -> httpx.Client:
@@ -235,6 +310,8 @@ class DeepSeekClient:
             "max_tokens": self._output_tokens(),
             "stream": stream,
         }
+        if stream:
+            payload["stream_options"] = {"include_usage": True}
         apply_thinking_payload(payload, self.settings)
         headers = {
             "Authorization": f"Bearer {self.settings.api_key}",
@@ -246,6 +323,7 @@ class DeepSeekClient:
             raise_for_status_with_body(response)
             guard_api_content_type(response, streaming=False)
             data = response.json()
+            self._record_usage(data)
             try:
                 message = data["choices"][0]["message"]
                 # some gateways omit "content" when the text went to reasoning_content
@@ -256,6 +334,7 @@ class DeepSeekClient:
         return self._openai_stream(url, headers, payload)
 
     def _openai_stream(self, url: str, headers: dict, payload: dict) -> Iterator[str]:
+        usage = UsageStats()
         with self._http().stream("POST", url, headers=headers, json=payload) as response:
             raise_for_status_with_body(response)
             guard_api_content_type(response, streaming=True)
@@ -267,12 +346,14 @@ class DeepSeekClient:
                     break
                 try:
                     data = json.loads(chunk)
+                    usage.absorb_snapshot(self._usage_snapshot(data))
                     delta = data["choices"][0].get("delta", {})
                 except (json.JSONDecodeError, KeyError, IndexError, TypeError):
                     continue
                 content = delta.get("content")
                 if content:
                     yield content
+        self.usage.merge(usage)
 
     def _openai_models(self) -> list[str]:
         self._require_key()
@@ -308,6 +389,7 @@ class DeepSeekClient:
             raise_for_status_with_body(response)
             guard_api_content_type(response, streaming=False)
             data = response.json()
+            self._record_usage(data)
             text = data.get("output_text")
             if isinstance(text, str) and text:
                 return text
@@ -324,6 +406,7 @@ class DeepSeekClient:
         return self._responses_stream(url, headers, payload)
 
     def _responses_stream(self, url: str, headers: dict, payload: dict) -> Iterator[str]:
+        usage = UsageStats()
         with self._http().stream("POST", url, headers=headers, json=payload) as response:
             raise_for_status_with_body(response)
             guard_api_content_type(response, streaming=True)
@@ -337,10 +420,12 @@ class DeepSeekClient:
                     data = json.loads(chunk)
                 except json.JSONDecodeError:
                     continue
+                usage.absorb_snapshot(self._usage_snapshot(data))
                 if data.get("type") == "response.output_text.delta":
                     delta = data.get("delta")
                     if delta:
                         yield delta
+        self.usage.merge(usage)
 
     # ---- Anthropic / Claude ----
     def _anthropic_chat(self, messages: list[Message], *, stream: bool):
@@ -365,6 +450,7 @@ class DeepSeekClient:
             response = self._http().post(url, headers=headers, json=payload)
             raise_for_status_with_body(response)
             data = response.json()
+            self._record_usage(data)
             try:
                 parts = [b.get("text", "") for b in data.get("content", []) if b.get("type") == "text"]
                 return "".join(parts)
@@ -374,6 +460,7 @@ class DeepSeekClient:
         return self._anthropic_stream(url, headers, payload)
 
     def _anthropic_stream(self, url: str, headers: dict, payload: dict) -> Iterator[str]:
+        usage = UsageStats()
         with self._http().stream("POST", url, headers=headers, json=payload) as response:
             raise_for_status_with_body(response)
             for line in response.iter_lines():
@@ -386,11 +473,13 @@ class DeepSeekClient:
                     data = json.loads(chunk)
                 except json.JSONDecodeError:
                     continue
+                usage.absorb_snapshot(self._usage_snapshot(data))
                 if data.get("type") != "content_block_delta":
                     continue
                 delta = data.get("delta") or {}
                 if delta.get("type") == "text_delta" and delta.get("text"):
                     yield delta["text"]
+        self.usage.merge(usage)
 
     def _anthropic_models(self) -> list[str]:
         self._require_key()
@@ -424,6 +513,7 @@ class DeepSeekClient:
             response = self._http().post(url, headers=headers, json=payload)
             raise_for_status_with_body(response)
             data = response.json()
+            self._record_usage(data)
             try:
                 parts = data["candidates"][0]["content"]["parts"]
                 return "".join(p.get("text", "") for p in parts)
@@ -434,6 +524,7 @@ class DeepSeekClient:
         return self._gemini_stream(url, headers, payload)
 
     def _gemini_stream(self, url: str, headers: dict, payload: dict) -> Iterator[str]:
+        usage = UsageStats()
         with self._http().stream("POST", url, headers=headers, json=payload) as response:
             raise_for_status_with_body(response)
             for line in response.iter_lines():
@@ -444,6 +535,7 @@ class DeepSeekClient:
                     continue
                 try:
                     data = json.loads(chunk)
+                    usage.absorb_snapshot(self._usage_snapshot(data))
                     parts = data["candidates"][0]["content"]["parts"]
                 except (json.JSONDecodeError, KeyError, IndexError, TypeError):
                     continue
@@ -451,6 +543,7 @@ class DeepSeekClient:
                     text = part.get("text")
                     if text:
                         yield text
+        self.usage.merge(usage)
 
     def _gemini_models(self) -> list[str]:
         key = self._require_key()
@@ -571,4 +664,3 @@ def apply_thinking_payload(payload: dict, settings: Settings) -> None:
         gen = payload.setdefault("generationConfig", {})
         if enabled and effort:
             gen["thinkingConfig"] = {"thinkingBudget": _effort_budget_tokens(effort), "includeThoughts": False}
-

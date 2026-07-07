@@ -13,7 +13,7 @@ from deepseek_tulagent.cli import main
 from deepseek_tulagent.config import Settings, get_settings, merge_file_config, resolve_model
 from deepseek_tulagent.messages import Message
 from deepseek_tulagent.policy import ApprovalPolicy, ThinkingMode
-from deepseek_tulagent.provider import apply_thinking_payload
+from deepseek_tulagent.provider import UsageStats, apply_thinking_payload, parse_usage_stats
 from deepseek_tulagent.session import SessionStore
 from deepseek_tulagent.skills import SkillStore
 from deepseek_tulagent.tui import ChatTui, TuiState
@@ -68,6 +68,56 @@ def test_parse_standard_tool_calls_shape():
 def test_parse_text_wrapped_tool_json():
     call = parse_tool_call('I will use a tool.\n{"name":"search_text","input":{"query":"DeepSeek"}}')
     assert call == ("search_text", {"query": "DeepSeek"})
+
+
+def test_parse_provider_usage_stats():
+    chat = parse_usage_stats(
+        {
+            "usage": {
+                "prompt_tokens": 100,
+                "completion_tokens": 20,
+                "total_tokens": 120,
+                "prompt_tokens_details": {"cached_tokens": 60},
+            }
+        },
+        "upstream",
+    )
+    assert chat == UsageStats(input_tokens=100, output_tokens=20, cached_input_tokens=60, total_tokens=120, source="upstream")
+
+    responses = parse_usage_stats(
+        {
+            "response": {
+                "usage": {
+                    "input_tokens": 90,
+                    "output_tokens": 10,
+                    "total_tokens": 100,
+                    "input_tokens_details": {"cached_tokens": 30},
+                }
+            }
+        },
+        "upstream",
+    )
+    assert responses.input_tokens == 90
+    assert responses.output_tokens == 10
+    assert responses.cached_input_tokens == 30
+    assert responses.total_tokens == 100
+
+    anthropic = parse_usage_stats(
+        {"usage": {"input_tokens": 80, "output_tokens": 12, "cache_creation_input_tokens": 40, "cache_read_input_tokens": 25}},
+        "upstream",
+    )
+    assert anthropic.cached_input_tokens == 25
+    anthropic_stream = parse_usage_stats({"message": {"usage": {"input_tokens": 81, "cache_read_input_tokens": 26}}}, "upstream")
+    assert anthropic_stream.input_tokens == 81
+    assert anthropic_stream.cached_input_tokens == 26
+
+    gemini = parse_usage_stats(
+        {"usageMetadata": {"promptTokenCount": 70, "candidatesTokenCount": 8, "totalTokenCount": 78}},
+        "upstream",
+    )
+    assert gemini.input_tokens == 70
+    assert gemini.output_tokens == 8
+    assert gemini.total_tokens == 78
 
 
 def test_parse_tool_json_with_trailing_fence_noise():
@@ -1230,13 +1280,26 @@ def test_desktop_context_status_reports_usage(monkeypatch, tmp_path: Path):
     assert status["ok"] is True
     assert status["tokens"] > 1000
     assert status["inputTokens"] > 1000
-    assert status["outputTokens"] >= 1
-    assert status["cachedTokens"] > 0
-    assert status["cachePercent"] > 0
+    assert status["outputTokens"] == 0
+    assert status["cachedTokens"] == 0
+    assert status["cachePercent"] == 0
+    assert status["accurate"] is False
+    assert status["measure"] == "本地估算"
     assert status["limit"] == 32_000
     assert status["threshold"] == int(32_000 * 0.92)
     assert 0 < status["percent"] < 100
     assert status["source"] == "model-name"
+
+    api._usage_by_session["s"] = UsageStats(input_tokens=2000, output_tokens=300, cached_input_tokens=1500, total_tokens=2300, source="upstream")
+    accurate = api.context_status()
+    assert accurate["accurate"] is True
+    assert accurate["measure"] == "上游 usage"
+    assert accurate["tokens"] == 2300
+    assert accurate["inputTokens"] == 2000
+    assert accurate["outputTokens"] == 300
+    assert accurate["cachedTokens"] == 1500
+    assert accurate["cachePercent"] == 75
+    assert accurate["source"] == "upstream"
 
 
 def test_desktop_turn_events_stay_bound_to_origin_session(monkeypatch, tmp_path: Path):
