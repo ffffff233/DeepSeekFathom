@@ -1,5 +1,23 @@
 # 更新记录 / Changelog
 
+## v0.1.89
+
+中文：
+
+- **修复：切换/新建对话时，后台运行中的回复会串到当前对话**。桌面端每一轮现在都有稳定 `sessionId` / `turnId`，后端所有流式事件、工具事件、子代理事件、完成/错误/取消/批准请求都带作用域；前端只把匹配当前会话/当前轮次的事件渲染到消息区。切到别的对话后，原后台任务继续跑、结果保存回原会话，只刷新侧边栏，不再污染当前对话。
+- **修复：编辑重发后沿用旧工具结果/旧回复上下文**。编辑或重试会截断到目标用户消息之前，丢掉旧用户消息、旧工具调用、`TOOL_RESULT` 和旧最终回复，再用新文本重新发起；新增回归测试覆盖“创建 a.txt 后编辑成 b.txt 不应带着 a.txt 的结果回答”。
+- **新增：桌面端接入真正的 KaTeX 数学渲染**。公式不再靠正则替换伪渲染；`$$…$$`、`\[…\]`、`$…$`、`\(...\)` 会优先走本地 KaTeX 0.16.28，支持复杂分式、求和、上下标、根号、矩阵/对齐等 LaTeX 结构。KaTeX 资源已本地化到桌面 assets，使用 Fathom 自己的块级/行内样式；加载失败时才降级到轻量可读渲染。
+- **调整：桌面 `/` 命令改成小而必要的 Codex 风格命令面板**。删除 `/test`、`/review`、`/explain`、`/subagent` 等“把 prompt 参数塞进输入框”的伪命令；保留 `/goal`、`/goal <text>`、`/goal clear`、`/compact`、`/new`、`/settings`、`/copyid`。技能改为显式 `/skill <name>`，不再把每个技能伪装成顶层命令。
+- **新增：桌面 `/goal` 持续目标模式**。`/goal xxx` 只设置目标，不发送给模型；后续普通消息会把 `goal` 参数传给 agent，让它像 CLI 一样持续推进直到完成或阻塞。`/goal` 查看当前目标，`/goal clear` 清除。
+
+English:
+
+- **Fixed: background turns leaked into the visible conversation after switching/newing chats**. Each desktop turn now has stable `sessionId` / `turnId`; backend stream/tool/subagent/done/error/cancel/approval events all carry scope, and the frontend only renders events matching the currently visible session/turn. If you switch away, the original turn keeps running and saves back to its own session; the sidebar refreshes, but the current conversation is not polluted.
+- **Fixed: edit-resend reused stale tool results / stale assistant context**. Edit/retry truncates history before the target user message, dropping the old user prompt, old tool call, `TOOL_RESULT`, and old final answer before sending the edited text. A regression test covers editing “create a.txt” into “create b.txt” without carrying the old `a.txt` result.
+- **Added: real KaTeX math rendering in the desktop app**. Math is no longer fake-rendered by regex replacement. `$$…$$`, `\[…\]`, `$…$`, and `\(...\)` now prefer local KaTeX 0.16.28, supporting complex fractions, sums, super/subscripts, roots, matrices/alignment, and other LaTeX structures. KaTeX assets are vendored into desktop assets and styled through Fathom wrappers; the lightweight renderer is only a fallback if KaTeX cannot load.
+- **Changed: desktop `/` commands are now a small Codex-style command palette**. Removed prompt-template pseudo-commands such as `/test`, `/review`, `/explain`, and `/subagent`; kept only necessary local commands: `/goal`, `/goal <text>`, `/goal clear`, `/compact`, `/new`, `/settings`, `/copyid`. Skills are explicit as `/skill <name>` instead of being promoted to top-level slash commands.
+- **Added: desktop `/goal` persistent objective mode**. `/goal xxx` sets the objective without sending it to the model; later normal messages pass `goal` into the agent so it continues like the CLI goal mode until completion or blockage. `/goal` shows the active goal and `/goal clear` clears it.
+
 ## v0.1.88
 
 中文：
