@@ -1229,6 +1229,8 @@ def test_desktop_context_status_reports_usage(monkeypatch, tmp_path: Path):
     status = api.context_status()
     assert status["ok"] is True
     assert status["tokens"] > 1000
+    assert status["inputTokens"] > 1000
+    assert status["outputTokens"] >= 1
     assert status["cachedTokens"] > 0
     assert status["cachePercent"] > 0
     assert status["limit"] == 32_000

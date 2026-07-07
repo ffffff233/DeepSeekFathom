@@ -227,6 +227,8 @@ class DesktopApi:
     def context_status(self) -> dict[str, Any]:
         messages = self.session.messages if self.session else []
         tokens = estimate_message_tokens(messages) if messages else 0
+        input_tokens = estimate_message_tokens([m for m in messages if m.role in {"system", "user"}]) if messages else 0
+        output_tokens = estimate_message_tokens([m for m in messages if m.role == "assistant"]) if messages else 0
         cached_tokens = estimate_cached_context_tokens(messages)
         info = context_window_info(self.settings.model)
         limit = int(info["tokens"])
@@ -236,6 +238,8 @@ class DesktopApi:
         return {
             "ok": True,
             "tokens": tokens,
+            "inputTokens": min(input_tokens, tokens),
+            "outputTokens": min(output_tokens, tokens),
             "cachedTokens": cached_tokens,
             "cachePercent": cache_percent,
             "limit": limit,

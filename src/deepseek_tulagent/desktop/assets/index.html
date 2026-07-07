@@ -64,15 +64,25 @@
       </div>
 
       <footer class="composer">
-        <button id="contextBadge" class="contextBadge idle" type="button" title="上下文使用量">
-          <span class="ctxRing"><i></i></span>
-          <span class="ctxText">
-            <strong id="ctxPct">0%</strong>
-            <small id="ctxDetail">上下文</small>
-          </span>
-        </button>
         <div id="attachments" class="attachments"></div>
         <div class="composeCard">
+          <div id="ctxPopover" class="ctxPopover" hidden>
+            <div class="ctxPopHead">
+              <strong>上下文统计</strong>
+              <span id="ctxSource">估算</span>
+            </div>
+            <div class="ctxMetric"><span>输入</span><strong id="ctxInput">0</strong></div>
+            <div class="ctxMetric"><span>输出</span><strong id="ctxOutput">0</strong></div>
+            <div class="ctxMetric"><span>上下文</span><strong id="ctxUsage">0 / 0</strong></div>
+            <div class="ctxMetric"><span>缓存</span><strong id="ctxCache">0 / 0%</strong></div>
+            <div class="ctxMetric"><span>压缩阈值</span><strong id="ctxThreshold">0</strong></div>
+            <div class="ctxBar"><i id="ctxBarFill"></i></div>
+            <p id="ctxHint">达到阈值前会自动压缩旧消息。</p>
+          </div>
+          <button id="contextBadge" class="contextBadge idle" type="button" title="上下文统计">
+            <span class="ctxDot"></span>
+            <span id="ctxPct">上下文 0%</span>
+          </button>
           <div id="slashMenu" class="slashMenu" hidden></div>
           <textarea id="prompt" rows="1" placeholder="输入任务，Enter 发送，Shift+Enter 换行，/ 调出命令"></textarea>
           <div class="composeRow">
