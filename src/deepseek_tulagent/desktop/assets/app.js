@@ -679,9 +679,10 @@ function renderMarkdown(src) {
   });
   src = src.replace(/\$([^\n$]+?)\$|\\\(([\s\S]+?)\\\)/g, (m, a, b) => {
     const inner = a != null ? a : b;
-    // $…$ is ambiguous with currency ("$5 和 $10"); only treat it as math when it has a
-    // LaTeX signal. \(…\) is always math.
-    if (a != null && !/[\\^_{}]/.test(inner)) return m;
+    // $…$ is ambiguous with currency. Treat it as math when it has LaTeX commands,
+    // super/subscripts, or variable/operator structure (x+y, a=b, x^2), but not plain
+    // money/ranges like $5 or $5 和 $10.
+    if (a != null && !looksLikeMath(inner)) return m;
     const i = blocks.length;
     blocks.push(`<span class="mathInline">${renderMath(inner)}</span>`);
     return `@@FB${i}@@`;
@@ -731,7 +732,9 @@ function renderMarkdown(src) {
     html += `<p>${inline(line)}</p>`;
   }
   closeList();
-  return html;
+  // restore protected code/math placeholders wherever they appear (including inline math
+  // embedded inside a paragraph or table cell), not only when a line is exactly @@FBn@@.
+  return html.replace(/@@FB(\d+)@@/g, (m, i) => blocks[Number(i)] || "");
 
   function inline(t) {
     t = escapeHtml(t);
@@ -755,9 +758,20 @@ const MATH_SYMBOLS = {
   "\\in":"∈","\\notin":"∉","\\subset":"⊂","\\subseteq":"⊆","\\supset":"⊃","\\cup":"∪","\\cap":"∩","\\emptyset":"∅","\\forall":"∀","\\exists":"∃","\\neg":"¬","\\wedge":"∧","\\vee":"∨",
   "\\ldots":"…","\\cdots":"⋯","\\dots":"…","\\angle":"∠","\\degree":"°","\\prime":"′",
 };
+function looksLikeMath(s) {
+  s = String(s || "").trim();
+  if (!s) return false;
+  if (/^[¥€£]?\s*\d+(?:[.,]\d+)?\s*$/.test(s)) return false;  // plain money/number
+  if (/\\[A-Za-z]+|[\^_{}]|[=+*/<>≤≥√∑∫∞≈≠→←×÷±]|\b(sin|cos|tan|log|ln|lim|max|min)\b/.test(s)) return true;
+  // single-letter variables next to digits/operators are math; plain words are not
+  return /\b[a-zA-Z]\b/.test(s) && /\d|[+\-*/=()]/.test(s);
+}
+
 function renderMath(tex) {
-  let s = String(tex || "");
-  s = s.replace(/\\left|\\right|\\displaystyle|\\!|\\,|\\;|\\:|\\quad|\\qquad/g, " ");
+  let s = String(tex || "").trim();
+  // tolerate nested wrappers like \($x$\) from model output
+  if (s.startsWith("$") && s.endsWith("$") && s.length > 1) s = s.slice(1, -1).trim();
+  s = s.replace(/\\(?:left|right|displaystyle)\b|\\!|\\,|\\;|\\:|\\quad\b|\\qquad\b/g, " ");
   // \frac{a}{b} -> (a)/(b), \sqrt{x} -> √(x)
   s = s.replace(/\\frac\s*\{([^{}]*)\}\s*\{([^{}]*)\}/g, "($1)/($2)");
   s = s.replace(/\\sqrt\s*\{([^{}]*)\}/g, "√($1)");

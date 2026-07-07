@@ -454,7 +454,7 @@ def serialize_messages(messages: list[Message]) -> list[dict[str, Any]]:
     (with the surrounding prose split out) and paired with the following TOOL_RESULT /
     SUBAGENT_RESULT so a resumed conversation shows tool cards instead of raw JSON.
     """
-    from ..agent import parse_tool_call, strip_tool_call_display, summarize_arguments
+    from ..agent import is_tool_intro_only, parse_tool_call, strip_tool_call_display, summarize_arguments
 
     visible: list[dict[str, Any]] = []
     pending_tool: dict[str, Any] | None = None
@@ -473,8 +473,8 @@ def serialize_messages(messages: list[Message]) -> list[dict[str, Any]]:
             if tool_call:
                 name, arguments = tool_call
                 prose = strip_tool_call_display(content)
-                if prose:
-                    # pre-tool narration — not a standalone reply, carries no actions
+                if prose and not is_tool_intro_only(prose):
+                    # pre-tool narration — not a standalone reply, carries no retry/branch
                     visible.append({"role": "assistant", "content": prose, "srcIndex": idx, "intermediate": True})
                 pending_tool = {
                     "role": "tool",

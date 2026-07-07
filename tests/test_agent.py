@@ -162,9 +162,11 @@ def test_strip_removes_labelled_tool_format():
     assert strip("工具很好用，我们来讨论一下。") == "工具很好用，我们来讨论一下。"
 
 
-def test_parse_action_bash_block_as_shell_tool():
+def test_parse_action_bash_block_is_not_inferred_as_tool_by_default():
+    # Codex/opencode-style: normal markdown code blocks are display content, not tools.
+    # Tool calls must arrive as explicit structured JSON/<tool_call>/Tool: blocks.
     call = parse_tool_call("我现在检查仓库。\n\n```bash\nprintf repo-ok\n```")
-    assert call == ("run_shell", {"command": "printf repo-ok"})
+    assert call is None
 
 
 def test_parse_ordinary_bash_example_is_not_tool_call():
@@ -172,14 +174,14 @@ def test_parse_ordinary_bash_example_is_not_tool_call():
     assert call is None
 
 
-def test_parse_multiple_action_bash_blocks_as_one_shell_tool():
+def test_parse_multiple_action_bash_blocks_are_not_inferred_as_tool_by_default():
     call = parse_tool_call(
         "我来检查本机所有端口：\n\n"
         "```bash\nss -tuln\n```\n\n"
         "同时查看连接：\n\n"
         "```bash\nss -tun\n```"
     )
-    assert call == ("run_shell", {"command": "ss -tuln\nss -tun"})
+    assert call is None
 
 
 def test_parse_labelled_tool_arguments():
@@ -664,9 +666,9 @@ def test_question_mark_only_goes_to_model_but_ignores_tools(tmp_path: Path):
     assert is_question_mark_only("???") is True
 
 
-def test_agent_executes_action_bash_block_instead_of_fake_execution(tmp_path: Path):
+def test_agent_executes_explicit_json_tool_call(tmp_path: Path):
     client = FakeClient([
-        "我现在检查。\n\n```bash\nprintf repo-ok\n```",
+        '{"tool":"run_shell","arguments":{"command":"printf repo-ok"}}',
         "工具结果是 repo-ok。",
     ])
     result = TuLAgent(settings(tmp_path), mode="root", client=client).run("检查仓库")
@@ -2005,5 +2007,48 @@ def test_serialize_marks_pre_tool_prose_intermediate():
         Message("assistant", "写好了。"),
     ])
     roles = [(o["role"], o.get("intermediate")) for o in out]
-    assert ("assistant", True) in roles          # pre-tool prose demoted
+    assert ("assistant", True) not in roles      # generic pre-tool intro is dropped entirely
     assert out[-1]["role"] == "assistant" and not out[-1].get("intermediate")  # final reply keeps actions
+
+
+def test_stream_holds_fenced_tool_call_from_fence_start():
+    from deepseek_tulagent.agent import safe_stream_emit_length, strip_tool_call_display, is_tool_intro_only
+
+    text = '我来调用工具：```json\n{"tool":"write_file","arguments":{"path":"a","content":"x"}}\n```'
+    assert text[: safe_stream_emit_length(text)] == "我来调用工具："
+    prose = strip_tool_call_display(text)
+    assert prose == "我来调用工具："
+    assert is_tool_intro_only(prose) is True
+
+
+def test_normal_code_blocks_are_not_inferred_or_partially_held():
+    from deepseek_tulagent.agent import safe_stream_emit_length, strip_tool_call_display
+
+    # JSON code can mention fields named arguments/input without becoming a tool.
+    normal_json = '```json\n{"hello":"world","arguments":"not a tool"}\n```'
+    assert parse_tool_call(normal_json) is None
+    assert safe_stream_emit_length(normal_json) == len(normal_json)
+    assert strip_tool_call_display(normal_json) == normal_json
+
+    # Bash code is display content by default, not an inferred run_shell tool.
+    normal_bash = '我现在解释：\n```bash\necho hello\n```'
+    assert parse_tool_call(normal_bash) is None
+    assert safe_stream_emit_length(normal_bash) == len(normal_bash)
+
+
+def test_generic_pre_tool_action_intro_is_dropped():
+    from deepseek_tulagent.agent import is_tool_intro_only, strip_tool_call_display
+
+    text = '我来读取 README 并检查安装说明。```json\n{"tool":"read_file","arguments":{"path":"README.md"}}\n```'
+    prose = strip_tool_call_display(text)
+    assert prose == "我来读取 README 并检查安装说明。"
+    assert is_tool_intro_only(prose) is True
+
+
+def test_substantive_pre_tool_prose_is_not_dropped():
+    from deepseek_tulagent.agent import is_tool_intro_only, strip_tool_call_display
+
+    text = '问题可能是配置文件没有保存。我来读取 README。```json\n{"tool":"read_file","arguments":{"path":"README.md"}}\n```'
+    prose = strip_tool_call_display(text)
+    assert prose == "问题可能是配置文件没有保存。我来读取 README。"
+    assert is_tool_intro_only(prose) is False

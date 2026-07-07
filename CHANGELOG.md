@@ -1,5 +1,21 @@
 # 更新记录 / Changelog
 
+## v0.1.88
+
+中文：
+
+- **修复：工具调用被当成 JSON 代码框/一条对话拆成两条**。按 Codex/opencode 的思路收紧：工具调用必须是明确结构化格式（JSON tool、`<tool_call>`、`Tool:`/`工具:`），**不再从普通 Markdown/bash 代码块里猜工具**。这样正常代码示例不会被误执行，工具输出也不会先变成代码框再跳成工具卡。
+- **修复：fenced JSON 工具调用流式时先显示 ```json 空框**。现在如果 ` ```json ` 里是明确工具 JSON，会从 fence 开头整体扣住；如果只是普通 JSON 代码块，即使字段叫 `arguments`/`input`，也完整正常显示，不会被误扣半截。
+- **修复：泛泛的“我来调用工具/我来读取/我来写文件”引子单独冒成一条消息**。这类纯工具引子会被丢弃，不再产生第二个复制按钮，也不会和工具卡隔很大空隙；只有包含实质解释的前置正文才保留。
+- **修复：数学公式显示不完整/误差大**。修掉 `\rightarrow` 被 `\right` 预处理误切成 `arrow` 的问题；行内公式占位符现在会在段落/表格里全局还原，不再残留 `@@FB` 或显示半截；`$E=mc^2$`、`\sum_{i=1}^{n}`、`\sqrt{x^2+y^2}` 等已用实际函数测试。
+
+English:
+
+- **Fixed: tool calls rendered as JSON code boxes / one turn split into two messages**. Following Codex/opencode's approach, tool calls now must be explicit structured formats (JSON tool, `<tool_call>`, `Tool:`/`工具:`); we **no longer infer tools from ordinary Markdown/bash code fences**. Normal code examples won't be executed by mistake, and tool output won't first render as a code box before becoming a tool card.
+- **Fixed: fenced JSON tool calls briefly showed an empty ```json box while streaming**. If a ` ```json ` fence contains explicit tool JSON, the whole fence is held from the opener; if it is an ordinary JSON code block (even with fields named `arguments`/`input`), it streams fully and normally.
+- **Fixed: generic “I will call/read/write” tool intros became separate messages**. Pure action intros are dropped, so they no longer create a second copy button or a large gap before the tool card; substantive explanatory prose before a tool is still preserved.
+- **Fixed: math formulas rendered incompletely / with high error**. `\rightarrow` is no longer broken by the `\right` cleanup; inline math placeholders are restored globally inside paragraphs/tables, so they no longer remain as `@@FB` or half-render. `$E=mc^2$`, `\sum_{i=1}^{n}`, `\sqrt{x^2+y^2}` and similar cases were tested against the actual renderer.
+
 ## v0.1.87
 
 中文：

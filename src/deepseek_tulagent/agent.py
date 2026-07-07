@@ -200,7 +200,8 @@ class TuLAgent:
             # with the prose around the tool JSON (or clear it) so the raw call never
             # stays visible as an assistant message.
             if stream and on_final is not None:
-                on_final(strip_tool_call_display(assistant_text))
+                prose = strip_tool_call_display(assistant_text)
+                on_final("" if is_tool_intro_only(prose) else prose)
             session.append(Message("assistant", assistant_text))
             last_turn_had_tool_result = False
             last_turn_had_tool_error = False
@@ -459,7 +460,13 @@ def parse_tool_call(text: str) -> tuple[str, dict[str, Any]] | None:
     xml = parse_xml_tool_call(stripped)
     if xml:
         return xml
-    return parse_action_shell_block(stripped)
+    # Do NOT infer a tool from ordinary markdown code fences. Codex/opencode receive
+    # tool calls as structured events; guessing from ```bash creates false positives and
+    # turns normal code examples into tools. Keep action-shell parsing available only via
+    # an explicit opt-in env for legacy behavior.
+    if os.getenv("DSTUL_PARSE_ACTION_SHELL", "0").lower() in {"1", "true", "yes"}:
+        return parse_action_shell_block(stripped)
+    return None
 
 
 # Hermes/Qwen/GLM/Kimi-style tool calls wrapped in <tool_call>…</tool_call> tags.
@@ -739,41 +746,70 @@ def safe_stream_emit_length(text: str) -> int:
     everything before it (real prose) stays visible. on_final re-sends the full cleaned
     text at end-of-turn, so holding a false positive back only delays it, never drops it.
     """
-    # 1) specific, high-signal tool-call openers that may appear mid-line
+    # 1) specific, high-signal tool-call openers that may appear mid-line.
+    # If the marker is inside a ```json fence, hold from the fence opener too — otherwise
+    # the UI briefly renders an empty JSON/code box before the tool card appears.
     specific = re.search(
         r"(?i)<tool_call|\{\s*\"(?:tool|name|function_call|tool_calls|arguments|input)\"",
         text,
     )
     if specific:
+        fence_start = text.rfind("```", 0, specific.start())
+        if fence_start != -1:
+            after = text[fence_start:specific.start()].lower()
+            if re.match(r"```\s*(json|tool|tools)?\s*\n?\s*$", after):
+                return fence_start
         return specific.start()
     # 1b) our labelled format at the start of a line (Tool:/工具: name)
     labelled = re.search(r"(?im)^[ \t]*(?:tool|工具)[ \t]*:[ \t]*[A-Za-z_][\w-]*[ \t]*$", text)
     if labelled:
         return labelled.start()
-    # 2) otherwise a line starting with '{' or a code fence may begin a tool call
+    # 1c) while a markdown fence is still open, hold it until we know whether it is a
+    # real code block or a fenced tool call. Once closed, ordinary code is allowed.
+    fences = list(re.finditer(r"(?m)^[ \t]*```", text))
+    if len(fences) % 2 == 1:
+        return fences[-1].start()
+    fenced_spans = [(fences[i].start(), fences[i + 1].end()) for i in range(0, len(fences) - 1, 2)]
+
+    def _inside_closed_fence(pos: int) -> bool:
+        return any(start <= pos < end for start, end in fenced_spans)
+
+    # 2) otherwise a line starting with '{' may begin a raw JSON tool call — but only
+    # outside markdown code fences. A normal ```json example must never be treated as a
+    # tool or partially held.
     last = None
-    for match in re.finditer(r"(?m)^[ \t]*(\{|```)", text):
+    for match in re.finditer(r"(?m)^[ \t]*\{", text):
+        if _inside_closed_fence(match.start()):
+            continue
         last = match
     if last is None:
         return len(text)
     start = last.start()
     segment = text[start:].strip()
-    if segment.startswith("```"):
-        if segment.count("```") >= 2:  # fence closed
-            inner = re.sub(r"^```[\w-]*\s*|\s*```.*$", "", segment, flags=re.DOTALL).strip()
-            if inner.startswith("{"):
-                try:
-                    if normalize_tool_call(json.loads(inner)):
-                        return start
-                except json.JSONDecodeError:
-                    return start
-            return len(text)
-        return start
     try:
         data = json.loads(segment)
     except json.JSONDecodeError:
-        return start  # incomplete JSON — keep holding
+        return start  # incomplete JSON outside a fence — keep holding
     return start if normalize_tool_call(data) else len(text)
+
+
+def is_tool_intro_only(text: str) -> bool:
+    """True when the only prose around a tool call is a generic intro like
+    '我来调用工具：'. Showing that as a separate assistant bubble creates duplicate copy
+    rows and an awkward gap before the tool card, so drop it."""
+    normalized = re.sub(r"\s+", "", (text or "").strip().strip("：:，,。.!！"))
+    if not normalized:
+        return True
+    intro_cues = (
+        "我来调用工具", "调用工具", "准备调用工具", "开始调用工具", "执行工具", "使用工具",
+        "我来执行", "开始执行", "现在执行", "我来运行", "准备运行", "运行命令",
+        "我来读取", "开始读取", "现在读取", "我来检查", "开始检查", "现在检查",
+        "我来写入", "开始写入", "我来写文件", "开始写文件", "我来修改", "开始修改", "我来搜索", "开始搜索",
+        "I'lluseatool", "Iwilluseatool", "Usingtool", "Callingtool", "Runningtool",
+    )
+    if normalized in intro_cues or any(normalized.startswith(cue) and len(normalized) <= 60 for cue in intro_cues):
+        return True
+    return any(normalized.endswith(cue) and len(normalized) <= len(cue) + 4 for cue in intro_cues)
 
 
 def strip_tool_call_display(text: str) -> str:

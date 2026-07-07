@@ -170,7 +170,8 @@ body.is-running .pulse { animation: pulseDot 1s ease-in-out infinite; }
 /* ---------- messages ---------- */
 .message { max-width: 760px; width: 100%; margin: 0 auto; padding: 6px 24px; display: flex; flex-direction: column; }
 .message.user { align-items: flex-end; padding-top: 14px; }
-.message.assistant { padding-bottom: 10px; }
+.message.assistant { padding-bottom: 6px; }
+.message.assistant.intermediate { padding-bottom: 0; }
 .msgHead { display: none; }
 .bubble { font-size: 13.5px; line-height: 1.75; word-break: break-word; }
 .bubble.user {
@@ -278,7 +279,7 @@ pre.code code { display: block; padding: 12px 14px; font-family: var(--mono); fo
 
 /* ---------- tool / event rows：单卡片 + 发丝线 ---------- */
 .threadEvent {
-  max-width: 760px; width: 100%; margin: 3px auto;
+  max-width: 760px; width: 100%; margin: 1px auto 3px;
   padding: 0 24px;
   background: transparent;
   border: none;
