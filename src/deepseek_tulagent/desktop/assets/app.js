@@ -18,6 +18,8 @@ const state = {
   pendingOutbound: false,
   pendingOutboundId: "",
   cancelPromise: null,
+  goalCollapsed: true,
+  goalsBySession: {},
   katexRenderToString: null,
   katexLoadPromise: null,
   activeGoal: "",
@@ -164,9 +166,11 @@ window.DeepSeekDesktop = {
         state.currentSessionId = sid;
         if (state.boot) state.boot.sessionId = sid;
         setText("sessionState", sid.slice(0, 8));
+        migrateDraftGoal(sid);
       }
       state.suppressStream = false;
       setRunning(true);
+      markGoalRunning();
       state.stickToBottom = true;
       setSaveState("running", "运行中", "正在执行工具和模型");
       // send() already rendered the user message locally (with image thumbs); only
@@ -199,6 +203,7 @@ window.DeepSeekDesktop = {
       const bubble = state.currentAssistant.querySelector(".bubble");
       bubble.dataset.raw = text;
       renderBubble(bubble);
+      settleGoalAfterText(text);
       // a tool call may follow in this same turn — let the next delta open a new bubble
       state.currentAssistant = null;
       scrollMessages();
@@ -216,6 +221,8 @@ window.DeepSeekDesktop = {
       } else if (sub) {
         // nest the subagent's own activity under its group so you can watch it work
         addSubEvent(sub, payload);
+      } else if (payload.kind === "todo") {
+        applyTodoPayload(payload.detail, sid || currentSessionId());
       } else if (payload.kind === "tool") {
         hideThinking();
         // a tool card starts a new visual block — text after it must open a NEW
@@ -255,6 +262,7 @@ window.DeepSeekDesktop = {
       const doneSid = String(payload.sessionId || "");
       state.currentSessionId = doneSid;
       if (state.boot) state.boot.sessionId = doneSid;
+      migrateDraftGoal(doneSid);
       if (!tid || tid === state.activeTurnId) state.activeTurnId = "";
       state.pendingOutbound = false;
       setText("sessionState", doneSid ? doneSid.slice(0, 8) : "新会话");
@@ -272,6 +280,7 @@ window.DeepSeekDesktop = {
       state.suppressStream = false;
       if (!tid || tid === state.activeTurnId) state.activeTurnId = "";
       state.pendingOutbound = false;
+      settleGoalAfterText("");
       setRunning(false);
       dismissApproval();
       const summary = payload.summary || payload.error || "运行失败";
@@ -291,6 +300,7 @@ window.DeepSeekDesktop = {
       state.suppressStream = false;
       if (!tid || tid === state.activeTurnId) state.activeTurnId = "";
       state.pendingOutbound = false;
+      settleGoalAfterText("");
       setRunning(false);
       dismissApproval();
       if (!wasSuppressed) {  // only if not already handled by the instant-cancel path
@@ -306,6 +316,7 @@ async function boot() {
   loadKatexRenderer().catch(() => {});
   $("version").textContent = `v${state.boot.version}`;
   $("workspace").textContent = state.boot.workspace || "";
+  state.currentSessionId = state.boot.sessionId || "";
   setText("apiState", state.boot.apiKeySet ? "已配置" : "未配置");
   $("topRuntime").textContent = `${state.boot.model} · ${state.boot.mode}/${state.boot.thinking}`;
   updateContextBadge(state.boot.context || null);
@@ -319,6 +330,7 @@ async function boot() {
   fillSelect("model", ensureIncludes((state.models && state.models.length ? state.models : [state.boot.model]), state.boot.model), state.boot.model);
   updateModeHelp();  $("baseUrl").value = state.boot.baseUrl || "";
   state.skills = state.boot.skills || [];
+  loadGoalStore();
   // Don't block the UI on the network model list — the dropdown already shows the saved
   // model; fetch the full list in the background and refresh it when it arrives. Awaiting
   // here made every load wait on a slow GET /models round-trip.
@@ -429,6 +441,187 @@ function setRunning(running) {
   document.body.classList.toggle("is-running", running);
 }
 
+function goalStorageKey() {
+  const workspace = state.boot && state.boot.workspace ? state.boot.workspace : "default";
+  return `deepseekTul.goals.v1:${workspace}`;
+}
+
+function loadGoalStore() {
+  try {
+    const raw = localStorage.getItem(goalStorageKey());
+    const parsed = raw ? JSON.parse(raw) : {};
+    state.goalsBySession = parsed && typeof parsed === "object" ? parsed : {};
+  } catch (_) {
+    state.goalsBySession = {};
+  }
+  syncActiveGoalFromStore();
+  renderGoalDock();
+}
+
+function saveGoalStore() {
+  try { localStorage.setItem(goalStorageKey(), JSON.stringify(state.goalsBySession)); } catch (_) {}
+}
+
+function goalSessionKey() {
+  return currentSessionId() || "__draft__";
+}
+
+function currentGoalTodos() {
+  const value = state.goalsBySession[goalSessionKey()];
+  return Array.isArray(value) ? value : [];
+}
+
+function normalizeTodos(raw) {
+  const items = Array.isArray(raw) ? raw : [];
+  let seenInProgress = false;
+  return items.map((item, index) => {
+    const content = String((item && (item.content || item.text || item.title)) || "").trim();
+    let status = String((item && item.status) || "pending");
+    if (!["pending", "in_progress", "completed", "cancelled"].includes(status)) status = "pending";
+    if (status === "in_progress") {
+      if (seenInProgress) status = "pending";
+      seenInProgress = true;
+    }
+    return { id: String((item && item.id) || `todo-${index + 1}`), content, status };
+  }).filter((item) => item.content);
+}
+
+function applyTodoPayload(detail, sessionId) {
+  let data = detail;
+  if (typeof detail === "string") {
+    try { data = JSON.parse(detail); } catch (_) { data = {}; }
+  }
+  const todos = normalizeTodos(data && data.todos ? data.todos : data);
+  const key = sessionId || goalSessionKey();
+  if (todos.length) state.goalsBySession[key] = todos;
+  else delete state.goalsBySession[key];
+  saveGoalStore();
+  syncActiveGoalFromStore();
+  renderGoalDock();
+}
+
+function syncActiveGoalFromStore() {
+  state.activeGoal = currentGoalTodos().filter((todo) => todo.status !== "completed").map((todo) => todo.content).join("\n");
+}
+
+function parseGoalTodos(goal) {
+  const text = String(goal || "").trim();
+  if (!text) return [];
+  let parts = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  if (parts.length === 1 && /[;；]/.test(parts[0])) {
+    parts = parts[0].split(/[;；]/).map((line) => line.trim()).filter(Boolean);
+  }
+  return parts.map((line, index) => {
+    const content = line
+      .replace(/^[-*]\s+\[[ xX]\]\s*/, "")
+      .replace(/^[-*]\s+/, "")
+      .replace(/^\d+[.)、]\s*/, "")
+      .trim();
+    return {
+      id: `goal-${Date.now()}-${index}-${Math.random().toString(16).slice(2)}`,
+      content: content || line,
+      status: "pending",
+    };
+  });
+}
+
+function migrateDraftGoal(sessionId) {
+  if (!sessionId || !state.goalsBySession.__draft__) return;
+  if (!state.goalsBySession[sessionId]) state.goalsBySession[sessionId] = state.goalsBySession.__draft__;
+  delete state.goalsBySession.__draft__;
+  saveGoalStore();
+  syncActiveGoalFromStore();
+  renderGoalDock();
+}
+
+function setGoalStatus(index, status) {
+  const key = goalSessionKey();
+  const todos = currentGoalTodos().slice();
+  if (!todos[index]) return;
+  todos[index] = { ...todos[index], status };
+  state.goalsBySession[key] = todos;
+  saveGoalStore();
+  syncActiveGoalFromStore();
+  renderGoalDock();
+}
+
+function markGoalRunning() {
+  const key = goalSessionKey();
+  const todos = currentGoalTodos().slice();
+  if (!todos.length) return;
+  const active = todos.findIndex((todo) => todo.status === "in_progress");
+  if (active >= 0) return;
+  const next = todos.findIndex((todo) => todo.status !== "completed");
+  if (next < 0) return;
+  todos[next] = { ...todos[next], status: "in_progress" };
+  state.goalsBySession[key] = todos;
+  saveGoalStore();
+  syncActiveGoalFromStore();
+  renderGoalDock();
+}
+
+function settleGoalAfterText(text) {
+  const key = goalSessionKey();
+  const todos = currentGoalTodos().slice();
+  if (!todos.length) return;
+  const terminal = /目标已完成|目标完成|已经达成目标|全部完成|已完成/.test(String(text || ""));
+  const active = todos.findIndex((todo) => todo.status === "in_progress");
+  if (terminal) {
+    state.goalsBySession[key] = todos.map((todo) => ({ ...todo, status: "completed" }));
+  } else if (active >= 0) {
+    todos[active] = { ...todos[active], status: "pending" };
+    state.goalsBySession[key] = todos;
+  }
+  saveGoalStore();
+  syncActiveGoalFromStore();
+  renderGoalDock();
+}
+
+function renderGoalDock() {
+  const dock = $("goalDock");
+  if (!dock) return;
+  const todos = currentGoalTodos();
+  if (!todos.length) {
+    dock.hidden = true;
+    dock.innerHTML = "";
+    return;
+  }
+  const done = todos.filter((todo) => todo.status === "completed").length;
+  const total = todos.length;
+  const active = todos.find((todo) => todo.status === "in_progress") || todos.find((todo) => todo.status !== "completed") || todos[todos.length - 1];
+  dock.hidden = false;
+  dock.className = `goalDock${state.goalCollapsed ? " collapsed" : ""}${done === total ? " complete" : ""}`;
+  dock.innerHTML = `
+    <button class="goalHead" type="button" data-action="toggle-goal">
+      <span class="goalCount">${done}/${total}</span>
+      <span class="goalTitle">任务目标</span>
+      <span class="goalPreview">${escapeHtml(active ? active.content : "")}</span>
+      <span class="goalChevron">⌄</span>
+    </button>
+    <div class="goalList">
+      ${todos.map((todo, index) => `
+        <button class="goalItem" type="button" data-goal-index="${index}" data-state="${escapeHtml(todo.status)}">
+          <span class="goalCheck"></span>
+          <span class="goalText">${escapeHtml(todo.content)}</span>
+        </button>
+      `).join("")}
+    </div>`;
+  const toggle = dock.querySelector('[data-action="toggle-goal"]');
+  if (toggle) toggle.onclick = () => {
+    state.goalCollapsed = !state.goalCollapsed;
+    renderGoalDock();
+  };
+  dock.querySelectorAll("[data-goal-index]").forEach((item) => {
+    item.onclick = (event) => {
+      event.stopPropagation();
+      const index = Number(item.getAttribute("data-goal-index"));
+      const todo = currentGoalTodos()[index];
+      if (!todo) return;
+      setGoalStatus(index, todo.status === "completed" ? "pending" : "completed");
+    };
+  });
+}
+
 async function refreshModels() {
   const models = await apiMethod("models");
   const result = await models();
@@ -501,6 +694,8 @@ async function refreshSessions() {
       setText("sessionState", result.sessionId.slice(0, 8));
       setSaveState("saved", "已恢复", result.sessionId);
       updateContextBadge(result.context || null);
+      syncActiveGoalFromStore();
+      renderGoalDock();
     };
     row.querySelector(".actPin").onclick = async (e) => {
       e.stopPropagation();
@@ -528,6 +723,7 @@ async function refreshSessions() {
 // replay a serialized transcript entry: text bubble or a completed tool card
 function replayMessage(entry) {
   if (entry.role === "tool") {
+    if (entry.name === "todo_write") applyTodoPayload(entry.output || "", currentSessionId());
     const card = addToolEvent(entry.name, entry.detail);
     if (card) {
       card.dataset.done = "1";
@@ -535,8 +731,9 @@ function replayMessage(entry) {
       if (status) { status.textContent = "完成"; status.classList.add("ok"); }
       const out = card.querySelector(".toolOut");
       const code = out.querySelector("code");
-      const text = truncateForDisplay(String(entry.output || "").trim());
-      code.innerHTML = text ? highlightCode(text, "") : '<span class="t-com">（无输出）</span>';
+      code.innerHTML = entry.name === "todo_write"
+        ? todoSnapshotHtml(entry.output)
+        : (truncateForDisplay(String(entry.output || "").trim()) ? highlightCode(truncateForDisplay(String(entry.output || "").trim()), "") : '<span class="t-com">（无输出）</span>');
       out.hidden = false;
     }
     state.currentTool = null;
@@ -622,10 +819,19 @@ function completeToolEvent(name, output) {
   const out = block.querySelector(".toolOut");
   const code = out.querySelector("code");
   const text = truncateForDisplay(String(output || "").trim());
-  code.innerHTML = text ? highlightCode(text, "") : "<span class=\"t-com\">（无输出）</span>";
+  code.innerHTML = name === "todo_write" ? todoSnapshotHtml(output) : (text ? highlightCode(text, "") : "<span class=\"t-com\">（无输出）</span>");
   out.hidden = false;
   scrollMessages();
   mirror(`[工具完成] ${name || ""} ${(output || "").slice(0, 200)}`);
+}
+
+function todoSnapshotHtml(output) {
+  let data = {};
+  try { data = JSON.parse(String(output || "")); } catch (_) {}
+  const todos = normalizeTodos(data && data.todos ? data.todos : data);
+  if (!todos.length) return '<span class="t-com">0 个任务</span>';
+  const mark = (status) => status === "completed" ? "[✓]" : status === "in_progress" ? "[•]" : status === "cancelled" ? "[×]" : "[ ]";
+  return todos.map((todo) => `${mark(todo.status)} ${escapeHtml(todo.content)}`).join("\n");
 }
 
 const MAX_DISPLAY_CHARS = 40000;
@@ -1038,6 +1244,7 @@ $("send").onclick = async () => {
       if (stillVisibleOutbound) {
         state.currentSessionId = result.sessionId;
         if (state.boot) state.boot.sessionId = result.sessionId;
+        migrateDraftGoal(result.sessionId);
         setText("sessionState", String(result.sessionId).slice(0, 8));
       }
     }
@@ -1150,7 +1357,13 @@ function closeSlash() {
 }
 
 function setGoal(goal) {
-  state.activeGoal = String(goal || "").trim();
+  const key = goalSessionKey();
+  const todos = parseGoalTodos(goal);
+  if (todos.length) state.goalsBySession[key] = todos;
+  else delete state.goalsBySession[key];
+  saveGoalStore();
+  syncActiveGoalFromStore();
+  renderGoalDock();
   toast(state.activeGoal ? `目标已设置：${state.activeGoal}` : "目标已清除");
   setSaveState(
     state.running ? "running" : (currentSessionId() ? "saved" : "idle"),
@@ -1329,6 +1542,9 @@ $("newSession").onclick = async () => {
   state.pendingOutbound = false;
   state.pendingOutboundId = "";
   state.suppressLocalUserEcho = false;
+  delete state.goalsBySession.__draft__;
+  syncActiveGoalFromStore();
+  renderGoalDock();
   if (state.boot) state.boot.sessionId = null;
   state.events = 0;
   state.stickToBottom = true;

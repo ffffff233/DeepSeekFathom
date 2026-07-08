@@ -35,6 +35,7 @@ Available tools:
 - download_url(url, path, max_bytes?, timeout?)
 - clone_repo(repo or url, path, branch?, timeout?)
 - web_search(query, max_results?, timeout?, engines?, language?, fetch_pages?, page_chars?): search via Baidu/Bing/DuckDuckGo and return result snippets; engines may be a comma-separated override such as "bing,duckduckgo"; set fetch_pages to enrich top results with short robots-checked page text
+- todo_write(todos): create or update the visible task list. todos is an array of {content, status}; status is pending, in_progress, completed, or cancelled.
 - start_service(name, command)
 - stop_service(name)
 - service_status(name)
@@ -56,6 +57,7 @@ Rules:
 - For text search, prefer a narrow path and small max_matches. Broad searches can time out.
 - Use delegate_agent proactively for multi-branch investigation, independent review, verification, research, or long workflows that can be split into focused subtasks. For multiple independent tasks, call delegate_agent once with an agents array (up to 8 subagents). Good subagent names: researcher, reviewer, verifier, implementer, debugger.
 - When delegating, give each subagent a narrow task and ask for evidence plus a recommended next step. Set mode/thinking per subagent when it needs different permissions or reasoning depth. Do not delegate trivial one-step tasks.
+- For non-trivial tasks, first call todo_write to list concrete task goals before doing the work. Keep exactly one item in_progress while work remains. Update todo_write immediately when starting or completing each item; do not batch all completions at the end. Skip todo_write only for very small one-step requests or purely informational answers.
 - If a web_search result is empty, irrelevant, or failed and the user asked to search, request one more web_search with a clearer query or a different engines override before reporting failure.
 - If no tool is needed, answer directly.
 - After tool results, continue until the task is complete or clearly blocked.
@@ -86,6 +88,7 @@ KNOWN_TOOL_NAMES = {
     "download_url",
     "clone_repo",
     "web_search",
+    "todo_write",
     "start_service",
     "stop_service",
     "service_status",
@@ -243,6 +246,8 @@ class TuLAgent:
                 _trimmed = trim_tool_content(content)
                 _b64 = base64.b64encode(_trimmed.encode("utf-8")).decode("ascii")
                 on_event(f"done {name} {_b64}")
+                if name == "todo_write":
+                    on_event(f"todo {_b64}")
             session.append(Message("user", tool_result_message(name, trim_tool_content(content))))
             last_turn_had_tool_result = True
             last_turn_had_tool_error = is_failed_tool_result(content)

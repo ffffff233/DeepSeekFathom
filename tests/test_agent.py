@@ -532,7 +532,7 @@ def test_streamed_tool_json_is_not_printed_as_visible_delta(tmp_path: Path):
     visible: list[str] = []
     events: list[str] = []
     client = StreamingToolClient()
-    result = TuLAgent(settings(tmp_path), mode="root", client=client).run(
+    result = TuLAgent(settings(tmp_path), mode="root", thinking="instant", client=client).run(
         "读取 README",
         stream=True,
         on_delta=visible.append,
@@ -1166,6 +1166,7 @@ def test_system_prompt_mentions_clone_repo(tmp_path: Path):
     assert "clone_repo(repo or url, path, branch?, timeout?)" in prompt
     assert "prefer clone_repo over manual git clone" in prompt
     assert "Windows paths" in prompt
+    assert "todo_write(todos)" in prompt
 
 
 def test_normalize_bing_redirect_url():
@@ -1176,6 +1177,52 @@ def test_normalize_bing_redirect_url():
 def test_normalize_duckduckgo_redirect_url():
     url = "https://duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Fnews%3Fa%3D1"
     assert normalize_duckduckgo_url(url) == "https://example.com/news?a=1"
+
+
+def test_todo_write_normalizes_visible_task_list(tmp_path: Path):
+    tools = ToolRegistry(tmp_path, policy=ApprovalPolicy.from_mode("root"))
+    result = tools.run(
+        "todo_write",
+        {
+            "todos": [
+                {"content": "分析问题", "status": "in_progress"},
+                {"content": "修复代码", "status": "in_progress"},
+                {"content": "运行测试", "status": "completed"},
+                {"content": "", "status": "pending"},
+            ]
+        },
+    )
+    assert result.ok is True
+    data = json.loads(result.output)
+    assert data["todos"] == [
+        {"id": "todo-1", "content": "分析问题", "status": "in_progress"},
+        {"id": "todo-2", "content": "修复代码", "status": "pending"},
+        {"id": "todo-3", "content": "运行测试", "status": "completed"},
+    ]
+
+
+def test_agent_emits_todo_event_for_todo_write(tmp_path: Path):
+    from deepseek_tulagent.desktop.app import parse_agent_event
+
+    events: list[str] = []
+    client = FakeClient(
+        [
+            '{"tool":"todo_write","arguments":{"todos":[{"content":"分析问题","status":"in_progress"},{"content":"修复","status":"pending"}]}}',
+            "继续处理。",
+            "目标已完成：已修复。",
+        ]
+    )
+    result = TuLAgent(settings(tmp_path), mode="root", thinking="instant", client=client).run(
+        "修一个复杂 bug",
+        goal="完成复杂 bug 修复",
+        on_event=events.append,
+    )
+    assert result.answer == "目标已完成：已修复。"
+    todo_events = [event for event in events if event.startswith("todo ")]
+    assert todo_events
+    parsed = parse_agent_event(todo_events[0])
+    assert parsed["kind"] == "todo"
+    assert "分析问题" in parsed["detail"]
 
 
 def test_web_search_uses_baidu_first(monkeypatch, tmp_path: Path):

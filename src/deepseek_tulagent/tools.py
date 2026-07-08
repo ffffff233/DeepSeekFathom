@@ -47,6 +47,7 @@ TOOL_DESCRIPTIONS = {
     "download_url": "gated network+write: download URL into workspace",
     "clone_repo": "gated network+write: clone a Git/GitHub repository with mirror and archive fallbacks",
     "web_search": "network: search the web via Baidu/Bing/DuckDuckGo and return result snippets",
+    "todo_write": "session: create or update the visible task list with pending/in_progress/completed/cancelled items",
     "start_service": "gated shell: start background service with pid/log tracking",
     "stop_service": "gated shell: stop a tracked background service",
     "service_status": "read: inspect a tracked background service",
@@ -87,6 +88,7 @@ class ToolRegistry:
             "download_url": self.download_url,
             "clone_repo": self.clone_repo,
             "web_search": self.web_search,
+            "todo_write": self.todo_write,
             "start_service": self.start_service,
             "stop_service": self.stop_service,
             "service_status": self.service_status,
@@ -365,6 +367,34 @@ class ToolRegistry:
             page_limit = int(arguments.get("page_chars", arguments.get("pageChars", 800)) or 800)
             results.extend(fetch_result_pages(results, timeout=timeout, fetch_pages=min(fetch_pages, 5), page_chars=max(200, min(page_limit, 1600))))
         return ToolResult(True, "\n\n".join(results))
+
+    def todo_write(self, arguments: dict[str, Any]) -> ToolResult:
+        raw_items = arguments.get("todos") or arguments.get("items") or []
+        if not isinstance(raw_items, list):
+            raise ToolError("todo_write requires a todos array")
+        todos: list[dict[str, str]] = []
+        seen_in_progress = False
+        allowed = {"pending", "in_progress", "completed", "cancelled"}
+        for index, item in enumerate(raw_items):
+            if isinstance(item, str):
+                content = item.strip()
+                status = "pending"
+            elif isinstance(item, dict):
+                content = str(item.get("content") or item.get("text") or item.get("title") or "").strip()
+                status = str(item.get("status") or "pending").strip()
+            else:
+                continue
+            if not content:
+                continue
+            if status not in allowed:
+                status = "pending"
+            if status == "in_progress":
+                if seen_in_progress:
+                    status = "pending"
+                else:
+                    seen_in_progress = True
+            todos.append({"id": f"todo-{index + 1}", "content": content[:500], "status": status})
+        return ToolResult(True, json.dumps({"todos": todos}, ensure_ascii=False))
 
     def start_service(self, arguments: dict[str, Any]) -> ToolResult:
         if not self.allow_shell:

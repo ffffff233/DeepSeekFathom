@@ -694,6 +694,15 @@ def parse_agent_event(text: str) -> dict[str, str]:
             except Exception:
                 output = ""
         return {"kind": "done", "name": name, "detail": output}
+    if text.startswith("todo "):
+        b64 = text.removeprefix("todo ").strip()
+        output = ""
+        if b64:
+            try:
+                output = base64.b64decode(b64).decode("utf-8", "replace")
+            except Exception:
+                output = ""
+        return {"kind": "todo", "name": "todo_write", "detail": output}
     if text.startswith("thinking pass "):
         return {"kind": "thinking", "name": "internal", "detail": text}
     if text.startswith("thinkingnote "):

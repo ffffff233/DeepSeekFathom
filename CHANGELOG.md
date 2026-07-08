@@ -1,5 +1,21 @@
 # 更新记录 / Changelog
 
+## v0.1.98
+
+中文：
+
+- **新增：OpenCode 风格任务目标清单闭环**。新增 `todo_write` 工具，模型在复杂任务开始前会先写任务目标，并在执行过程中实时更新 `pending` / `in_progress` / `completed` / `cancelled` 状态。
+- **新增：桌面端任务目标 dock**。当前会话有 todo 时，输入框上方显示可折叠任务面板，展示完成数、当前任务和完整清单；切换会话时按会话隔离，不把旧任务带到新对话。
+- **优化：todo 工具卡展示**。`todo_write` 的工具卡显示为 `[ ]` / `[•]` / `[✓]` 清单快照，不再展示原始 JSON。
+- **同步：包版本和 README 安装链接更新到 `v0.1.98`**。
+
+English:
+
+- **Added: OpenCode-style task-goal checklist loop**. The new `todo_write` tool lets the model create task goals before complex work and update `pending` / `in_progress` / `completed` / `cancelled` status as it proceeds.
+- **Added: desktop task-goal dock**. Active session todos render as a collapsible dock above the composer with progress, current item, and the full checklist; todos are isolated per session.
+- **Improved: todo tool cards**. `todo_write` renders as a `[ ]` / `[•]` / `[✓]` checklist snapshot instead of raw JSON.
+- **Synced: package version and README install links are now `v0.1.98`**.
+
 ## v0.1.97
 
 中文：
