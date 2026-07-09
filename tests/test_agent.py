@@ -741,6 +741,32 @@ def test_complex_task_gets_private_execution_hint(tmp_path: Path):
     assert result.answer == "ok"
 
 
+def test_complex_task_requires_todo_write_before_prose(tmp_path: Path):
+    class PlanOnlyThenTodoClient:
+        def __init__(self):
+            self.calls = 0
+
+        def chat(self, messages):
+            self.calls += 1
+            if self.calls == 1:
+                return "我先列任务目标，然后开始修复。"
+            if self.calls == 2:
+                assert "todo_write" in messages[-1].content
+                assert "Do not describe the plan in prose" in messages[-1].content
+                return '{"tool":"todo_write","arguments":{"todos":[{"content":"定位问题","status":"in_progress"},{"content":"修复并验证","status":"pending"}]}}'
+            assert "todo_write" in messages[-1].content
+            return "任务已启动。"
+
+    events: list[str] = []
+    result = TuLAgent(settings(tmp_path), mode="root", client=PlanOnlyThenTodoClient()).run(
+        "检查这个复杂 bug，然后修复，再运行测试验证",
+        on_event=events.append,
+        max_tool_rounds=3,
+    )
+    assert result.answer == "任务已启动。"
+    assert any(event.startswith("todo ") for event in events)
+
+
 def test_agent_finalizes_instead_of_pausing_after_tool_limit(tmp_path: Path):
     class LimitClient:
         def __init__(self):
@@ -2850,6 +2876,16 @@ def test_open_fenced_tool_call_is_held_from_fence_start():
 
     text = '我来调用工具：```json\n{"tool":"write_file"'
     assert text[: safe_stream_emit_length(text)] == "我来调用工具："
+
+    midline_opener = "我来调用工具：```json"
+    assert midline_opener[: safe_stream_emit_length(midline_opener)] == "我来调用工具："
+
+
+def test_dangling_tool_json_fence_is_not_displayed_as_prose():
+    from deepseek_tulagent.agent import plainify_assistant_text
+
+    assert plainify_assistant_text("我来调用工具：```json").strip() == "我来调用工具："
+    assert plainify_assistant_text('我来调用工具：```json\n{"tool":"write_file"').strip() == "我来调用工具："
 
 
 def test_generic_pre_tool_action_intro_is_dropped():

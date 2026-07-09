@@ -1,5 +1,21 @@
 # 更新记录 / Changelog
 
+## v0.1.101
+
+中文：
+
+- **修复：模型输出悬空 ` ```json` 不再显示到聊天框**。无论 fence 是否在行首，只要像工具 JSON 的开头，都会从 fence 前扣留；如果上游最终只返回半截工具 fence，也会在展示前清理掉。
+- **修复：复杂任务口头说“列任务目标”但不调用工具的问题**。顶层复杂任务第一轮如果只用文字说计划/任务目标、没有调用 `todo_write`，会清掉这段口头输出并强制模型返回 `todo_write` 工具调用。
+- **收窄：不拦截真实工具调用和子代理**。`delegate_agent`、`write_file`、`run_shell` 等真实工具调用继续正常执行；子代理不被强制创建父级 todo。
+- **同步：包版本和 README 安装链接更新到 `v0.1.101`**。
+
+English:
+
+- **Fixed: dangling ` ```json` tool fences no longer appear in chat**. Tool-like JSON fences are held from the fence opener even when emitted mid-line, and unfinished tool fences are scrubbed before display.
+- **Fixed: complex tasks that verbally promise task goals now get forced into `todo_write`**. If the first top-level response is only prose about planning/tasks, it is cleared and retried as a `todo_write` tool call.
+- **Narrowed: real tool calls and subagents are not intercepted**. Existing `delegate_agent`, file, shell, and subagent flows continue normally.
+- **Synced: package version and README install links are now `v0.1.101`**.
+
 ## v0.1.100
 
 中文：

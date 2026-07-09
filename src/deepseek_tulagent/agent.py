@@ -76,6 +76,12 @@ RECOVER_AFTER_TOOL_FAILURE_PROMPT = (
     "Continue with one better tool call using the error details, or explicitly state that the task is blocked."
 )
 
+REQUIRE_TODO_WRITE_PROMPT = (
+    "This is a non-trivial multi-step task. Your first action must be a todo_write tool call. "
+    "Do not describe the plan in prose. Return exactly one tool JSON object now, using todo_write with concrete task goals. "
+    "Keep exactly one todo in_progress and the rest pending."
+)
+
 KNOWN_TOOL_NAMES = {
     "ask_user",
     "delegate_agent",
@@ -138,6 +144,7 @@ class TuLAgent:
         max_tool_rounds: int | None = None,
         stop_after_tool: bool = False,
         goal: str | None = None,
+        require_todo: bool = True,
     ) -> AgentResult:
         session = session or Session(self.settings.workspace)
         if not session.messages:
@@ -151,6 +158,10 @@ class TuLAgent:
         last_turn_had_tool_error = False
         pending_internal_prompt: str | None = None
         round_limit = max_tool_rounds or self.settings.max_tool_rounds
+        complex_task = is_complex_task(prompt)
+        todo_required = require_todo and complex_task
+        todo_was_written = False
+        todo_enforced = False
         for rounds in range(1, round_limit + 1):
             if should_cancel and should_cancel():
                 raise RuntimeError("turn cancelled")
@@ -159,7 +170,7 @@ class TuLAgent:
                 model_source_messages = model_source_messages + [Message("user", pending_internal_prompt)]
                 pending_internal_prompt = None
             model_messages = compact_context_messages(model_source_messages, self.settings.model, on_event=on_event, client=self.client)
-            if rounds == 1 and is_complex_task(prompt):
+            if rounds == 1 and complex_task:
                 model_messages = model_messages + [Message("user", private_execution_hint())]
             model_messages = self._with_internal_thinking(model_messages, on_event=on_event)
             if stream:
@@ -201,6 +212,19 @@ class TuLAgent:
                 raise RuntimeError("turn cancelled")
             tool_call = None if is_question_mark_only(prompt) else parse_tool_call(assistant_text)
             if not tool_call:
+                if (
+                    todo_required
+                    and not todo_was_written
+                    and not todo_enforced
+                    and rounds == 1
+                    and should_force_todo_after_prose(assistant_text)
+                    and not declares_blocked_or_complete(assistant_text)
+                ):
+                    if stream and on_final:
+                        on_final("")
+                    pending_internal_prompt = REQUIRE_TODO_WRITE_PROMPT
+                    todo_enforced = True
+                    continue
                 assistant_text = plainify_assistant_text(assistant_text)
                 if stream and on_final:
                     on_final(assistant_text)
@@ -220,6 +244,7 @@ class TuLAgent:
                     continue
                 final_answer = assistant_text
                 break
+            name, arguments = tool_call
             # Tool call detected. If any text already streamed to the UI, replace it
             # with the prose around the tool JSON (or clear it) so the raw call never
             # stays visible as an assistant message.
@@ -229,7 +254,8 @@ class TuLAgent:
             session.append(Message("assistant", assistant_text))
             last_turn_had_tool_result = False
             last_turn_had_tool_error = False
-            name, arguments = tool_call
+            if name == "todo_write":
+                todo_was_written = True
             if on_event:
                 on_event(f"tool {name} {summarize_arguments(arguments)}")
             try:
@@ -391,6 +417,7 @@ class TuLAgent:
             max_tool_rounds=max_rounds,
             should_cancel=should_cancel,
             on_event=sub_on_event,
+            require_todo=False,
             # ephemeral session: a delegated subagent must not create its own on-disk
             # conversation in the sidebar
             session=Session(self.settings.workspace, persist=False),
@@ -686,10 +713,20 @@ def is_complex_task(prompt: str) -> bool:
 def private_execution_hint() -> str:
     return (
         "Private execution hint: this is a multi-step task. Work in small tool-backed steps. "
+        "Before any other tool or prose, call todo_write with concrete task goals; this drives the visible task-goal UI. "
         "If part of the task benefits from independent research, review, debugging, or verification, use delegate_agent with a narrow subtask. "
         "After each tool result, continue with the next required tool until the requested workflow is verified or blocked. "
         "Do not merely say what you will do next."
     )
+
+
+def should_force_todo_after_prose(text: str) -> bool:
+    normalized = re.sub(r"\s+", "", text.lower())
+    cues = (
+        "列任务目标", "任务目标", "任务清单", "todo", "待办",
+        "我先列", "先列出", "计划如下", "执行计划", "开始修复", "开始处理",
+    )
+    return any(cue in normalized for cue in cues) or promises_more_work(text)
 
 
 def promises_more_work(text: str) -> bool:
@@ -738,6 +775,9 @@ def plainify_assistant_text(text: str) -> str:
     # failed to parse) — drop closed blocks and any dangling opener
     text = _TOOL_TAG_RE.sub("", text)
     text = _TOOL_TAG_OPEN_RE.sub("", text)
+    dangling_fence = dangling_tool_json_fence_start(text)
+    if dangling_fence is not None:
+        text = text[:dangling_fence]
     parts = re.split(r"(```.*?```)", text, flags=re.DOTALL)
     cleaned: list[str] = []
     for part in parts:
@@ -784,6 +824,26 @@ def should_hold_stream_output(text: str) -> bool:
     return False
 
 
+def dangling_tool_json_fence_start(text: str) -> int | None:
+    fence_start = text.rfind("```")
+    if fence_start == -1 or text.find("```", fence_start + 3) != -1:
+        return None
+    open_fence = re.match(r"(?is)```\s*([a-z0-9_-]*)[^\n]*\n?(.*)$", text[fence_start:])
+    if not open_fence:
+        return None
+    lang = (open_fence.group(1) or "").lower()
+    if lang not in {"json", "tool", "tools"}:
+        return None
+    body = (open_fence.group(2) or "").lstrip()
+    if (
+        not body
+        or re.match(r'^\{\s*(?:"(?:tool|name|function_call|tool_calls)"?)?$', body, flags=re.IGNORECASE)
+        or re.match(r'^\{\s*"(?:tool|name|function_call|tool_calls)"', body, flags=re.IGNORECASE)
+    ):
+        return fence_start
+    return None
+
+
 def safe_stream_emit_length(text: str) -> int:
     """How much of a streaming buffer is safe to show without leaking a tool call.
 
@@ -821,6 +881,9 @@ def safe_stream_emit_length(text: str) -> int:
     labelled = re.search(r"(?im)^[ \t]*(?:tool|工具)[ \t]*:[ \t]*[A-Za-z_][\w-]*[ \t]*$", text)
     if labelled:
         return labelled.start()
+    dangling_fence = dangling_tool_json_fence_start(text)
+    if dangling_fence is not None:
+        return dangling_fence
     fences = list(re.finditer(r"(?m)^[ \t]*```", text))
     if len(fences) % 2 == 1:
         fence_start = fences[-1].start()
