@@ -1,5 +1,19 @@
 # 更新记录 / Changelog
 
+## v0.1.106
+
+中文：
+
+- **修复：编辑重发中间消息后，版本箭头不再把后续用户消息对应的 AI 回复弄丢**。前端现在把重发生成的新 turn 插回原位置，并把版本箭头绑定到该插入位置的用户消息，不再误用最后一条用户消息。
+- **修复：编辑/重试中间 turn 后刷新会话不再丢后续历史**。后端重跑时仍只把目标消息之前的上下文交给模型，避免旧工具结果污染新回答；新回答完成后会把后续 turns 恢复写回会话文件。
+- **同步：包版本和 README 安装链接更新到 `v0.1.106`**。
+
+English:
+
+- **Fixed: edit-resending a middle message no longer loses the later assistant reply when switching response-version arrows**. The regenerated turn is inserted back at the original position, and the pager is bound to that inserted user message instead of the last user message.
+- **Fixed: persisted sessions no longer drop later history after editing/retrying a middle turn**. The model still sees only the clean prefix before the target turn, while later turns are restored after the new answer is saved.
+- **Synced: package version and README install links are now `v0.1.106`**.
+
 ## v0.1.105
 
 中文：

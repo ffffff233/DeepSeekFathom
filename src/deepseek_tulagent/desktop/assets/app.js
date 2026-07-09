@@ -12,6 +12,8 @@ const state = {
   editing: false,
   editSrc: null,
   pendingVersions: null,
+  pendingVersionMarker: null,
+  pendingVersionUser: null,
   models: [],
   currentSessionId: "",
   activeTurnId: "",
@@ -180,7 +182,10 @@ window.DeepSeekDesktop = {
       // send() already rendered the user message locally (with image thumbs); only
       // add it here for turns started elsewhere (retry/edit/branch)
       if (state.suppressLocalUserEcho) { state.suppressLocalUserEcho = false; }
-      else { addMessage("user", payload.prompt); }
+      else {
+        const userRow = addMessage("user", payload.prompt);
+        if (state.pendingVersions) state.pendingVersionUser = userRow;
+      }
       state.currentAssistant = null;
       state.currentTool = null;
       // Codex-style: show a loading shimmer immediately, before the first token arrives
@@ -288,6 +293,7 @@ window.DeepSeekDesktop = {
       // if this turn was a retry, attach the ‹ i/n › version pager to the retried
       // USER message (Codex-style: versions live on your message, not the reply)
       if (!wasSuppressed) attachVersionPager();
+      clearVersionInsertMarker();
       refreshContextBadge().catch(() => {});
     }
     if (event === "turn:error") {
@@ -304,6 +310,7 @@ window.DeepSeekDesktop = {
       addEvent("error", "错误", detail);
       setSaveState("error", "出错", "查看上方错误卡片");
       toast(summary);
+      clearVersionInsertMarker();
     }
     if (event === "turn:cancel") {
       dismissApproval();
@@ -322,6 +329,7 @@ window.DeepSeekDesktop = {
         addEvent("done", "已取消", payload.message || "");
         setSaveState("idle", "已取消", state.currentSessionId || "未保存");
       }
+      clearVersionInsertMarker();
     }
   }
 };
@@ -782,6 +790,16 @@ function replayMessage(entry) {
   return row;
 }
 
+function appendTranscriptNode(node) {
+  const box = $("messages");
+  const marker = state.pendingVersionMarker;
+  if (marker && marker.isConnected && marker.parentNode === box) {
+    box.insertBefore(node, marker);
+  } else {
+    box.append(node);
+  }
+}
+
 function bumpEventCount() {
   state.events += 1;
   setText("eventCount", String(state.events));
@@ -804,7 +822,7 @@ function addMessage(role, content, srcIndex) {
   const bubble = row.querySelector(".bubble");
   bubble.dataset.raw = content || "";
   renderBubble(bubble);
-  $("messages").append(row);
+  appendTranscriptNode(row);
   scrollMessages();
   return row;
 }
@@ -832,7 +850,7 @@ function addToolEvent(name, args) {
       <div class="toolSection toolCall"><div class="secLabel">调用</div><pre><code>${String(args || "").trim() ? highlightCode(String(args).trim(), guessLang(name, args)) : '<span class="t-com">（无参数）</span>'}</code></pre></div>
       <div class="toolSection toolOut" hidden><div class="secLabel">输出</div><pre><code></code></pre></div>
     </div>`;
-  $("messages").append(details);
+  appendTranscriptNode(details);
   scrollMessages();
   mirror(`[工具调用] ${name || ""} ${args || ""}`);
   return details;
@@ -920,7 +938,7 @@ function addEvent(kind, name, detail) {
   details.innerHTML = `
     <summary><span class="eventIcon">${icon_}</span><span class="evLabel">${labelFor(kind)}</span><strong>${escapeHtml(name || "")}</strong><span class="evChevron">${icon("chevron", 13)}</span></summary>
     <pre>${escapeHtml(truncateForDisplay(String(detail || "")))}</pre>`;
-  $("messages").append(details);
+  appendTranscriptNode(details);
   scrollMessages();
   mirror(`[${labelFor(kind)}] ${name || ""} ${detail || ""}`.trim());
   return details;
@@ -942,7 +960,7 @@ function subagentCard(name) {
     `<strong>${escapeHtml(name)}</strong><span class="evStatus">运行中</span>` +
     `<span class="evChevron">${icon("chevron", 13)}</span></summary>` +
     `<div class="subBody"></div>`;
-  $("messages").append(card);
+  appendTranscriptNode(card);
   scrollMessages();
   return card;
 }
@@ -1023,11 +1041,11 @@ function showThinking(message) {
     el = document.createElement("div");
     el.className = "thinkingShimmer";
     el.innerHTML = `<span class="shimmerDots"><i></i><i></i><i></i></span><span class="shimmerText"></span>`;
-    $("messages").append(el);
+    appendTranscriptNode(el);
   }
   el.querySelector(".shimmerText").textContent = message || "思考中";
   // keep the shimmer as the last child so it always sits below the newest content
-  $("messages").append(el);
+  appendTranscriptNode(el);
   scrollMessages();
 }
 
@@ -1913,7 +1931,20 @@ function applyVersion(anchorUserEl, version) {
     n.remove();
     n = nx;
   }
-  if (version.tailHTML) anchorUserEl.insertAdjacentHTML("afterend", version.tailHTML);
+  const safeTail = currentTurnHTMLOnly(version.tailHTML || "");
+  if (safeTail) anchorUserEl.insertAdjacentHTML("afterend", safeTail);
+}
+
+function currentTurnHTMLOnly(html) {
+  if (!html) return "";
+  const template = document.createElement("template");
+  template.innerHTML = html;
+  let out = "";
+  for (const node of Array.from(template.content.children)) {
+    if (node.classList && node.classList.contains("message") && node.classList.contains("user")) break;
+    out += node.outerHTML;
+  }
+  return out;
 }
 
 /* ---------- approval request card (Codex approvalRequestCard: 受限模式弹批准) ---------- */
@@ -1930,7 +1961,7 @@ function showApproval(payload) {
     `<div class="apActions"><button class="ghost apDeny">拒绝</button><button class="primary apAllow">批准</button></div>`;
   card.querySelector(".apAllow").onclick = () => resolveApproval(card, true);
   card.querySelector(".apDeny").onclick = () => resolveApproval(card, false);
-  $("messages").append(card);
+  appendTranscriptNode(card);
   state.stickToBottom = true;
   scrollMessages(true);
 }
@@ -1949,14 +1980,47 @@ function dismissApproval() {
   });
 }
 
-// remove an element and every sibling after it
-function removeElAndAfter(el) {
+// Remove an element and following siblings until the next user turn. Version/edit
+// operations must never delete adjacent conversations.
+function removeTurnNodes(el) {
   let node = el;
-  while (node) { const next = node.nextSibling; node.remove(); node = next; }
+  while (node) {
+    const next = node.nextSibling;
+    node.remove();
+    if (next && next.classList && next.classList.contains("message") && next.classList.contains("user")) break;
+    node = next;
+  }
 }
 
-// for retrying/editing an assistant/user message: strip back to (and including) the
-// user message that starts that turn, so the regenerated turn replaces it cleanly
+function nextUserAfterTurn(el) {
+  let node = el ? el.nextElementSibling : null;
+  while (node) {
+    if (node.classList && node.classList.contains("message") && node.classList.contains("user")) return node;
+    node = node.nextElementSibling;
+  }
+  return null;
+}
+
+function setVersionInsertMarker(nextUserEl) {
+  clearVersionInsertMarker();
+  const marker = document.createElement("span");
+  marker.className = "versionInsertMarker";
+  marker.hidden = true;
+  const box = $("messages");
+  if (nextUserEl && nextUserEl.parentNode === box) box.insertBefore(marker, nextUserEl);
+  else box.append(marker);
+  state.pendingVersionMarker = marker;
+  state.pendingVersionUser = null;
+}
+
+function clearVersionInsertMarker() {
+  if (state.pendingVersionMarker && state.pendingVersionMarker.isConnected) state.pendingVersionMarker.remove();
+  state.pendingVersionMarker = null;
+  state.pendingVersionUser = null;
+}
+
+// For retrying/editing an assistant/user message: strip only that turn. Do not remove
+// later user turns; those are separate conversation branches in the visible transcript.
 function removeTurnFrom(msg) {
   let anchor = msg;
   if (msg.classList.contains("assistant")) {
@@ -1964,9 +2028,11 @@ function removeTurnFrom(msg) {
     while (p && !(p.classList && p.classList.contains("message") && p.classList.contains("user"))) p = p.previousElementSibling;
     if (p) anchor = p;
   }
-  removeElAndAfter(anchor);
+  const nextUser = nextUserAfterTurn(anchor);
+  removeTurnNodes(anchor);
   state.currentAssistant = null;
   state.currentTool = null;
+  return nextUser;
 }
 
 async function doRetry(src) {
@@ -1989,7 +2055,8 @@ async function doRetry(src) {
     versions: priorVersions.length ? priorVersions : [replacedVersion],
     newPrompt: replacedVersion.prompt,  // retry keeps the same prompt
   };
-  removeTurnFrom(target);
+  const nextUser = removeTurnFrom(target);
+  setVersionInsertMarker(nextUser);
   state.stickToBottom = true;
   setRunning(true);
   try {
@@ -2013,8 +2080,11 @@ function attachVersionPager() {
   state.pendingVersions = null;
   if (!snap) return;
   const box = $("messages");
-  // the new turn's user message is the last user message in the transcript
-  const userEl = [...box.querySelectorAll(".message.user")].pop();
+  // Prefer the user row created at the edit/retry insertion point. Falling back to
+  // the last user is only for older/demo event paths.
+  const userEl = (state.pendingVersionUser && state.pendingVersionUser.isConnected)
+    ? state.pendingVersionUser
+    : [...box.querySelectorAll(".message.user")].pop();
   if (!userEl) return;
   const newVersion = {
     prompt: snap.newPrompt != null ? snap.newPrompt : (userEl.querySelector(".bubble").dataset.raw || ""),
@@ -2103,7 +2173,8 @@ function doEdit(text, src, msg) {
       versions: priorVersions.length ? priorVersions : [replacedVersion],
       newPrompt: next,
     };
-    removeTurnFrom(msg);
+    const nextUser = removeTurnFrom(msg);
+    setVersionInsertMarker(nextUser);
     state.stickToBottom = true;
     setRunning(true);
     try {
@@ -2114,6 +2185,7 @@ function doEdit(text, src, msg) {
       if (!result.ok) throw new Error(result.error || "unknown error");
     } catch (error) {
       state.pendingVersions = null;
+      clearVersionInsertMarker();
       setRunning(false);
       addEvent("error", "编辑重发失败", String(error.message || error));
     }

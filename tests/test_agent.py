@@ -2058,6 +2058,56 @@ def test_desktop_edit_resend_drops_old_tool_result_context(monkeypatch, tmp_path
     assert captured["messages"] == ["system"]
 
 
+def test_desktop_edit_resend_preserves_later_turns_after_regeneration(monkeypatch, tmp_path: Path):
+    import time
+
+    import deepseek_tulagent.desktop.app as desktop
+    from deepseek_tulagent.agent import AgentResult
+    from deepseek_tulagent.messages import Message
+    from deepseek_tulagent.session import Session, SessionStore
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("DSTUL_CONFIG_HOME", str(tmp_path / "config-home"))
+    api = desktop.DesktopApi()
+    api.session = Session(tmp_path, session_id="edit-preserve-session")
+    for message in [
+        Message("system", "system"),
+        Message("user", "第一问"),
+        Message("assistant", "第一答"),
+        Message("user", "第二问原文"),
+        Message("assistant", "第二答原文"),
+        Message("user", "第三问"),
+        Message("assistant", "第三答"),
+    ]:
+        api.session.append(message)
+
+    captured = {}
+
+    class FakeAgent:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def run(self, prompt, **kwargs):
+            captured["prompt"] = prompt
+            captured["messages"] = [message.content for message in kwargs["session"].messages]
+            kwargs["session"].append(Message("user", prompt))
+            kwargs["session"].append(Message("assistant", "第二答新版"))
+            return AgentResult(kwargs["session"].session_id, "第二答新版", 1)
+
+    monkeypatch.setattr(desktop, "TuLAgent", FakeAgent)
+    result = api.edit_resend({"prompt": "第二问新版", "srcIndex": 3})
+    assert result["ok"] is True
+    deadline = time.time() + 2
+    while api._running and time.time() < deadline:
+        time.sleep(0.02)
+    assert api._running is False
+
+    assert captured["prompt"] == "第二问新版"
+    assert captured["messages"] == ["system", "第一问", "第一答"]
+    persisted = [message.content for message in SessionStore(tmp_path).load("edit-preserve-session").messages]
+    assert persisted == ["system", "第一问", "第一答", "第二问新版", "第二答新版", "第三问", "第三答"]
+
+
 def test_desktop_send_passes_goal_to_agent(monkeypatch, tmp_path: Path):
     import time
 

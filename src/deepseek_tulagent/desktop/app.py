@@ -367,14 +367,24 @@ class DesktopApi:
             return {"ok": False, "error": "turn already running"}
         return self._start_turn(prompt, images=images, goal=goal)
 
-    def _start_turn(self, prompt: str, images: list[str] | None = None, goal: str | None = None) -> dict[str, Any]:
+    def _start_turn(
+        self,
+        prompt: str,
+        images: list[str] | None = None,
+        goal: str | None = None,
+        restore_suffix: list[Message] | None = None,
+    ) -> dict[str, Any]:
         self._cancel_requested = False
         self._running = True
         if self.session is None:
             self.session = Session(self.settings.workspace)
         session_id = self.session.session_id
         turn_id = uuid4().hex
-        thread = threading.Thread(target=self._run_agent_turn, args=(prompt, images or [], session_id, turn_id, goal), daemon=True)
+        thread = threading.Thread(
+            target=self._run_agent_turn,
+            args=(prompt, images or [], session_id, turn_id, goal, restore_suffix),
+            daemon=True,
+        )
         thread.start()
         return {"ok": True, "sessionId": session_id, "turnId": turn_id}
 
@@ -418,26 +428,38 @@ class DesktopApi:
         )
         thread.start()
 
-    def _truncate_to_last_user(self, before_index: int | None = None) -> str | None:
-        """Drop a user turn and everything after it; return that user prompt.
+    @staticmethod
+    def _is_real_user_message(message: Message) -> bool:
+        return message.role == "user" and not message.content.startswith(("TOOL_RESULT", "SUBAGENT_RESULT", "USER_ANSWER"))
+
+    def _prepare_regenerated_turn(self, before_index: int | None = None) -> tuple[str, list[Message]] | tuple[None, list[Message]]:
+        """Drop the target turn from model context; preserve later turns for UI/session.
 
         With before_index, target the user message at/nearest-before that transcript
         index (for retry/edit on any message); otherwise the last user message.
         Skips tool-result / subagent-result messages (which also carry role 'user').
-        Rewrites the session log so a fresh turn appends cleanly.
+        Rewrites the session log to the clean prefix before running, then the caller
+        passes the preserved suffix to _start_turn so it can be restored after the new
+        answer is persisted.
         """
         if self.session is None:
-            return None
+            return None, []
         messages = self.session.messages
         start = len(messages) - 1 if before_index is None else min(before_index, len(messages) - 1)
         for i in range(start, -1, -1):
             message = messages[i]
-            if message.role == "user" and not message.content.startswith(("TOOL_RESULT", "SUBAGENT_RESULT")):
+            if self._is_real_user_message(message):
                 prompt = message.content
+                suffix_start = len(messages)
+                for j in range(i + 1, len(messages)):
+                    if self._is_real_user_message(messages[j]):
+                        suffix_start = j
+                        break
+                restore_suffix = [Message(m.role, m.content, m.name, list(m.images)) for m in messages[suffix_start:]]
                 self.session.messages = messages[:i]
                 self.session.rewrite()
-                return prompt
-        return None
+                return prompt, restore_suffix
+        return None, []
 
     def _user_index_for(self, src_index: int | None) -> int | None:
         """Given a transcript index (any message), return the index to truncate at
@@ -446,6 +468,15 @@ class DesktopApi:
             return None
         return min(src_index, len(self.session.messages) - 1)
 
+    def _restore_regenerated_suffix(self, session_id: str | None, suffix: list[Message] | None) -> None:
+        if not session_id or not suffix:
+            return
+        restored = SessionStore(self.settings.workspace).load(session_id)
+        restored.messages.extend(Message(m.role, m.content, m.name, list(m.images)) for m in suffix)
+        restored.rewrite()
+        if self.session is not None and self.session.session_id == session_id:
+            self.session = restored
+
     def retry(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         """Regenerate the answer for a user message (the one at srcIndex, or the last)."""
         if self._running:
@@ -453,10 +484,10 @@ class DesktopApi:
         if self.session is None:
             return {"ok": False, "error": "no active session"}
         src = payload.get("srcIndex") if isinstance(payload, dict) else None
-        prompt = self._truncate_to_last_user(self._user_index_for(src))
+        prompt, restore_suffix = self._prepare_regenerated_turn(self._user_index_for(src))
         if prompt is None:
             return {"ok": False, "error": "no user message to retry"}
-        return self._start_turn(prompt)
+        return self._start_turn(prompt, restore_suffix=restore_suffix)
 
     def edit_resend(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Branch: replace a user message (at srcIndex, or the last) with edited text."""
@@ -467,8 +498,8 @@ class DesktopApi:
         text = str(payload.get("prompt") or "").strip()
         if not text:
             return {"ok": False, "error": "empty prompt"}
-        self._truncate_to_last_user(self._user_index_for(payload.get("srcIndex")))
-        return self._start_turn(text)
+        _old_prompt, restore_suffix = self._prepare_regenerated_turn(self._user_index_for(payload.get("srcIndex")))
+        return self._start_turn(text, restore_suffix=restore_suffix)
 
     def branch(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         """Fork a new session from an assistant reply (Codex-style branch).
@@ -567,6 +598,7 @@ class DesktopApi:
         turn_session_id: str | None = None,
         turn_id: str | None = None,
         goal: str | None = None,
+        restore_suffix: list[Message] | None = None,
     ) -> None:
         with self._lock:
             turn_session_id = turn_session_id or (self.session.session_id if self.session else None)
@@ -623,16 +655,19 @@ class DesktopApi:
                 # different conversation meanwhile — otherwise the next send would land in
                 # the OLD conversation (context bleeding across chats).
                 current_id = self.session.session_id if self.session else None
+                self._restore_regenerated_suffix(result.session_id, restore_suffix)
                 if current_id in (turn_session_id, result.session_id):
                     self.session = SessionStore(self.settings.workspace).load(result.session_id)
                 ensure_session_title(self.settings.workspace, SessionStore(self.settings.workspace).load(result.session_id))
                 emit_turn("turn:done", {"sessionId": result.session_id, "rounds": result.rounds})
             except RuntimeError as exc:
+                self._restore_regenerated_suffix(turn_session_id, restore_suffix)
                 if str(exc) == "turn cancelled":
                     emit_turn("turn:cancelled", {"message": "当前回复已取消"})
                 else:
                     emit_turn("turn:error", desktop_error_payload(exc))
             except Exception as exc:
+                self._restore_regenerated_suffix(turn_session_id, restore_suffix)
                 emit_turn("turn:error", desktop_error_payload(exc))
             finally:
                 self._abandoned_turn_ids.discard(turn_id)
