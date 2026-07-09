@@ -302,7 +302,7 @@ window.DeepSeekDesktop = {
       const summary = payload.summary || payload.error || "运行失败";
       const detail = payload.trace ? `${summary}\n\n调试详情：\n${payload.trace}` : summary;
       addEvent("error", "错误", detail);
-      setSaveState("error", "出错", summary);
+      setSaveState("error", "出错", "查看上方错误卡片");
       toast(summary);
     }
     if (event === "turn:cancel") {
@@ -443,7 +443,15 @@ function setSaveState(kind, label, detail) {
   const box = document.querySelector(".saveState");
   box.className = `saveState ${kind}`;
   $("saveState").textContent = label;
-  $("composerSession").textContent = detail || "";
+  const session = $("composerSession");
+  const text = String(detail || "");
+  session.textContent = truncateInline(text, 96);
+  session.title = text;
+}
+
+function truncateInline(text, max = 120) {
+  const compact = String(text || "").replace(/\s+/g, " ").trim();
+  return compact.length > max ? compact.slice(0, max - 1) + "…" : compact;
 }
 
 function setRunning(running) {
@@ -911,7 +919,7 @@ function addEvent(kind, name, detail) {
   const icon_ = iconFor(kind);
   details.innerHTML = `
     <summary><span class="eventIcon">${icon_}</span><span class="evLabel">${labelFor(kind)}</span><strong>${escapeHtml(name || "")}</strong><span class="evChevron">${icon("chevron", 13)}</span></summary>
-    <pre>${escapeHtml(detail || "")}</pre>`;
+    <pre>${escapeHtml(truncateForDisplay(String(detail || "")))}</pre>`;
   $("messages").append(details);
   scrollMessages();
   mirror(`[${labelFor(kind)}] ${name || ""} ${detail || ""}`.trim());
@@ -1500,7 +1508,8 @@ function interpretPrompt(text) {
 function toast(message) {
   const el = document.createElement("div");
   el.className = "toast";
-  el.textContent = message;
+  el.textContent = truncateInline(message, 160);
+  el.title = String(message || "");
   document.body.append(el);
   requestAnimationFrame(() => el.classList.add("show"));
   setTimeout(() => { el.classList.remove("show"); setTimeout(() => el.remove(), 200); }, 2600);
@@ -1882,21 +1891,28 @@ function removeLastExchange() {
   state.currentTool = null;
 }
 
-// snapshot everything AFTER an anchor user message (answer, tool cards, later turns) so
-// a version can restore the WHOLE tail, not just one bubble's text
+// Snapshot only this user's answer/tool tail. Stop before the next user turn so
+// edit/retry version arrows never delete later messages.
 function tailHTMLFrom(anchorUserEl) {
   let html = "";
   let n = anchorUserEl.nextElementSibling;
-  while (n) { html += n.outerHTML; n = n.nextElementSibling; }
+  while (n && !(n.classList && n.classList.contains("message") && n.classList.contains("user"))) {
+    html += n.outerHTML;
+    n = n.nextElementSibling;
+  }
   return html;
 }
 
-// replace an anchor's whole tail with a version's saved prompt + tail HTML
+// Replace only this user's answer/tool tail; preserve later turns.
 function applyVersion(anchorUserEl, version) {
   const bubble = anchorUserEl.querySelector(".bubble");
   if (bubble && version.prompt != null) { bubble.dataset.raw = version.prompt; renderBubble(bubble); }
   let n = anchorUserEl.nextElementSibling;
-  while (n) { const nx = n.nextElementSibling; n.remove(); n = nx; }
+  while (n && !(n.classList && n.classList.contains("message") && n.classList.contains("user"))) {
+    const nx = n.nextElementSibling;
+    n.remove();
+    n = nx;
+  }
   if (version.tailHTML) anchorUserEl.insertAdjacentHTML("afterend", version.tailHTML);
 }
 

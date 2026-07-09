@@ -1,5 +1,21 @@
 # 更新记录 / Changelog
 
+## v0.1.105
+
+中文：
+
+- **修复：编辑/重试后的版本箭头切换不再删除后续消息**。版本快照现在只替换当前用户消息对应的回复/工具卡，遇到下一条用户消息就停止。
+- **修复：长上游错误不再挤爆输入框区域**。状态栏只显示短提示，完整错误保留在上方错误卡片；toast 和事件详情也做截断/滚动。
+- **优化：任务目标 dock 的关闭按钮和折叠箭头分区**，右侧预留关闭按钮空间，避免下拉箭头被叉号挡住。
+- **同步：包版本和 README 安装链接更新到 `v0.1.105`**。
+
+English:
+
+- **Fixed: edit/retry version arrows no longer delete later messages**. Version snapshots now replace only the current user's reply/tool tail and stop at the next user turn.
+- **Fixed: long upstream errors no longer blow up the composer area**. The status strip shows a short hint, while full details stay in the error card with truncation/scrolling.
+- **Improved: task-goal dock close and collapse controls no longer overlap**.
+- **Synced: package version and README install links are now `v0.1.105`**.
+
 ## v0.1.104
 
 中文：
