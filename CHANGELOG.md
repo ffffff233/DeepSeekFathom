@@ -1,5 +1,25 @@
 # 更新记录 / Changelog
 
+## v0.1.104
+
+中文：
+
+- **修复：`todo_write` 完成任务后不再撤回最终回答**。只有任务列表仍有 `pending/in_progress` 且模型只输出短占位话术时才内部催继续；任务已完成/取消时不再强制插入继续 prompt。
+- **修复：前端收到空 `assistant:final` 时不再删除已有流式正文**。空 final 只清理空的工具调用占位气泡，避免最终回答快输出完被撤回。
+- **优化：任务目标 dock 右上角关闭按钮始终显示**，不必等全部完成后才能关掉；关闭只隐藏当前任务快照，后续新的任务目标仍会正常显示。
+- **修复：新对话不再继承上一条对话的任务目标 UI**。草稿任务使用独立 draft key，切新对话会隔离并清理当前草稿目标。
+- **优化：测试连接先获取上游模型列表并弹窗选择模型**。用户填入 Base URL/API Key/provider 后，先拉取该接口模型列表，选择模型后再发真实测试请求。
+- **同步：包版本和 README 安装链接更新到 `v0.1.104`**。
+
+English:
+
+- **Fixed: final answers are no longer withdrawn after `todo_write` marks tasks complete**. Internal continuation is now limited to open todo lists plus short placeholder prose.
+- **Fixed: empty `assistant:final` no longer deletes an existing streamed assistant body**. It only removes empty tool-call placeholder bubbles.
+- **Improved: the task-goal dock close button is always available**, not only after all tasks complete; closing only hides the current snapshot, so future task goals still appear normally.
+- **Fixed: new conversations no longer inherit the previous conversation's task-goal UI** by isolating draft goal keys.
+- **Improved: connection testing now fetches upstream models first and asks which model to test** before sending the real probe request.
+- **Synced: package version and README install links are now `v0.1.104`**.
+
 ## v0.1.103
 
 中文：

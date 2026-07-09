@@ -665,8 +665,10 @@ dialog#settingsDialog { max-width: 440px; width: 92%; }
 dialog.miniModal { max-width: 360px; width: 90%; }
 dialog.miniModal form { padding: 18px; display: flex; flex-direction: column; gap: 12px; }
 dialog.miniModal p { margin: 0; font-size: 13px; line-height: 1.6; color: var(--text); }
-dialog.miniModal input { background: var(--bg-under); color: var(--text); border: 1px solid var(--line); border-radius: var(--r-md); padding: 7px 10px; font-size: 13px; font-family: inherit; outline: none; }
-dialog.miniModal input:focus { border-color: var(--line-heavy); }
+dialog.miniModal input,
+dialog.miniModal select { background: var(--bg-under); color: var(--text); border: 1px solid var(--line); border-radius: var(--r-md); padding: 7px 10px; font-size: 13px; font-family: inherit; outline: none; }
+dialog.miniModal input:focus,
+dialog.miniModal select:focus { border-color: var(--line-heavy); }
 dialog.miniModal menu { display: flex; justify-content: flex-end; gap: 8px; margin: 0; padding: 0; }
 
 /* ---------- transient toast ---------- */

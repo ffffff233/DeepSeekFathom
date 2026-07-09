@@ -1313,6 +1313,38 @@ def test_agent_continues_after_required_todo_write(tmp_path: Path):
     assert result.answer == "已完成：done.txt 已写入。"
 
 
+def test_agent_preserves_substantive_answer_after_completed_todo_write(tmp_path: Path):
+    finals: list[str] = []
+
+    class CompletedTodoThenSummaryClient:
+        def __init__(self):
+            self.calls = 0
+
+        def chat(self, messages):
+            self.calls += 1
+            if self.calls == 1:
+                return '{"tool":"todo_write","arguments":{"todos":[{"content":"整理结果","status":"completed"}]}}'
+            assert "TOOL_RESULT name=todo_write" in messages[-1].content
+            return (
+                "处理结果如下：任务目标已经更新到完成态，前端会保留这条最终说明，"
+                "不会因为刚刚收到 todo_write 的完成事件而把已经流式显示的回答撤回。"
+            )
+
+        def stream_chat(self, messages):
+            yield self.chat(messages)
+
+    result = TuLAgent(settings(tmp_path), mode="root", client=CompletedTodoThenSummaryClient()).run(
+        "整理这个复杂问题，然后给出最终说明",
+        stream=True,
+        on_final=finals.append,
+        max_tool_rounds=3,
+    )
+
+    assert result.answer.startswith("处理结果如下")
+    assert finals.count("") == 1
+    assert finals[-1] == result.answer
+
+
 def test_web_search_uses_baidu_first(monkeypatch, tmp_path: Path):
     requested: list[str] = []
 

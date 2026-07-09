@@ -163,6 +163,7 @@ class TuLAgent:
         last_turn_had_tool_result = False
         last_turn_had_tool_error = False
         last_tool_name: str | None = None
+        last_todo_has_open_items = False
         pending_internal_prompt: str | None = None
         round_limit = max_tool_rounds or self.settings.max_tool_rounds
         complex_task = is_complex_task(prompt)
@@ -240,11 +241,17 @@ class TuLAgent:
                     todo_enforced = True
                     continue
                 assistant_text = plainify_assistant_text(assistant_text)
-                if last_turn_had_tool_result and last_tool_name == "todo_write" and not declares_blocked_or_complete(assistant_text):
+                if (
+                    last_turn_had_tool_result
+                    and last_tool_name == "todo_write"
+                    and last_todo_has_open_items
+                    and todo_followup_is_placeholder(assistant_text)
+                ):
                     if stream and on_final:
                         on_final("")
                     pending_internal_prompt = CONTINUE_AFTER_TODO_PROMPT
                     last_turn_had_tool_result = False
+                    last_todo_has_open_items = False
                     continue
                 if stream and on_final:
                     on_final(assistant_text)
@@ -291,6 +298,8 @@ class TuLAgent:
                     result = self.tools.run(name, arguments)
                     content = result.to_message()
                     event_content = result.output if name == "todo_write" else content
+                    if name == "todo_write":
+                        last_todo_has_open_items = todo_result_has_open_items(result.output)
                     tool_images = list(getattr(result, "images", None) or [])
             except (ToolError, ValueError, OSError, subprocess.SubprocessError, TypeError) as exc:  # type: ignore[name-defined]
                 content = json.dumps({"ok": False, "output": str(exc)}, ensure_ascii=False)
@@ -799,6 +808,44 @@ def promises_more_work(text: str) -> bool:
     if any(cue in stripped.lower() for cue in completion_cues) and not any(cue in stripped for cue in ("接下来", "下一步", "继续", "然后")):
         return False
     return any(cue in stripped for cue in future_cues) and any(cue in stripped for cue in action_cues)
+
+
+def todo_result_has_open_items(output: str) -> bool:
+    try:
+        data = json.loads(output)
+    except (json.JSONDecodeError, TypeError):
+        return True
+    todos = data.get("todos") if isinstance(data, dict) else data
+    if not isinstance(todos, list):
+        return True
+    if not todos:
+        return False
+    for item in todos:
+        if isinstance(item, dict) and str(item.get("status") or "pending") in {"pending", "in_progress"}:
+            return True
+    return False
+
+
+def todo_followup_is_placeholder(text: str) -> bool:
+    stripped = re.sub(r"\s+", "", text)
+    if not stripped:
+        return True
+    if len(stripped) > 120:
+        return False
+    lowered = stripped.lower()
+    cues = (
+        "继续处理",
+        "继续执行",
+        "开始处理",
+        "开始执行",
+        "任务已启动",
+        "我会继续",
+        "接下来继续",
+        "继续完成",
+        "continuing",
+        "continue",
+    )
+    return any(cue in lowered for cue in cues) or promises_more_work(text)
 
 
 def plainify_assistant_text(text: str) -> str:

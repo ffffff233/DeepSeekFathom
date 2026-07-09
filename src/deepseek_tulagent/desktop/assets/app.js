@@ -20,6 +20,8 @@ const state = {
   cancelPromise: null,
   goalCollapsed: false,
   goalsBySession: {},
+  dismissedGoalSnapshots: {},
+  goalDraftId: `__draft__:${Date.now()}-${Math.random().toString(16).slice(2)}`,
   katexRenderToString: null,
   katexLoadPromise: null,
   activeGoal: "",
@@ -200,7 +202,15 @@ window.DeepSeekDesktop = {
       // streamed content was actually a tool call — remove the bubble entirely
       const text = payload.text || "";
       if (!text.trim()) {
-        if (state.currentAssistant) { state.currentAssistant.remove(); state.currentAssistant = null; }
+        if (state.currentAssistant) {
+          const bubble = state.currentAssistant.querySelector(".bubble");
+          if ((bubble && (bubble.dataset.raw || "").trim())) {
+            state.currentAssistant.classList.remove("streaming");
+          } else {
+            state.currentAssistant.remove();
+          }
+          state.currentAssistant = null;
+        }
         return;
       }
       hideThinking();
@@ -458,6 +468,7 @@ function loadGoalStore() {
     const raw = localStorage.getItem(goalStorageKey());
     const parsed = raw ? JSON.parse(raw) : {};
     state.goalsBySession = parsed && typeof parsed === "object" ? parsed : {};
+    delete state.goalsBySession.__draft__;
   } catch (_) {
     state.goalsBySession = {};
   }
@@ -470,12 +481,19 @@ function saveGoalStore() {
 }
 
 function goalSessionKey() {
-  return currentSessionId() || "__draft__";
+  return currentSessionId() || state.goalDraftId;
 }
 
 function currentGoalTodos() {
   const value = state.goalsBySession[goalSessionKey()];
   return Array.isArray(value) ? value : [];
+}
+
+function goalSnapshot(todos) {
+  return JSON.stringify((todos || []).map((todo) => ({
+    content: todo.content || "",
+    status: todo.status || "pending",
+  })));
 }
 
 function normalizeTodos(raw) {
@@ -503,6 +521,7 @@ function applyTodoPayload(detail, sessionId) {
   const key = sessionId || goalSessionKey();
   if (todos.length) state.goalsBySession[key] = todos;
   else delete state.goalsBySession[key];
+  delete state.dismissedGoalSnapshots[key];
   saveGoalStore();
   syncActiveGoalFromStore();
   renderGoalDock();
@@ -534,9 +553,11 @@ function parseGoalTodos(goal) {
 }
 
 function migrateDraftGoal(sessionId) {
-  if (!sessionId || !state.goalsBySession.__draft__) return;
-  if (!state.goalsBySession[sessionId]) state.goalsBySession[sessionId] = state.goalsBySession.__draft__;
-  delete state.goalsBySession.__draft__;
+  if (!sessionId) return;
+  const draftKey = state.goalDraftId;
+  if (!state.goalsBySession[draftKey]) return;
+  if (!state.goalsBySession[sessionId]) state.goalsBySession[sessionId] = state.goalsBySession[draftKey];
+  delete state.goalsBySession[draftKey];
   saveGoalStore();
   syncActiveGoalFromStore();
   renderGoalDock();
@@ -548,6 +569,7 @@ function setGoalStatus(index, status) {
   if (!todos[index]) return;
   todos[index] = { ...todos[index], status };
   state.goalsBySession[key] = todos;
+  delete state.dismissedGoalSnapshots[key];
   saveGoalStore();
   syncActiveGoalFromStore();
   renderGoalDock();
@@ -572,7 +594,8 @@ function renderGoalDock() {
   const dock = $("goalDock");
   if (!dock) return;
   const todos = currentGoalTodos();
-  if (!todos.length) {
+  const key = goalSessionKey();
+  if (!todos.length || state.dismissedGoalSnapshots[key] === goalSnapshot(todos)) {
     dock.hidden = true;
     dock.innerHTML = "";
     return;
@@ -584,7 +607,7 @@ function renderGoalDock() {
   dock.hidden = false;
   dock.className = `goalDock${state.goalCollapsed ? " collapsed" : ""}${done === total ? " complete" : ""}`;
   dock.innerHTML = `
-    ${done === total ? `<button class="goalClose" type="button" title="清除已完成任务">${icon("x", 12)}</button>` : ""}
+    <button class="goalClose" type="button" title="关闭任务目标">${icon("x", 12)}</button>
     <button class="goalHead" type="button" data-action="toggle-goal">
       <span class="goalOrb">${done === total ? icon("check", 13) : icon("loader", 13)}</span>
       <span class="goalMeta">
@@ -612,9 +635,7 @@ function renderGoalDock() {
   const close = dock.querySelector(".goalClose");
   if (close) close.onclick = (event) => {
     event.stopPropagation();
-    delete state.goalsBySession[goalSessionKey()];
-    saveGoalStore();
-    syncActiveGoalFromStore();
+    state.dismissedGoalSnapshots[goalSessionKey()] = goalSnapshot(currentGoalTodos());
     renderGoalDock();
   };
 }
@@ -1428,6 +1449,7 @@ function setGoal(goal) {
   const todos = parseGoalTodos(goal);
   if (todos.length) state.goalsBySession[key] = todos;
   else delete state.goalsBySession[key];
+  delete state.dismissedGoalSnapshots[key];
   saveGoalStore();
   syncActiveGoalFromStore();
   renderGoalDock();
@@ -1569,18 +1591,38 @@ $("testConn").onclick = async () => {
   const box = $("testResult");
   box.hidden = false;
   box.className = "testResult testing";
-  box.textContent = "正在测试连接（发送真实请求）…";
+  box.textContent = "正在获取上游模型列表…";
   const fmtReasoning = (r) => {
     if (!r || !Object.keys(r).length) return "无（思考关闭）";
     try { return JSON.stringify(r); } catch (_) { return String(r); }
   };
   try {
-    const testConnection = await apiMethod("test_connection");
-    const r = await testConnection({
+    const probe = {
       baseUrl: $("baseUrl").value,
       apiKey: $("apiKey").value,
       providerFormat: $("providerFormat").value,
       model: $("model") ? $("model").value : undefined,
+    };
+    const modelsFn = await apiMethod("models");
+    const listed = await modelsFn(probe);
+    const fetched = listed.ok && Array.isArray(listed.models) ? listed.models.filter(Boolean) : [];
+    if (!fetched.length) throw new Error(listed.error || "上游没有返回可选模型");
+    state.models = fetched;
+    const current = fetched.includes(probe.model) ? probe.model : fetched[0];
+    fillSelect("model", ensureIncludes(fetched, current), current);
+    const selectedModel = await uiSelect("选择用于测试连接的模型", fetched, current);
+    if (!selectedModel) {
+      box.className = "testResult";
+      box.textContent = "已取消测试连接";
+      return;
+    }
+    $("model").value = selectedModel;
+    box.className = "testResult testing";
+    box.textContent = `正在使用 ${selectedModel} 发送真实测试请求…`;
+    const testConnection = await apiMethod("test_connection");
+    const r = await testConnection({
+      ...probe,
+      model: selectedModel,
     });
     if (r.ok) {
       box.className = "testResult ok";
@@ -1622,7 +1664,10 @@ $("newSession").onclick = async () => {
   state.pendingOutbound = false;
   state.pendingOutboundId = "";
   state.suppressLocalUserEcho = false;
-  delete state.goalsBySession.__draft__;
+  delete state.goalsBySession[state.goalDraftId];
+  delete state.dismissedGoalSnapshots[state.goalDraftId];
+  state.goalDraftId = `__draft__:${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  saveGoalStore();
   syncActiveGoalFromStore();
   renderGoalDock();
   if (state.boot) state.boot.sessionId = null;
@@ -2149,6 +2194,37 @@ function uiModal({ title, withInput, defaultValue }) {
 }
 const uiPrompt = (title, defaultValue) => uiModal({ title, withInput: true, defaultValue });
 const uiConfirm = (title) => uiModal({ title, withInput: false });
+
+function uiSelect(title, values, selected) {
+  return new Promise((resolve) => {
+    const dialog = document.createElement("dialog");
+    dialog.className = "miniModal modelPickModal";
+    dialog.innerHTML = `
+      <form method="dialog">
+        <p>${escapeHtml(title)}</p>
+        <select></select>
+        <menu>
+          <button value="cancel" class="ghost">取消</button>
+          <button value="ok" class="primary">测试</button>
+        </menu>
+      </form>`;
+    const select = dialog.querySelector("select");
+    values.forEach((value) => {
+      const option = document.createElement("option");
+      option.value = value;
+      option.textContent = value;
+      option.selected = value === selected;
+      select.append(option);
+    });
+    document.body.append(dialog);
+    dialog.addEventListener("close", () => {
+      resolve(dialog.returnValue === "ok" ? select.value : null);
+      dialog.remove();
+    });
+    dialog.showModal();
+    select.focus();
+  });
+}
 
 /* ---------- startup: 等待 pywebview 注入 api，浏览器预览时回退到演示数据 ---------- */
 // pywebview creates window.pywebview.api as an object BEFORE attaching each method
