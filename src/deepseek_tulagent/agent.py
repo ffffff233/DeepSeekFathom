@@ -760,9 +760,19 @@ def should_hold_stream_output(text: str) -> bool:
     head = stripped[: len(tag)].lower()
     if stripped[:1] == "<" and (head.startswith(tag[: len(head)]) or head == tag):
         return len(stripped) < 32000
+    leading_fence = re.match(r"(?is)^```\s*([a-z0-9_-]*)[^\n]*\n?(.*)$", stripped)
+    if leading_fence:
+        lang = (leading_fence.group(1) or "").lower()
+        body = (leading_fence.group(2) or "").lstrip()
+        if lang in {"json", "tool", "tools"} and (
+            not body
+            or re.match(r'^\{\s*(?:"(?:tool|name|function_call|tool_calls)"?)?$', body, flags=re.IGNORECASE)
+            or re.match(r'^\{\s*"(?:tool|name|function_call|tool_calls)"', body, flags=re.IGNORECASE)
+        ):
+            return len(stripped) < 32000
+        return False
     tool_prefixes = (
         "{",
-        "```",
         "tool:",
         "工具:",
         "Tool:",
@@ -790,30 +800,40 @@ def safe_stream_emit_length(text: str) -> int:
     if tag:
         return tag.start()
     for specific in re.finditer(r"(?i)\{\s*\"(?:tool|name|function_call|tool_calls)\"", text):
+        fence_start = text.rfind("```", 0, specific.start())
+        inside_tool_fence = False
+        if fence_start != -1:
+            after = text[fence_start:specific.start()].lower()
+            inside_tool_fence = bool(re.match(r"```\s*(json|tool|tools)?\s*\n?\s*$", after))
         objects = extract_json_objects(text[specific.start():])
         if not objects:
-            return specific.start()
+            return fence_start if inside_tool_fence else specific.start()
         try:
             data = json.loads(objects[0])
         except json.JSONDecodeError:
-            return specific.start()
+            return fence_start if inside_tool_fence else specific.start()
         if not normalize_tool_call(data):
             continue
-        fence_start = text.rfind("```", 0, specific.start())
-        if fence_start != -1:
-            after = text[fence_start:specific.start()].lower()
-            if re.match(r"```\s*(json|tool|tools)?\s*\n?\s*$", after):
-                return fence_start
+        if inside_tool_fence:
+            return fence_start
         return specific.start()
     # 1b) our labelled format at the start of a line (Tool:/工具: name)
     labelled = re.search(r"(?im)^[ \t]*(?:tool|工具)[ \t]*:[ \t]*[A-Za-z_][\w-]*[ \t]*$", text)
     if labelled:
         return labelled.start()
-    # 1c) while a markdown fence is still open, hold it until we know whether it is a
-    # real code block or a fenced tool call. Once closed, ordinary code is allowed.
     fences = list(re.finditer(r"(?m)^[ \t]*```", text))
     if len(fences) % 2 == 1:
-        return fences[-1].start()
+        fence_start = fences[-1].start()
+        open_fence = re.match(r"(?is)[ \t]*```\s*([a-z0-9_-]*)[^\n]*\n?(.*)$", text[fence_start:])
+        if open_fence:
+            lang = (open_fence.group(1) or "").lower()
+            body = (open_fence.group(2) or "").lstrip()
+            if lang in {"json", "tool", "tools"} and (
+                not body
+                or re.match(r'^\{\s*(?:"(?:tool|name|function_call|tool_calls)"?)?$', body, flags=re.IGNORECASE)
+                or re.match(r'^\{\s*"(?:tool|name|function_call|tool_calls)"', body, flags=re.IGNORECASE)
+            ):
+                return fence_start
     fenced_spans = [(fences[i].start(), fences[i + 1].end()) for i in range(0, len(fences) - 1, 2)]
 
     def _inside_closed_fence(pos: int) -> bool:

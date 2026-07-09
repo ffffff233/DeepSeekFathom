@@ -15,7 +15,7 @@ from deepseek_tulagent.cli import main
 from deepseek_tulagent.config import Settings, get_settings, merge_file_config, resolve_model
 from deepseek_tulagent.messages import Message
 from deepseek_tulagent.policy import ApprovalPolicy, ThinkingMode
-from deepseek_tulagent.provider import UsageStats, apply_thinking_payload, extract_error_message, parse_usage_stats
+from deepseek_tulagent.provider import UsageStats, apply_anthropic_cache_control, apply_thinking_payload, cache_affinity_headers, extract_error_message, parse_usage_stats, prompt_cache_key
 from deepseek_tulagent.session import SessionStore
 from deepseek_tulagent.skills import SkillStore
 from deepseek_tulagent.tui import ChatTui, TuiState
@@ -120,6 +120,30 @@ def test_parse_provider_usage_stats():
     assert gemini.input_tokens == 70
     assert gemini.output_tokens == 8
     assert gemini.total_tokens == 78
+
+
+def test_provider_cache_affinity_is_stable_and_non_secret(tmp_path: Path):
+    cfg = settings(tmp_path)
+    key1 = prompt_cache_key(cfg)
+    key2 = prompt_cache_key(cfg)
+    assert key1 == key2
+    assert cfg.api_key not in key1
+    assert cache_affinity_headers(cfg) == {"Session_id": key1}
+
+
+def test_anthropic_cache_control_marks_stable_prefixes():
+    payload = {
+        "system": "stable system prompt",
+        "messages": [
+            {"role": "user", "content": "first"},
+            {"role": "assistant", "content": "reply"},
+            {"role": "user", "content": "second"},
+        ],
+    }
+    apply_anthropic_cache_control(payload)
+    assert payload["system"][0]["cache_control"] == {"type": "ephemeral"}
+    assert payload["messages"][0]["content"][0]["cache_control"] == {"type": "ephemeral"}
+    assert payload["messages"][2]["content"] == "second"
 
 
 def test_extract_provider_error_message_from_compatible_shapes():
@@ -1606,7 +1630,8 @@ def test_desktop_api_rejects_parallel_turn(monkeypatch, tmp_path: Path):
     assert result == {"ok": False, "error": "turn already running"}
     cancelled = api.cancel()
     assert cancelled["ok"] is True
-    assert cancelled["running"] is True
+    assert cancelled["running"] is False
+    assert api._running is False
 
 
 def test_desktop_send_after_cancel_queues_next_turn(monkeypatch, tmp_path: Path):
@@ -1641,11 +1666,11 @@ def test_desktop_send_after_cancel_queues_next_turn(monkeypatch, tmp_path: Path)
     assert first["ok"] is True
     assert entered_first.wait(timeout=2)
     cancelled = api.cancel()
-    assert cancelled == {"ok": True, "running": True}
+    assert cancelled == {"ok": True, "running": False}
 
     second = api.send({"prompt": "第二条"})
     assert second["ok"] is True
-    assert second["queued"] is True
+    assert "queued" not in second
     assert second["sessionId"] == first["sessionId"]
     assert second["turnId"] != first["turnId"]
 
@@ -2804,6 +2829,10 @@ def test_stream_holds_fenced_tool_call_from_fence_start():
 def test_normal_code_blocks_are_not_inferred_or_partially_held():
     from deepseek_tulagent.agent import safe_stream_emit_length, strip_tool_call_display
 
+    # Open ordinary code fences are visible while streaming; they are not tools.
+    open_python = "我给你代码：\n```python\nprint('hello')"
+    assert safe_stream_emit_length(open_python) == len(open_python)
+
     # JSON code can mention fields named arguments/input without becoming a tool.
     normal_json = '```json\n{"hello":"world","arguments":"not a tool"}\n```'
     assert parse_tool_call(normal_json) is None
@@ -2814,6 +2843,13 @@ def test_normal_code_blocks_are_not_inferred_or_partially_held():
     normal_bash = '我现在解释：\n```bash\necho hello\n```'
     assert parse_tool_call(normal_bash) is None
     assert safe_stream_emit_length(normal_bash) == len(normal_bash)
+
+
+def test_open_fenced_tool_call_is_held_from_fence_start():
+    from deepseek_tulagent.agent import safe_stream_emit_length
+
+    text = '我来调用工具：```json\n{"tool":"write_file"'
+    assert text[: safe_stream_emit_length(text)] == "我来调用工具："
 
 
 def test_generic_pre_tool_action_intro_is_dropped():

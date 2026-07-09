@@ -99,7 +99,10 @@ def load_file_config() -> dict:
 def save_file_config(data: dict) -> Path:
     path = config_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    tmp.chmod(0o600)
+    tmp.replace(path)
     path.chmod(0o600)
     return path
 

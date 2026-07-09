@@ -189,6 +189,7 @@ body.is-running .pulse { animation: pulseDot 1s ease-in-out infinite; }
 .message.user .msgActions { justify-content: flex-end; }
 .message:hover .msgActions { opacity: 1; }
 .msgActions:has(.versionPager) { opacity: 1; }
+body.is-running .message .msgActions { display: none; }
 /* latest actionable turn (retry/branch/edit) stays visible — no hover needed,
    so switching back to a conversation shows them immediately */
 .message.canRetry .msgActions, .message.canEdit .msgActions { opacity: 1; }
@@ -207,7 +208,7 @@ body.is-running .pulse { animation: pulseDot 1s ease-in-out infinite; }
 .message.user .msgAct.edit { display: inline-grid; }
 /* pre-tool narration is not a standalone reply: no copy/retry/branch row and no
    extra action-line gap before the tool card. */
-.message.assistant.intermediate .msgActions { display: none; }
+.message.assistant.intermediate .msgActions, .message.assistant.streaming .msgActions { display: none; }
 
 /* retry version pager: ‹ i/n › */
 .versionPager { display: inline-flex; align-items: center; gap: 2px; margin-right: 4px; color: var(--text-4); font-size: 11px; font-family: var(--mono); }

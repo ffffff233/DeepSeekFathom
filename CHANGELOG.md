@@ -1,5 +1,25 @@
 # 更新记录 / Changelog
 
+## v0.1.100
+
+中文：
+
+- **修复：普通代码块不再被误判为工具调用**。未闭合的 `python` / `bash` / 普通 markdown 代码框会正常流式显示；只有明确像工具调用的 fenced JSON 才继续扣留，避免泄露工具参数。
+- **修复：流式/等待中不再露出复制、重试、分支按钮**。assistant 气泡生成中会标记为 streaming，运行中统一隐藏消息操作，final 完成后才恢复可操作。
+- **优化：取消回复后立即释放发送闸门**。点击中断后后端马上返回 `running=false`，旧 turnId 的迟到输出会被丢弃，不再因为后台请求未完全退出而反复提示 `turn already running`。
+- **优化：提高上游提示缓存命中率**。OpenAI/DeepSeek 兼容请求增加稳定 `Session_id`，Responses 请求增加 `prompt_cache_key`，Anthropic 请求自动注入 system/历史 turn 的 `cache_control`。
+- **优化：模型列表读取更快更稳**。`/models` 查询改为短超时并缓存 10 分钟，慢网关不再拖慢桌面端；配置保存改为原子写入，避免重启时读到半截配置。
+- **同步：包版本和 README 安装链接更新到 `v0.1.100`**。
+
+English:
+
+- **Fixed: ordinary code blocks are no longer mistaken for tool calls**. Open markdown code fences stream normally unless they clearly contain tool-call JSON.
+- **Fixed: copy/retry/branch actions stay hidden while a message is streaming or waiting**. Actions return only after the final assistant reply is committed.
+- **Improved: cancel releases the send gate immediately**. Interrupted turns are abandoned by `turnId`, so late output is ignored and `turn already running` is avoided.
+- **Improved: higher prompt-cache affinity**. OpenAI/DeepSeek-compatible requests send stable `Session_id`, Responses sends `prompt_cache_key`, and Anthropic payloads get cache-control breakpoints.
+- **Improved: faster model/config startup behavior**. Model list requests use a short timeout plus 10-minute cache; config writes are atomic.
+- **Synced: package version and README install links are now `v0.1.100`**.
+
 ## v0.1.99
 
 中文：

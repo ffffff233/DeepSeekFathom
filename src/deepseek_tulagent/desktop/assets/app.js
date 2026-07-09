@@ -184,7 +184,10 @@ window.DeepSeekDesktop = {
     }
     if (event === "assistant:delta") {
       hideThinking();
-      if (!state.currentAssistant) state.currentAssistant = addMessage("assistant", "");
+      if (!state.currentAssistant) {
+        state.currentAssistant = addMessage("assistant", "");
+        state.currentAssistant.classList.add("streaming");
+      }
       const bubble = state.currentAssistant.querySelector(".bubble");
       bubble.dataset.raw = (bubble.dataset.raw || "") + payload.text;
       renderBubble(bubble);
@@ -200,6 +203,7 @@ window.DeepSeekDesktop = {
       }
       hideThinking();
       if (!state.currentAssistant) state.currentAssistant = addMessage("assistant", "");
+      state.currentAssistant.classList.remove("streaming");
       const bubble = state.currentAssistant.querySelector(".bubble");
       bubble.dataset.raw = text;
       renderBubble(bubble);
@@ -2015,7 +2019,7 @@ function markMessageActions() {
   const box = $("messages");
   box.querySelectorAll(".canRetry, .canEdit").forEach((m) => m.classList.remove("canRetry", "canEdit"));
   // only real replies are actionable — skip pre-tool narration bubbles
-  const assistants = box.querySelectorAll(".message.assistant:not(.intermediate)");
+  const assistants = box.querySelectorAll(".message.assistant:not(.intermediate):not(.streaming)");
   const usersList = box.querySelectorAll(".message.user");
   if (assistants.length) assistants[assistants.length - 1].classList.add("canRetry");
   if (usersList.length) usersList[usersList.length - 1].classList.add("canEdit");
@@ -2035,6 +2039,7 @@ function markLastAssistantIntermediate() {
   const lastUser = users.length ? users[users.length - 1] : null;
   if (lastUser && !(lastUser.compareDocumentPosition(last) & Node.DOCUMENT_POSITION_FOLLOWING)) return;
   last.classList.add("intermediate");
+  last.classList.remove("streaming");
 }
 
 function readFileAsDataUrl(file) {

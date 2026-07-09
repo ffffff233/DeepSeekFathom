@@ -8,6 +8,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import threading
+import time
 import traceback
 from typing import Any
 from uuid import uuid4
@@ -70,6 +71,8 @@ class DesktopApi:
         self._active_turn_session_id: str | None = None
         self._active_turn_id: str | None = None
         self._pending_turn: dict[str, Any] | None = None
+        self._abandoned_turn_ids: set[str] = set()
+        self._models_cache: dict[str, tuple[float, list[str]]] = {}
         self._last_usage = UsageStats()
         self._usage_total = UsageStats()
         self._usage_by_session: dict[str, UsageStats] = {}
@@ -149,10 +152,18 @@ class DesktopApi:
         return self.boot()
 
     def models(self) -> dict[str, Any]:
+        api_marker = str(hash(self.settings.api_key or ""))
+        key = "|".join([self.settings.provider_format, self.settings.base_url, self.settings.model, api_marker])
+        cached = self._models_cache.get(key)
+        if cached and time.monotonic() - cached[0] < 600:
+            return {"ok": True, "models": cached[1], "cached": True}
         try:
-            models = DeepSeekClient(self.settings).models()
+            models = DeepSeekClient(self.settings, timeout=8.0).models()
+            self._models_cache[key] = (time.monotonic(), models)
             return {"ok": True, "models": models}
         except Exception as exc:
+            if cached and cached[1]:
+                return {"ok": True, "models": cached[1], "cached": True, "stale": True, "error": str(exc)}
             return {"ok": False, "error": str(exc), "models": [self.settings.model]}
 
     def test_connection(self, data: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -463,6 +474,9 @@ class DesktopApi:
         if not self._running:
             return {"ok": True, "running": False}
         self._cancel_requested = True
+        cancelled_turn_id = self._active_turn_id
+        if cancelled_turn_id:
+            self._abandoned_turn_ids.add(cancelled_turn_id)
         # unblock any pending approval so the turn can wind down
         for pending in list(self._approvals.values()):
             pending["decision"] = False
@@ -472,7 +486,11 @@ class DesktopApi:
             "sessionId": self._active_turn_session_id,
             "turnId": self._active_turn_id,
         })
-        return {"ok": True, "running": True}
+        self._running = False
+        self._cancel_requested = False
+        self._active_turn_session_id = None
+        self._active_turn_id = None
+        return {"ok": True, "running": False}
 
     def _request_approval(self, name: str, arguments: dict[str, Any]) -> bool:
         """Blocking approval bridge: emit a request to the UI, wait for the user's
@@ -522,26 +540,33 @@ class DesktopApi:
             self._active_turn_id = turn_id
 
             def emit_turn(event: str, payload: dict[str, Any] | None = None) -> None:
+                if turn_id in self._abandoned_turn_ids and event != "turn:cancelled":
+                    return
                 scoped = dict(payload or {})
                 scoped.setdefault("sessionId", turn_session_id)
                 scoped.setdefault("turnId", turn_id)
                 self._emit(event, scoped)
 
+            def is_cancelled() -> bool:
+                return turn_id in self._abandoned_turn_ids or (
+                    self._cancel_requested and self._active_turn_id == turn_id
+                )
+
             try:
                 emit_turn("turn:start", {"prompt": prompt, "thinking": self.thinking.name})
 
                 def delta(text: str) -> None:
-                    if self._cancel_requested:
+                    if is_cancelled():
                         raise RuntimeError("turn cancelled")
                     emit_turn("assistant:delta", {"text": text})
 
                 def final(text: str) -> None:
-                    if self._cancel_requested:
+                    if is_cancelled():
                         raise RuntimeError("turn cancelled")
                     emit_turn("assistant:final", {"text": text})
 
                 def event(text: str) -> None:
-                    if self._cancel_requested:
+                    if is_cancelled():
                         raise RuntimeError("turn cancelled")
                     emit_turn("agent:event", parse_agent_event(text))
 
@@ -552,7 +577,7 @@ class DesktopApi:
                     thinking=self.thinking.name,
                     client=client,
                     approve=(lambda _n, _a: True) if self.mode in {"root", "yolo"} else self._request_approval,
-                ).run(prompt, stream=True, images=images or [], on_delta=delta, on_final=final, on_event=event, session=self.session, goal=goal)
+                ).run(prompt, stream=True, images=images or [], on_delta=delta, on_final=final, on_event=event, should_cancel=is_cancelled, session=self.session, goal=goal)
                 self._last_usage = client.usage
                 self._record_session_usage(result.session_id, client.usage)
                 # Only adopt the finished turn's session if the user hasn't switched to a
@@ -571,11 +596,13 @@ class DesktopApi:
             except Exception as exc:
                 emit_turn("turn:error", desktop_error_payload(exc))
             finally:
-                self._running = False
-                self._cancel_requested = False
-                self._active_turn_session_id = None
-                self._active_turn_id = None
-                self._start_pending_turn_if_any()
+                self._abandoned_turn_ids.discard(turn_id)
+                if self._active_turn_id == turn_id:
+                    self._running = False
+                    self._cancel_requested = False
+                    self._active_turn_session_id = None
+                    self._active_turn_id = None
+                    self._start_pending_turn_if_any()
 
     def _record_session_usage(self, session_id: str | None, usage: UsageStats) -> None:
         if not session_id or not usage.source:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass
+import hashlib
 import json
 from typing import Iterator
 
@@ -112,6 +113,49 @@ def parse_usage_stats(data: dict, source: str) -> UsageStats:
     # Anthropic reports cache creation/read separately; "cached input" means read hits.
     cached += intval("cache_read_input_tokens")
     return UsageStats(input_tokens, output_tokens, cached, total_tokens, source)
+
+
+def prompt_cache_key(settings: Settings) -> str:
+    """Stable, non-secret cache key for providers/gateways that support prompt cache affinity."""
+    seed = "|".join(
+        [
+            "deepseek-tulagent",
+            settings.base_url or "",
+            settings.api_key or "",
+        ]
+    )
+    return hashlib.sha256(seed.encode("utf-8")).hexdigest()
+
+
+def cache_affinity_headers(settings: Settings) -> dict[str, str]:
+    return {"Session_id": prompt_cache_key(settings)}
+
+
+def apply_anthropic_cache_control(payload: dict) -> None:
+    """Inject Anthropic-compatible cache breakpoints without changing message meaning.
+
+    Strategy mirrors Codex/OpenCode-style adapters: cache the stable system prefix and
+    the second-to-last user turn so multi-turn conversations can reuse the large prefix.
+    """
+    system = payload.get("system")
+    if isinstance(system, str) and system.strip():
+        payload["system"] = [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}]
+    elif isinstance(system, list) and system:
+        last = system[-1]
+        if isinstance(last, dict) and not last.get("cache_control"):
+            last["cache_control"] = {"type": "ephemeral"}
+
+    user_indices = [i for i, msg in enumerate(payload.get("messages", [])) if isinstance(msg, dict) and msg.get("role") == "user"]
+    if len(user_indices) < 2:
+        return
+    message = payload["messages"][user_indices[-2]]
+    content = message.get("content")
+    if isinstance(content, str):
+        message["content"] = [{"type": "text", "text": content, "cache_control": {"type": "ephemeral"}}]
+    elif isinstance(content, list) and content:
+        last_block = content[-1]
+        if isinstance(last_block, dict) and last_block.get("type") == "text" and not last_block.get("cache_control"):
+            last_block["cache_control"] = {"type": "ephemeral"}
 
 
 def _split_data_url(data_url: str) -> tuple[str, str]:
@@ -317,6 +361,7 @@ class DeepSeekClient:
             "Authorization": f"Bearer {self.settings.api_key}",
             "Content-Type": "application/json",
         }
+        headers.update(cache_affinity_headers(self.settings))
         url = f"{self._base_url()}/chat/completions"
         if not stream:
             response = self._http().post(url, headers=headers, json=payload)
@@ -375,6 +420,7 @@ class DeepSeekClient:
             "input": [{"role": m.role, "content": responses_content(m)} for m in turns],
             "max_output_tokens": self._output_tokens(),
             "stream": stream,
+            "prompt_cache_key": prompt_cache_key(self.settings),
         }
         if system:
             payload["instructions"] = system
@@ -383,6 +429,7 @@ class DeepSeekClient:
             "Authorization": f"Bearer {self.settings.api_key}",
             "Content-Type": "application/json",
         }
+        headers.update(cache_affinity_headers(self.settings))
         url = f"{self._base_url()}/responses"
         if not stream:
             response = self._http().post(url, headers=headers, json=payload)
@@ -440,6 +487,7 @@ class DeepSeekClient:
         if system:
             payload["system"] = system
         apply_thinking_payload(payload, self.settings)
+        apply_anthropic_cache_control(payload)
         headers = {
             "x-api-key": self.settings.api_key or "",
             "anthropic-version": "2023-06-01",
