@@ -1,5 +1,25 @@
 # 更新记录 / Changelog
 
+## v0.1.99
+
+中文：
+
+- **新增：`inspect_media` 视觉检查工具**。模型拿到图片/视频路径后可以主动调用；图片直接作为视觉输入，视频用 `ffmpeg` 抽代表帧，下一轮模型会真正看到截图/帧，不再只看文件路径。
+- **新增：桌面端显示截图/视频帧**。`inspect_media` 的截图结果会在工具卡里展示给用户，能看到模型“看过”的画面。
+- **优化：上传视频自动抽帧**。桌面端上传视频时会保存原文件并抽帧，抽出的帧随消息作为 vision images 发给上游。
+- **修复：附件发送后本地消息看不到路径，恢复会话后才突然出现路径**。现在本地发送时就显示稳定的附件块；文件夹/普通附件展示路径但不污染正文。
+- **调整：任务目标 dock 默认展开，状态只由 `todo_write` 或手动点击更新**。不再靠助手回复里的“已完成”文字猜测并乱打勾。
+- **同步：包版本和 README 安装链接更新到 `v0.1.99`**。
+
+English:
+
+- **Added: `inspect_media` visual inspection tool**. The model can inspect image/video paths; images are attached directly, while videos are sampled into frames via `ffmpeg` and sent to the next model turn.
+- **Added: desktop screenshot/frame previews**. `inspect_media` results render in the tool card so the user can see what the model inspected.
+- **Improved: video uploads auto-sample frames**. Uploaded videos are saved and representative frames are sent as vision images.
+- **Fixed: attachment paths only appearing after reopening a session**. Sent messages now show a stable attachment block immediately.
+- **Changed: task-goal dock opens by default and status changes only via `todo_write` or manual clicks**, not fragile text guessing.
+- **Synced: package version and README install links are now `v0.1.99`**.
+
 ## v0.1.98
 
 中文：

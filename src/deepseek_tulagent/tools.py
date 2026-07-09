@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+import base64
 import json
+import mimetypes
 import os
 from pathlib import Path
 import shutil
@@ -28,6 +30,7 @@ class ToolError(RuntimeError):
 class ToolResult:
     ok: bool
     output: str
+    images: list[str] | None = None
 
     def to_message(self) -> str:
         return json.dumps({"ok": self.ok, "output": self.output}, ensure_ascii=False)
@@ -48,6 +51,7 @@ TOOL_DESCRIPTIONS = {
     "clone_repo": "gated network+write: clone a Git/GitHub repository with mirror and archive fallbacks",
     "web_search": "network: search the web via Baidu/Bing/DuckDuckGo and return result snippets",
     "todo_write": "session: create or update the visible task list with pending/in_progress/completed/cancelled items",
+    "inspect_media": "read+vision: inspect an image/video path by attaching screenshots or sampled frames to the next model turn",
     "start_service": "gated shell: start background service with pid/log tracking",
     "stop_service": "gated shell: stop a tracked background service",
     "service_status": "read: inspect a tracked background service",
@@ -89,6 +93,7 @@ class ToolRegistry:
             "clone_repo": self.clone_repo,
             "web_search": self.web_search,
             "todo_write": self.todo_write,
+            "inspect_media": self.inspect_media,
             "start_service": self.start_service,
             "stop_service": self.stop_service,
             "service_status": self.service_status,
@@ -395,6 +400,31 @@ class ToolRegistry:
                     seen_in_progress = True
             todos.append({"id": f"todo-{index + 1}", "content": content[:500], "status": status})
         return ToolResult(True, json.dumps({"todos": todos}, ensure_ascii=False))
+
+    def inspect_media(self, arguments: dict[str, Any]) -> ToolResult:
+        path = self.resolve_workspace_path(require_str(arguments, "path"))
+        max_frames = max(1, min(int(arguments.get("max_frames", arguments.get("maxFrames", 6)) or 6), 12))
+        if not path.exists() or not path.is_file():
+            return ToolResult(False, f"media file not found: {self._display_path(path)}")
+        media = mimetypes.guess_type(path.name)[0] or ""
+        images: list[str] = []
+        kind = "file"
+        if media.startswith("image/") or path.suffix.lower() in IMAGE_EXTENSIONS:
+            images = [image_data_url(path, media or "image/png")]
+            kind = "image"
+        elif media.startswith("video/") or path.suffix.lower() in VIDEO_EXTENSIONS:
+            images = extract_video_frame_data_urls(path, max_frames=max_frames)
+            kind = "video"
+        else:
+            return ToolResult(False, f"unsupported media type for inspect_media: {path.name}")
+        if not images:
+            return ToolResult(False, f"could not extract visual frames from {self._display_path(path)}")
+        output = (
+            f"inspected {kind}: {self._display_path(path)}\n"
+            f"attached {len(images)} visual frame(s) for the next model turn.\n"
+            "Use the attached image(s) to answer the user's media request."
+        )
+        return ToolResult(True, output, images=images)
 
     def start_service(self, arguments: dict[str, Any]) -> ToolResult:
         if not self.allow_shell:
@@ -932,6 +962,79 @@ def fetch_direct_url(url: str, *, timeout: int) -> ToolResult:
     title = clean_html(title_match.group(1)) if title_match else url
     text = clean_page_text(html)
     return ToolResult(True, f"[URL]\n- {title}\n  {url}\n  {text[:1800]}")
+
+
+IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"}
+VIDEO_EXTENSIONS = {".mp4", ".mov", ".m4v", ".webm", ".mkv", ".avi", ".mpeg", ".mpg"}
+
+
+def image_data_url(path: Path, media: str = "image/png") -> str:
+    return f"data:{media};base64," + base64.b64encode(path.read_bytes()).decode("ascii")
+
+
+def video_duration_seconds(path: Path, timeout: int = 8) -> float | None:
+    ffprobe = shutil.which("ffprobe")
+    if not ffprobe:
+        return None
+    try:
+        completed = subprocess.run(
+            [ffprobe, "-v", "error", "-show_entries", "format=duration", "-of", "default=nw=1:nk=1", str(path)],
+            text=True,
+            capture_output=True,
+            timeout=timeout,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if completed.returncode != 0:
+        return None
+    try:
+        duration = float(completed.stdout.strip())
+    except ValueError:
+        return None
+    return duration if duration > 0 else None
+
+
+def extract_video_frame_data_urls(path: Path, *, max_frames: int = 6, timeout: int = 20) -> list[str]:
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        return []
+    duration = video_duration_seconds(path) or 0
+    if duration > 0:
+        count = max(1, min(max_frames, int(duration) if duration >= 1 else 1))
+        timestamps = [duration * (i + 1) / (count + 1) for i in range(count)]
+    else:
+        timestamps = [0]
+    frame_dir = path.parent / f".{path.stem}_inspect_frames"
+    frame_dir.mkdir(parents=True, exist_ok=True)
+    frames: list[str] = []
+    for index, timestamp in enumerate(timestamps, 1):
+        out = frame_dir / f"frame_{index:02d}.jpg"
+        try:
+            completed = subprocess.run(
+                [
+                    ffmpeg,
+                    "-y",
+                    "-ss",
+                    f"{timestamp:.3f}",
+                    "-i",
+                    str(path),
+                    "-frames:v",
+                    "1",
+                    "-vf",
+                    "scale='min(768,iw)':-2",
+                    "-q:v",
+                    "4",
+                    str(out),
+                ],
+                text=True,
+                capture_output=True,
+                timeout=timeout,
+            )
+        except (OSError, subprocess.SubprocessError):
+            continue
+        if completed.returncode == 0 and out.exists() and out.stat().st_size:
+            frames.append(image_data_url(out, "image/jpeg"))
+    return frames
 
 
 def clean_page_text(html: str) -> str:

@@ -36,6 +36,7 @@ Available tools:
 - clone_repo(repo or url, path, branch?, timeout?)
 - web_search(query, max_results?, timeout?, engines?, language?, fetch_pages?, page_chars?): search via Baidu/Bing/DuckDuckGo and return result snippets; engines may be a comma-separated override such as "bing,duckduckgo"; set fetch_pages to enrich top results with short robots-checked page text
 - todo_write(todos): create or update the visible task list. todos is an array of {content, status}; status is pending, in_progress, completed, or cancelled.
+- inspect_media(path, max_frames?): inspect an image or video path. For video, extracts representative frames. Use this when the user asks about screenshots, images, videos, cutting/editing video, or gives a media file path.
 - start_service(name, command)
 - stop_service(name)
 - service_status(name)
@@ -89,6 +90,7 @@ KNOWN_TOOL_NAMES = {
     "clone_repo",
     "web_search",
     "todo_write",
+    "inspect_media",
     "start_service",
     "stop_service",
     "service_status",
@@ -231,6 +233,7 @@ class TuLAgent:
             if on_event:
                 on_event(f"tool {name} {summarize_arguments(arguments)}")
             try:
+                tool_images: list[str] = []
                 if name == "ask_user":
                     content = self._ask_user(arguments)
                 elif name == "delegate_agent":
@@ -240,15 +243,20 @@ class TuLAgent:
                 else:
                     result = self.tools.run(name, arguments)
                     content = result.to_message()
+                    tool_images = list(getattr(result, "images", None) or [])
             except (ToolError, ValueError, OSError, subprocess.SubprocessError, TypeError) as exc:  # type: ignore[name-defined]
                 content = json.dumps({"ok": False, "output": str(exc)}, ensure_ascii=False)
+                tool_images = []
             if on_event:
                 _trimmed = trim_tool_content(content)
                 _b64 = base64.b64encode(_trimmed.encode("utf-8")).decode("ascii")
                 on_event(f"done {name} {_b64}")
+                if tool_images:
+                    media_payload = json.dumps({"images": tool_images}, ensure_ascii=False)
+                    on_event(f"media {name} {base64.b64encode(media_payload.encode('utf-8')).decode('ascii')}")
                 if name == "todo_write":
                     on_event(f"todo {_b64}")
-            session.append(Message("user", tool_result_message(name, trim_tool_content(content))))
+            session.append(Message("user", tool_result_message(name, trim_tool_content(content)), images=tool_images))
             last_turn_had_tool_result = True
             last_turn_had_tool_error = is_failed_tool_result(content)
             if should_cancel and should_cancel():

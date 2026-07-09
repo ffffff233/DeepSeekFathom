@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import base64
 import json
 import io
 import os
@@ -1199,6 +1200,16 @@ def test_todo_write_normalizes_visible_task_list(tmp_path: Path):
         {"id": "todo-2", "content": "修复代码", "status": "pending"},
         {"id": "todo-3", "content": "运行测试", "status": "completed"},
     ]
+
+
+def test_inspect_media_attaches_image_to_tool_result(tmp_path: Path):
+    image = tmp_path / "shot.png"
+    image.write_bytes(base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAFgwJ/lH9dtwAAAABJRU5ErkJggg=="))
+    tools = ToolRegistry(tmp_path, policy=ApprovalPolicy.from_mode("root"))
+    result = tools.run("inspect_media", {"path": "shot.png"})
+    assert result.ok is True
+    assert result.images and result.images[0].startswith("data:image/png;base64,")
+    assert "attached 1 visual frame" in result.output
 
 
 def test_agent_emits_todo_event_for_todo_write(tmp_path: Path):

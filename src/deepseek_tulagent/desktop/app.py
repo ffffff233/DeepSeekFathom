@@ -3,7 +3,10 @@ from __future__ import annotations
 from dataclasses import asdict, replace as replace_settings
 import base64
 import json
+import mimetypes
 from pathlib import Path
+import shutil
+import subprocess
 import threading
 import traceback
 from typing import Any
@@ -282,6 +285,9 @@ class DesktopApi:
     def save_upload(self, file: dict[str, Any]) -> dict[str, Any]:
         name = safe_upload_name(str(file.get("name") or "upload.bin"))
         content = str(file.get("content") or "")
+        media_type = ""
+        if content.startswith("data:") and "," in content:
+            media_type = content[5:].split(";", 1)[0]
         if "," in content:
             content = content.split(",", 1)[1]
         data = base64.b64decode(content)
@@ -289,7 +295,13 @@ class DesktopApi:
         upload_dir.mkdir(parents=True, exist_ok=True)
         path = upload_dir / name
         path.write_bytes(data)
-        return {"ok": True, "name": name, "path": str(path), "size": len(data)}
+        result = {"ok": True, "name": name, "path": str(path), "size": len(data)}
+        if is_video_upload(name, media_type):
+            frames = extract_video_frames(path)
+            result["kind"] = "video"
+            result["frames"] = frames
+            result["frameCount"] = len(frames)
+        return result
 
     def send(self, payload: dict[str, Any]) -> dict[str, Any]:
         prompt = str(payload.get("prompt") or "").strip()
@@ -298,9 +310,10 @@ class DesktopApi:
         images = [str(u) for u in (payload.get("images") or []) if isinstance(u, str) and u.startswith("data:")]
         non_image = [item for item in attachments if isinstance(item, dict)]
         if non_image:
-            prompt += "\n\nAttached files:\n" + "\n".join(
+            prompt += "\n\n附件文件：\n" + "\n".join(
                 f"- {item.get('name')}: {item.get('path')} ({item.get('size')} bytes)" for item in non_image
             )
+            prompt += "\n如果需要查看图片/视频内容，请调用 inspect_media(path)。如果是文本文件，请调用 read_file(path)。"
         if images and not prompt:
             prompt = "请看这张图片。"
         if not prompt and not images:
@@ -703,6 +716,16 @@ def parse_agent_event(text: str) -> dict[str, str]:
             except Exception:
                 output = ""
         return {"kind": "todo", "name": "todo_write", "detail": output}
+    if text.startswith("media "):
+        rest = text.removeprefix("media ").strip()
+        name, _, b64 = rest.partition(" ")
+        output = ""
+        if b64:
+            try:
+                output = base64.b64decode(b64).decode("utf-8", "replace")
+            except Exception:
+                output = ""
+        return {"kind": "media", "name": name or "media", "detail": output}
     if text.startswith("thinking pass "):
         return {"kind": "thinking", "name": "internal", "detail": text}
     if text.startswith("thinkingnote "):
@@ -761,6 +784,82 @@ def safe_upload_name(name: str) -> str:
         cleaned = cleaned.replace("..", ".")
     cleaned = cleaned.strip(". ")
     return cleaned[:120] or "upload.bin"
+
+
+VIDEO_EXTENSIONS = {".mp4", ".mov", ".m4v", ".webm", ".mkv", ".avi", ".mpeg", ".mpg"}
+
+
+def is_video_upload(name: str, media_type: str = "") -> bool:
+    guessed = mimetypes.guess_type(name)[0] or ""
+    return media_type.startswith("video/") or guessed.startswith("video/") or Path(name).suffix.lower() in VIDEO_EXTENSIONS
+
+
+def video_duration_seconds(path: Path, timeout: int = 8) -> float | None:
+    ffprobe = shutil.which("ffprobe")
+    if not ffprobe:
+        return None
+    try:
+        completed = subprocess.run(
+            [ffprobe, "-v", "error", "-show_entries", "format=duration", "-of", "default=nw=1:nk=1", str(path)],
+            text=True,
+            capture_output=True,
+            timeout=timeout,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if completed.returncode != 0:
+        return None
+    try:
+        duration = float(completed.stdout.strip())
+    except ValueError:
+        return None
+    return duration if duration > 0 else None
+
+
+def extract_video_frames(path: Path, *, max_frames: int = 6, timeout: int = 20) -> list[str]:
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        return []
+    duration = video_duration_seconds(path) or 0
+    if duration > 0:
+        count = max(1, min(max_frames, int(duration) if duration >= 1 else 1))
+        timestamps = [duration * (i + 1) / (count + 1) for i in range(count)]
+    else:
+        timestamps = [0]
+    frames: list[str] = []
+    frame_dir = path.parent / f".{path.stem}_frames"
+    frame_dir.mkdir(parents=True, exist_ok=True)
+    for index, timestamp in enumerate(timestamps, 1):
+        out = frame_dir / f"frame_{index:02d}.jpg"
+        try:
+            completed = subprocess.run(
+                [
+                    ffmpeg,
+                    "-y",
+                    "-ss",
+                    f"{timestamp:.3f}",
+                    "-i",
+                    str(path),
+                    "-frames:v",
+                    "1",
+                    "-vf",
+                    "scale='min(768,iw)':-2",
+                    "-q:v",
+                    "4",
+                    str(out),
+                ],
+                text=True,
+                capture_output=True,
+                timeout=timeout,
+            )
+        except (OSError, subprocess.SubprocessError):
+            continue
+        if completed.returncode != 0 or not out.exists():
+            continue
+        data = out.read_bytes()
+        if data:
+            frames.append("data:image/jpeg;base64," + base64.b64encode(data).decode("ascii"))
+    return frames
 
 
 def main() -> None:

@@ -54,14 +54,14 @@ deepseekTul desktop
 On Windows after installation:
 
 ```powershell
-py -3 -m pip install --upgrade "deepseek-tulagent[desktop] @ https://github.com/ffffff233/deepseek-tulagent/archive/refs/tags/v0.1.98.tar.gz"
+py -3 -m pip install --upgrade "deepseek-tulagent[desktop] @ https://github.com/ffffff233/deepseek-tulagent/archive/refs/tags/v0.1.99.tar.gz"
 deepseekTulDesktop
 ```
 
 Native Windows PowerShell:
 
 ```powershell
-py -3 -m pip install --upgrade https://github.com/ffffff233/deepseek-tulagent/archive/refs/tags/v0.1.98.tar.gz
+py -3 -m pip install --upgrade https://github.com/ffffff233/deepseek-tulagent/archive/refs/tags/v0.1.99.tar.gz
 deepseekTul config set --base-url https://api.deepseek.com --api-key sk-... --model deepseek-v4-flash
 deepseekTul doctor --live
 deepseekTul
@@ -70,7 +70,7 @@ deepseekTul
 Windows CMD:
 
 ```bat
-py -3 -m pip install --upgrade https://github.com/ffffff233/deepseek-tulagent/archive/refs/tags/v0.1.98.tar.gz
+py -3 -m pip install --upgrade https://github.com/ffffff233/deepseek-tulagent/archive/refs/tags/v0.1.99.tar.gz
 deepseekTul version
 deepseekTul
 ```
@@ -81,7 +81,7 @@ The desktop app uses `pywebview` and is suitable for native Windows use.
 If `git clone` is blocked by local proxy/git configuration, install directly from the tagged source tarball instead:
 
 ```bash
-python3 -m pip install --upgrade https://github.com/ffffff233/deepseek-tulagent/archive/refs/tags/v0.1.98.tar.gz
+python3 -m pip install --upgrade https://github.com/ffffff233/deepseek-tulagent/archive/refs/tags/v0.1.99.tar.gz
 ```
 
 Proxy-compatible examples:
@@ -89,7 +89,7 @@ Proxy-compatible examples:
 ```bash
 export HTTPS_PROXY=http://127.0.0.1:7890
 export HTTP_PROXY=http://127.0.0.1:7890
-python3 -m pip install --upgrade https://github.com/ffffff233/deepseek-tulagent/archive/refs/tags/v0.1.98.tar.gz
+python3 -m pip install --upgrade https://github.com/ffffff233/deepseek-tulagent/archive/refs/tags/v0.1.99.tar.gz
 ```
 
 Windows PowerShell proxy example:
@@ -97,7 +97,7 @@ Windows PowerShell proxy example:
 ```powershell
 $env:HTTPS_PROXY="http://127.0.0.1:7890"
 $env:HTTP_PROXY="http://127.0.0.1:7890"
-py -3 -m pip install --upgrade https://github.com/ffffff233/deepseek-tulagent/archive/refs/tags/v0.1.98.tar.gz
+py -3 -m pip install --upgrade https://github.com/ffffff233/deepseek-tulagent/archive/refs/tags/v0.1.99.tar.gz
 ```
 
 Windows CMD proxy example:
@@ -105,7 +105,7 @@ Windows CMD proxy example:
 ```bat
 set HTTPS_PROXY=http://127.0.0.1:7890
 set HTTP_PROXY=http://127.0.0.1:7890
-py -3 -m pip install --upgrade https://github.com/ffffff233/deepseek-tulagent/archive/refs/tags/v0.1.98.tar.gz
+py -3 -m pip install --upgrade https://github.com/ffffff233/deepseek-tulagent/archive/refs/tags/v0.1.99.tar.gz
 ```
 
 When asking the agent to fetch another GitHub repository, say something like `clone owner/repo into path`. The agent should use `clone_repo`, which tries direct git, mirror URLs, and GitHub archive download before asking you to configure `HTTP_PROXY`, `HTTPS_PROXY`, or git proxy settings.
@@ -384,6 +384,7 @@ Available tools:
 - `search_text`: search text inside workspace files
 - `web_search`: search the web through Baidu/Bing/DuckDuckGo; supports `engines`, `language`, and opt-in `fetch_pages` with robots.txt checks and short excerpts
 - `todo_write`: create and update the visible task-goal checklist for non-trivial work; the desktop app shows it as a collapsible dock above the composer
+- `inspect_media`: inspect an image/video path; videos are sampled into frames and both the model and desktop UI receive the screenshots
 - `git_status`: show short git status
 - `run_shell`: run a command in the workspace
 - `read_file`: read a UTF-8 text file

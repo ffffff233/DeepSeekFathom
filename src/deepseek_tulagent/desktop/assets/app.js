@@ -18,7 +18,7 @@ const state = {
   pendingOutbound: false,
   pendingOutboundId: "",
   cancelPromise: null,
-  goalCollapsed: true,
+  goalCollapsed: false,
   goalsBySession: {},
   katexRenderToString: null,
   katexLoadPromise: null,
@@ -203,7 +203,6 @@ window.DeepSeekDesktop = {
       const bubble = state.currentAssistant.querySelector(".bubble");
       bubble.dataset.raw = text;
       renderBubble(bubble);
-      settleGoalAfterText(text);
       // a tool call may follow in this same turn — let the next delta open a new bubble
       state.currentAssistant = null;
       scrollMessages();
@@ -223,6 +222,8 @@ window.DeepSeekDesktop = {
         addSubEvent(sub, payload);
       } else if (payload.kind === "todo") {
         applyTodoPayload(payload.detail, sid || currentSessionId());
+      } else if (payload.kind === "media") {
+        showMediaFrames(payload.detail);
       } else if (payload.kind === "tool") {
         hideThinking();
         // a tool card starts a new visual block — text after it must open a NEW
@@ -280,7 +281,6 @@ window.DeepSeekDesktop = {
       state.suppressStream = false;
       if (!tid || tid === state.activeTurnId) state.activeTurnId = "";
       state.pendingOutbound = false;
-      settleGoalAfterText("");
       setRunning(false);
       dismissApproval();
       const summary = payload.summary || payload.error || "运行失败";
@@ -300,7 +300,6 @@ window.DeepSeekDesktop = {
       state.suppressStream = false;
       if (!tid || tid === state.activeTurnId) state.activeTurnId = "";
       state.pendingOutbound = false;
-      settleGoalAfterText("");
       setRunning(false);
       dismissApproval();
       if (!wasSuppressed) {  // only if not already handled by the instant-cancel path
@@ -555,23 +554,6 @@ function markGoalRunning() {
   if (next < 0) return;
   todos[next] = { ...todos[next], status: "in_progress" };
   state.goalsBySession[key] = todos;
-  saveGoalStore();
-  syncActiveGoalFromStore();
-  renderGoalDock();
-}
-
-function settleGoalAfterText(text) {
-  const key = goalSessionKey();
-  const todos = currentGoalTodos().slice();
-  if (!todos.length) return;
-  const terminal = /目标已完成|目标完成|已经达成目标|全部完成|已完成/.test(String(text || ""));
-  const active = todos.findIndex((todo) => todo.status === "in_progress");
-  if (terminal) {
-    state.goalsBySession[key] = todos.map((todo) => ({ ...todo, status: "completed" }));
-  } else if (active >= 0) {
-    todos[active] = { ...todos[active], status: "pending" };
-    state.goalsBySession[key] = todos;
-  }
   saveGoalStore();
   syncActiveGoalFromStore();
   renderGoalDock();
@@ -834,6 +816,25 @@ function todoSnapshotHtml(output) {
   return todos.map((todo) => `${mark(todo.status)} ${escapeHtml(todo.content)}`).join("\n");
 }
 
+function showMediaFrames(detail) {
+  let data = {};
+  try { data = JSON.parse(String(detail || "")); } catch (_) {}
+  const images = Array.isArray(data.images) ? data.images : [];
+  if (!images.length) return;
+  const block = addEvent("media", "截图/视频帧", `已查看 ${images.length} 张画面`);
+  const pre = block && block.querySelector("pre");
+  if (!pre) return;
+  pre.innerHTML = "";
+  const strip = document.createElement("div");
+  strip.className = "msgImages mediaFrames";
+  images.forEach((url) => {
+    const img = document.createElement("img");
+    img.src = url;
+    strip.append(img);
+  });
+  pre.append(strip);
+}
+
 const MAX_DISPLAY_CHARS = 40000;
 function truncateForDisplay(text) {
   if (text.length <= MAX_DISPLAY_CHARS) return text;
@@ -853,6 +854,7 @@ function addEvent(kind, name, detail) {
   $("messages").append(details);
   scrollMessages();
   mirror(`[${labelFor(kind)}] ${name || ""} ${detail || ""}`.trim());
+  return details;
 }
 
 /* ---------- subagent group: an expandable card that shows the subagent working ---------- */
@@ -1222,7 +1224,7 @@ $("send").onclick = async () => {
   state.images = [];
   renderAttachments();
   // show the user's message (with image thumbnails) immediately
-  addUserMessageWithImages(outgoing, images);
+  addUserMessageWithImages(outgoing, images, attachments);
   state.suppressLocalUserEcho = true;  // turn:start would double-add it
   state.stickToBottom = true;
   setRunning(true);
@@ -1264,8 +1266,9 @@ $("send").onclick = async () => {
   }
 };
 
-function addUserMessageWithImages(text, images) {
+function addUserMessageWithImages(text, images, attachments) {
   const row = addMessage("user", text || "");
+  const bubble = row.querySelector(".bubble");
   if (images && images.length) {
     const strip = document.createElement("div");
     strip.className = "msgImages";
@@ -1274,7 +1277,29 @@ function addUserMessageWithImages(text, images) {
       el.src = img.url;
       strip.append(el);
     });
-    row.querySelector(".bubble").append(strip);
+    bubble.append(strip);
+  }
+  if (attachments && attachments.length) {
+    const list = document.createElement("div");
+    list.className = "msgFiles";
+    attachments.forEach((file) => {
+      const item = document.createElement("div");
+      item.className = "msgFile";
+      const extra = file.kind === "video" && file.frameCount ? ` · 已抽 ${file.frameCount} 帧` : "";
+      item.textContent = `${file.name || "file"} · ${file.path || ""}${extra}`;
+      list.append(item);
+      if (file.frames && file.frames.length) {
+        const frames = document.createElement("div");
+        frames.className = "msgImages mediaFrames";
+        file.frames.forEach((url) => {
+          const el = document.createElement("img");
+          el.src = url;
+          frames.append(el);
+        });
+        list.append(frames);
+      }
+    });
+    bubble.append(list);
   }
   return row;
 }
@@ -1641,7 +1666,12 @@ async function uploadFile(file, relPath) {
       return;
     }
     const saved = await window.pywebview.api.save_upload({ name: relPath || file.name, content });
-    if (saved && saved.ok) state.attachments.push(saved);
+    if (saved && saved.ok) {
+      state.attachments.push(saved);
+      if (saved.kind === "video" && Array.isArray(saved.frames)) {
+        saved.frames.forEach((url, index) => state.images.push({ name: `${saved.name || "video"} frame ${index + 1}`, url }));
+      }
+    }
   } catch (_) { /* skip unreadable file */ }
 }
 
