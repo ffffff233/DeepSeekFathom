@@ -76,6 +76,12 @@ RECOVER_AFTER_TOOL_FAILURE_PROMPT = (
     "Continue with one better tool call using the error details, or explicitly state that the task is blocked."
 )
 
+CONTINUE_AFTER_TODO_PROMPT = (
+    "You wrote the task goals with todo_write. Do not stop at the checklist. "
+    "Continue now with the first in_progress task using the required tool call. "
+    "Update todo_write again when a task starts or completes."
+)
+
 REQUIRE_TODO_WRITE_PROMPT = (
     "This is a non-trivial multi-step task. Your first action must be a todo_write tool call. "
     "Do not describe the plan in prose. Return exactly one tool JSON object now, using todo_write with concrete task goals. "
@@ -156,6 +162,7 @@ class TuLAgent:
         rounds = 0
         last_turn_had_tool_result = False
         last_turn_had_tool_error = False
+        last_tool_name: str | None = None
         pending_internal_prompt: str | None = None
         round_limit = max_tool_rounds or self.settings.max_tool_rounds
         complex_task = is_complex_task(prompt)
@@ -226,6 +233,12 @@ class TuLAgent:
                     todo_enforced = True
                     continue
                 assistant_text = plainify_assistant_text(assistant_text)
+                if last_turn_had_tool_result and last_tool_name == "todo_write" and not declares_blocked_or_complete(assistant_text):
+                    if stream and on_final:
+                        on_final("")
+                    pending_internal_prompt = CONTINUE_AFTER_TODO_PROMPT
+                    last_turn_had_tool_result = False
+                    continue
                 if stream and on_final:
                     on_final(assistant_text)
                 elif stream and held_parts and on_delta:
@@ -258,6 +271,7 @@ class TuLAgent:
                 todo_was_written = True
             if on_event:
                 on_event(f"tool {name} {summarize_arguments(arguments)}")
+            event_content: str | None = None
             try:
                 tool_images: list[str] = []
                 if name == "ask_user":
@@ -269,12 +283,14 @@ class TuLAgent:
                 else:
                     result = self.tools.run(name, arguments)
                     content = result.to_message()
+                    event_content = result.output if name == "todo_write" else content
                     tool_images = list(getattr(result, "images", None) or [])
             except (ToolError, ValueError, OSError, subprocess.SubprocessError, TypeError) as exc:  # type: ignore[name-defined]
                 content = json.dumps({"ok": False, "output": str(exc)}, ensure_ascii=False)
+                event_content = content
                 tool_images = []
             if on_event:
-                _trimmed = trim_tool_content(content)
+                _trimmed = trim_tool_content(event_content if event_content is not None else content)
                 _b64 = base64.b64encode(_trimmed.encode("utf-8")).decode("ascii")
                 on_event(f"done {name} {_b64}")
                 if tool_images:
@@ -285,6 +301,7 @@ class TuLAgent:
             session.append(Message("user", tool_result_message(name, trim_tool_content(content)), images=tool_images))
             last_turn_had_tool_result = True
             last_turn_had_tool_error = is_failed_tool_result(content)
+            last_tool_name = name
             if should_cancel and should_cancel():
                 raise RuntimeError("turn cancelled")
             if stop_after_tool:

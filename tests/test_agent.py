@@ -755,7 +755,7 @@ def test_complex_task_requires_todo_write_before_prose(tmp_path: Path):
                 assert "Do not describe the plan in prose" in messages[-1].content
                 return '{"tool":"todo_write","arguments":{"todos":[{"content":"定位问题","status":"in_progress"},{"content":"修复并验证","status":"pending"}]}}'
             assert "todo_write" in messages[-1].content
-            return "任务已启动。"
+            return "已完成：任务目标已列出。"
 
     events: list[str] = []
     result = TuLAgent(settings(tmp_path), mode="root", client=PlanOnlyThenTodoClient()).run(
@@ -763,7 +763,7 @@ def test_complex_task_requires_todo_write_before_prose(tmp_path: Path):
         on_event=events.append,
         max_tool_rounds=3,
     )
-    assert result.answer == "任务已启动。"
+    assert result.answer == "已完成：任务目标已列出。"
     assert any(event.startswith("todo ") for event in events)
 
 
@@ -1284,6 +1284,33 @@ def test_agent_emits_todo_event_for_todo_write(tmp_path: Path):
     parsed = parse_agent_event(todo_events[0])
     assert parsed["kind"] == "todo"
     assert "分析问题" in parsed["detail"]
+    detail = json.loads(parsed["detail"])
+    assert detail["todos"][0]["content"] == "分析问题"
+
+
+def test_agent_continues_after_required_todo_write(tmp_path: Path):
+    class TodoThenWorkClient:
+        def __init__(self):
+            self.calls = 0
+
+        def chat(self, messages):
+            self.calls += 1
+            if self.calls == 1:
+                return "我先列任务目标，然后开始处理。"
+            if self.calls == 2:
+                return '{"tool":"todo_write","arguments":{"todos":[{"content":"定位问题","status":"in_progress"},{"content":"修复问题","status":"pending"}]}}'
+            if self.calls == 3:
+                assert "TOOL_RESULT name=todo_write" in messages[-1].content
+                return '{"tool":"write_file","arguments":{"path":"done.txt","content":"ok"}}'
+            assert "TOOL_RESULT name=write_file" in messages[-1].content
+            return "已完成：done.txt 已写入。"
+
+    result = TuLAgent(settings(tmp_path), mode="root", client=TodoThenWorkClient()).run(
+        "检查这个复杂 bug，然后修复，再验证",
+        max_tool_rounds=4,
+    )
+    assert (tmp_path / "done.txt").read_text(encoding="utf-8") == "ok"
+    assert result.answer == "已完成：done.txt 已写入。"
 
 
 def test_web_search_uses_baidu_first(monkeypatch, tmp_path: Path):

@@ -37,6 +37,7 @@ const ICONS = {
   trash: '<path d="M3 6h18"/><path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/>',
   terminal: '<path d="M4 17l6-6-6-6"/><path d="M12 19h8"/>',
   dots: '<circle cx="5" cy="12" r="1.5" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.5" fill="currentColor" stroke="none"/>',
+  loader: '<path d="M12 2v4"/><path d="M12 18v4"/><path d="m4.93 4.93 2.83 2.83"/><path d="m16.24 16.24 2.83 2.83"/><path d="M2 12h4"/><path d="M18 12h4"/><path d="m4.93 19.07 2.83-2.83"/><path d="m16.24 7.76 2.83-2.83"/>',
   check: '<path d="M20 6L9 17l-5-5"/>',
   branch: '<path d="M4 4v8a3 3 0 0 0 3 3h13"/><path d="M16 11l4 4-4 4"/>',
   compact: '<path d="M17 11l-5-5-5 5"/><path d="M17 13l-5 5-5-5"/>',
@@ -494,6 +495,7 @@ function applyTodoPayload(detail, sessionId) {
   if (typeof detail === "string") {
     try { data = JSON.parse(detail); } catch (_) { data = {}; }
   }
+  data = unwrapTodoPayload(data);
   const todos = normalizeTodos(data && data.todos ? data.todos : data);
   const key = sessionId || goalSessionKey();
   if (todos.length) state.goalsBySession[key] = todos;
@@ -575,21 +577,27 @@ function renderGoalDock() {
   const done = todos.filter((todo) => todo.status === "completed").length;
   const total = todos.length;
   const active = todos.find((todo) => todo.status === "in_progress") || todos.find((todo) => todo.status !== "completed") || todos[todos.length - 1];
+  const pct = total ? Math.round((done / total) * 100) : 0;
   dock.hidden = false;
   dock.className = `goalDock${state.goalCollapsed ? " collapsed" : ""}${done === total ? " complete" : ""}`;
   dock.innerHTML = `
     <button class="goalHead" type="button" data-action="toggle-goal">
+      <span class="goalOrb">${done === total ? icon("check", 13) : icon("loader", 13)}</span>
+      <span class="goalMeta">
+        <span class="goalTitle">任务目标</span>
+        <span class="goalPreview">${escapeHtml(active ? active.content : "")}</span>
+      </span>
       <span class="goalCount">${done}/${total}</span>
-      <span class="goalTitle">任务目标</span>
-      <span class="goalPreview">${escapeHtml(active ? active.content : "")}</span>
       <span class="goalChevron">⌄</span>
     </button>
+    <div class="goalProgress"><span style="width:${pct}%"></span></div>
     <div class="goalList">
       ${todos.map((todo, index) => `
-        <button class="goalItem" type="button" data-goal-index="${index}" data-state="${escapeHtml(todo.status)}">
+        <div class="goalItem" data-goal-index="${index}" data-state="${escapeHtml(todo.status)}">
           <span class="goalCheck"></span>
           <span class="goalText">${escapeHtml(todo.content)}</span>
-        </button>
+          <span class="goalState">${goalStatusLabel(todo.status)}</span>
+        </div>
       `).join("")}
     </div>`;
   const toggle = dock.querySelector('[data-action="toggle-goal"]');
@@ -597,15 +605,13 @@ function renderGoalDock() {
     state.goalCollapsed = !state.goalCollapsed;
     renderGoalDock();
   };
-  dock.querySelectorAll("[data-goal-index]").forEach((item) => {
-    item.onclick = (event) => {
-      event.stopPropagation();
-      const index = Number(item.getAttribute("data-goal-index"));
-      const todo = currentGoalTodos()[index];
-      if (!todo) return;
-      setGoalStatus(index, todo.status === "completed" ? "pending" : "completed");
-    };
-  });
+}
+
+function goalStatusLabel(status) {
+  if (status === "completed") return "完成";
+  if (status === "in_progress") return "进行中";
+  if (status === "cancelled") return "取消";
+  return "等待";
 }
 
 async function refreshModels() {
@@ -814,10 +820,23 @@ function completeToolEvent(name, output) {
 function todoSnapshotHtml(output) {
   let data = {};
   try { data = JSON.parse(String(output || "")); } catch (_) {}
+  data = unwrapTodoPayload(data);
   const todos = normalizeTodos(data && data.todos ? data.todos : data);
   if (!todos.length) return '<span class="t-com">0 个任务</span>';
   const mark = (status) => status === "completed" ? "[✓]" : status === "in_progress" ? "[•]" : status === "cancelled" ? "[×]" : "[ ]";
   return todos.map((todo) => `${mark(todo.status)} ${escapeHtml(todo.content)}`).join("\n");
+}
+
+function unwrapTodoPayload(data) {
+  if (!data || typeof data !== "object") return data;
+  if (data.todos || Array.isArray(data)) return data;
+  if (typeof data.output === "string") {
+    try {
+      const inner = JSON.parse(data.output);
+      if (inner && typeof inner === "object") return inner;
+    } catch (_) {}
+  }
+  return data;
 }
 
 function showMediaFrames(detail) {

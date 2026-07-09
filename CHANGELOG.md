@@ -1,5 +1,21 @@
 # 更新记录 / Changelog
 
+## v0.1.102
+
+中文：
+
+- **修复：`todo_write` 工具卡和任务目标 dock 显示 0 个任务**。后端 `todo` 事件现在发送裸 `{todos:[...]}`；前端同时兼容旧的 `{"ok":true,"output":"..."}` 包裹格式。
+- **修复：列完任务目标后模型像停机**。`todo_write` 后如果模型只说“任务已启动/继续处理”这类中间话术，会被隐藏并强制继续执行第一个 `in_progress` 任务。
+- **优化：任务目标面板改为 OpenCode 风格只读执行进度**。不再需要用户手动点勾；状态由模型 `todo_write` 更新驱动，面板显示当前任务、完成数、进度条、状态 badge 和运行中脉冲。
+- **同步：包版本和 README 安装链接更新到 `v0.1.102`**。
+
+English:
+
+- **Fixed: `todo_write` tool cards and the task-goal dock showing 0 tasks**. Todo events now send raw `{todos:[...]}`, while the frontend remains compatible with the older wrapped result shape.
+- **Fixed: the agent stopping after listing task goals**. Non-terminal prose after `todo_write` is hidden and converted into an internal continuation that must execute the first `in_progress` task.
+- **Improved: task-goal UI now behaves like an OpenCode-style read-only progress panel**. Users no longer manually toggle tasks; model-driven `todo_write` updates control status, progress, badges, and the active-item pulse.
+- **Synced: package version and README install links are now `v0.1.102`**.
+
 ## v0.1.101
 
 中文：
