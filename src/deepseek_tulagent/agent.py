@@ -792,7 +792,62 @@ def is_internal_automation_prompt(text: str) -> bool:
 
 
 def filter_internal_automation_messages(messages: list[Message]) -> list[Message]:
-    return [message for message in messages if not (message.role == "user" and is_internal_automation_prompt(message.content))]
+    filtered = [
+        message
+        for message in messages
+        if not (message.role == "user" and is_internal_automation_prompt(message.content))
+    ]
+    return sanitize_model_tool_history(filtered)
+
+
+def sanitize_model_tool_history(messages: list[Message]) -> list[Message]:
+    """Keep only complete assistant-tool-result pairs in provider context.
+
+    Older desktop releases could persist unsupported DSML as an assistant message and
+    later persist an unrelated tool result. Retain the source transcript on disk, but
+    do not send those orphan protocol records back to the model on every future turn.
+    """
+    sanitized: list[Message] = []
+    index = 0
+    while index < len(messages):
+        message = messages[index]
+        if message.role == "assistant":
+            tool_call = parse_tool_call(message.content)
+            if tool_call:
+                name, _arguments = tool_call
+                following = messages[index + 1] if index + 1 < len(messages) else None
+                if following is not None and tool_result_matches(name, following):
+                    sanitized.extend((message, following))
+                    index += 2
+                    continue
+                prose = strip_tool_call_display(message.content).strip()
+                if prose and not is_tool_intro_only(prose):
+                    sanitized.append(Message("assistant", prose, name=message.name, images=list(message.images)))
+                index += 1
+                continue
+        if is_tool_result_record(message):
+            index += 1
+            continue
+        sanitized.append(message)
+        index += 1
+    return sanitized
+
+
+def is_tool_result_record(message: Message) -> bool:
+    return message.role == "user" and message.content.startswith(
+        ("TOOL_RESULT", "SUBAGENT_RESULT", "USER_ANSWER")
+    )
+
+
+def tool_result_matches(name: str, message: Message) -> bool:
+    if not is_tool_result_record(message):
+        return False
+    if name == "ask_user":
+        return message.content.startswith("USER_ANSWER")
+    if name == "delegate_agent":
+        return message.content.startswith("SUBAGENT_RESULT")
+    first_line = message.content.partition("\n")[0].strip()
+    return first_line == f"TOOL_RESULT name={name}"
 
 
 def is_failed_tool_result(content: str) -> bool:

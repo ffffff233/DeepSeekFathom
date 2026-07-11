@@ -896,6 +896,58 @@ def test_internal_automation_prompts_are_filtered_from_context():
     assert [message.content for message in filtered] == ["真实用户输入", "回答"]
 
 
+def test_orphaned_legacy_tool_protocol_is_not_sent_back_to_model():
+    dsml = '''<｜｜DSML｜｜tool_calls>
+<｜｜DSML｜｜invoke name="write_file">
+<｜｜DSML｜｜parameter name="path">C:\\Users\\admin\\Desktop\\snake.html</｜｜DSML｜｜parameter>
+<｜｜DSML｜｜parameter name="content" string="true"><html></html></｜｜DSML｜｜parameter>
+</｜｜DSML｜｜invoke>
+</｜｜DSML｜｜tool_calls>'''
+    messages = [
+        Message("system", "system"),
+        Message("user", "写文件"),
+        Message("assistant", dsml),
+        Message("user", "你没有执行"),
+        Message("assistant", "正确格式例如 JSON。"),
+        Message("user", 'TOOL_RESULT name=write_file\n{"ok":false}'),
+        Message("user", "继续"),
+    ]
+
+    filtered = filter_internal_automation_messages(messages)
+    contents = [message.content for message in filtered]
+    assert dsml not in contents
+    assert not any(content.startswith("TOOL_RESULT") for content in contents)
+    assert contents == ["system", "写文件", "你没有执行", "正确格式例如 JSON。", "继续"]
+
+
+def test_valid_tool_protocol_pair_stays_in_model_context():
+    call = '{"tool":"read_file","arguments":{"path":"README.md"}}'
+    result = 'TOOL_RESULT name=read_file\n{"ok":true,"output":"hello"}'
+    filtered = filter_internal_automation_messages([
+        Message("assistant", call),
+        Message("user", result),
+    ])
+    assert [message.content for message in filtered] == [call, result]
+
+
+def test_desktop_marks_orphaned_legacy_tool_as_not_executed():
+    from deepseek_tulagent.desktop.app import serialize_messages
+
+    call = '{"tool":"write_file","arguments":{"path":"snake.html","content":"game"}}'
+    visible = serialize_messages([
+        Message("user", "写文件"),
+        Message("assistant", call),
+        Message("user", "你没有执行"),
+    ])
+
+    tool = next(item for item in visible if item["role"] == "tool")
+    assert tool["orphaned"] is True
+    assert json.loads(tool["output"]) == {
+        "ok": False,
+        "output": "没有执行结果，已按未执行处理。",
+    }
+
+
 def test_complex_task_gets_private_execution_hint(tmp_path: Path):
     class InspectClient:
         def chat(self, messages):
@@ -1942,6 +1994,56 @@ def test_desktop_api_boot_and_runtime(monkeypatch, tmp_path: Path):
     assert updated["thinking"] == "deep"
     assert updated["model"] == "deepseek-v4-pro"
     assert updated["running"] is False
+    saved = get_settings()
+    assert saved.default_mode == "plan"
+    assert saved.default_thinking == "deep"
+    assert saved.model == "deepseek-v4-pro"
+    restarted = desktop.DesktopApi()
+    assert restarted.mode == "plan"
+    assert restarted.thinking.name == "deep"
+    assert restarted.settings.model == "deepseek-v4-pro"
+
+
+def test_desktop_windows_single_instance_mutex(monkeypatch):
+    import ctypes
+
+    import deepseek_tulagent.desktop.app as desktop
+
+    class Call:
+        def __init__(self, fn):
+            self.fn = fn
+            self.argtypes = None
+            self.restype = None
+
+        def __call__(self, *args):
+            return self.fn(*args)
+
+    class Kernel:
+        def __init__(self):
+            self.closed = []
+            self.CreateMutexW = Call(lambda *_args: 123)
+            self.CloseHandle = Call(lambda handle: self.closed.append(handle) or True)
+
+    kernel = Kernel()
+    errors = iter([0, desktop._ERROR_ALREADY_EXISTS])
+    focused = []
+    monkeypatch.setattr(desktop.sys, "platform", "win32")
+    monkeypatch.setattr(ctypes, "WinDLL", lambda *_args, **_kwargs: kernel)
+    monkeypatch.setattr(ctypes, "set_last_error", lambda _value: None)
+    monkeypatch.setattr(ctypes, "get_last_error", lambda: next(errors))
+    monkeypatch.setattr(desktop, "focus_existing_desktop_window", lambda: focused.append(True))
+
+    acquired, instance = desktop.acquire_desktop_instance()
+    assert acquired is True
+    assert instance == (kernel, 123)
+    desktop.release_desktop_instance(instance)
+    assert kernel.closed == [123]
+
+    acquired_again, duplicate = desktop.acquire_desktop_instance()
+    assert acquired_again is False
+    assert duplicate is None
+    assert kernel.closed == [123, 123]
+    assert focused == [True]
 
 
 def test_desktop_api_rejects_parallel_turn(monkeypatch, tmp_path: Path):
@@ -2543,7 +2645,7 @@ def test_desktop_brand_uses_transparent_whale_asset():
     assert '<img src="app-icon.png" alt="">' in brand
     assert "<svg" not in brand
     assert 'class="introLogo" src="app-icon.png"' in html
-    assert '<span id="version">v0.1.8</span>' in html
+    assert '<span id="version">v0.1.9</span>' in html
     assert 'id="settingsView"' in html and '<dialog id="settingsDialog"' not in html
     assert 'id="settingsBackTop"' in html and 'id="settingsBackBottom"' in html
     js = (root / "app.js").read_text(encoding="utf-8")
@@ -2557,10 +2659,12 @@ def test_desktop_brand_uses_transparent_whale_asset():
     assert ".logo img" in css
     assert "background: transparent" in css
     assert 'id="sessionScrollbar"' in html and 'id="sessionScrollThumb"' in html
-    assert 'style.css?v=0.1.8' in html and 'app.js?v=0.1.8' in html
+    assert 'style.css?v=0.1.9' in html and 'app.js?v=0.1.9' in html
     assert 'state.currentAssistant.remove();' in js
     assert "suppressedTurnIds: new Set()" in js
     assert "state.suppressedTurnIds.add(turnId)" in js
+    assert '$("cancel").hidden = !state.running || !state.activeTurnId;' in js
+    assert "function syncRunControls()" in js
     assert 'event === "native:drop"' in js
     assert "sessions.slice(0, 40)" not in js
     assert "sessions.forEach" in js
@@ -3576,10 +3680,12 @@ def test_cli_and_desktop_versions_are_independent():
     assert project["name"] == "deepseek-tulagent"
     assert project["version"] == __version__ == "0.1.108"
     assert project["scripts"]["deepseekfathom"] == "deepseek_tulagent.cli:main"
-    assert DESKTOP_VERSION == "0.1.8"
+    assert DESKTOP_VERSION == "0.1.9"
     assert REPO == "ffffff233/DeepSeekFathom"
-    assert '#define MyAppVersion "0.1.8"' in (root / "scripts" / "windows_installer.iss").read_text(encoding="utf-8")
-    assert 'filevers=(0, 1, 5, 0)' in (root / "assets" / "windows-version-info.txt").read_text(encoding="utf-8")
+    assert '#define MyAppVersion "0.1.9"' in (root / "scripts" / "windows_installer.iss").read_text(encoding="utf-8")
+    version_info = (root / "assets" / "windows-version-info.txt").read_text(encoding="utf-8")
+    assert 'filevers=(0, 1, 9, 0)' in version_info
+    assert "StringStruct('FileVersion', '0.1.9')" in version_info
 
 
 def test_update_refuses_dirty_source_tree(monkeypatch, tmp_path: Path):

@@ -216,19 +216,31 @@ class DesktopApi:
         return self.boot()
 
     def set_runtime(self, data: dict[str, Any]) -> dict[str, Any]:
+        persisted: dict[str, Any] = {}
         mode = str(data.get("mode") or self.mode)
         if mode in MODES:
-            self.mode = coerce_permission_tier(mode)
+            resolved_mode = coerce_permission_tier(mode)
+            if resolved_mode != self.mode:
+                self.mode = resolved_mode
+                persisted["default_mode"] = resolved_mode
         thinking_name = str(data.get("thinking") or self.thinking.name)
         if thinking_name in ThinkingMode.names():
-            self.thinking = ThinkingMode.resolve(thinking_name)
+            resolved_thinking = ThinkingMode.resolve(thinking_name)
+            if resolved_thinking.name != self.thinking.name:
+                self.thinking = resolved_thinking
+                persisted["default_thinking"] = resolved_thinking.name
         model = str(data.get("model") or self.settings.model)
+        previous_model = self.settings.model
         self.settings = self.settings.with_runtime(
             model=model,
             max_tokens=self.thinking.max_tokens,
             thinking_enabled=self.thinking.api_thinking,
             reasoning_effort=self.thinking.reasoning_effort,
         )
+        if self.settings.model != previous_model:
+            persisted["model"] = self.settings.model
+        if persisted:
+            merge_file_config(persisted)
         return self.boot()
 
     def models(self, data: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -1192,6 +1204,18 @@ def serialize_messages(messages: list[Message]) -> list[dict[str, Any]]:
 
     visible: list[dict[str, Any]] = []
     pending_tool: dict[str, Any] | None = None
+
+    def finish_orphaned_tool() -> None:
+        nonlocal pending_tool
+        if pending_tool is None:
+            return
+        pending_tool["output"] = json.dumps(
+            {"ok": False, "output": "没有执行结果，已按未执行处理。"},
+            ensure_ascii=False,
+        )
+        pending_tool["orphaned"] = True
+        pending_tool = None
+
     for idx, message in enumerate(messages):
         content = message.content
         if content.startswith(("TOOL_RESULT", "SUBAGENT_RESULT", "USER_ANSWER")):
@@ -1200,6 +1224,7 @@ def serialize_messages(messages: list[Message]) -> list[dict[str, Any]]:
                 pending_tool["output"] = body
                 pending_tool = None
             continue
+        finish_orphaned_tool()
         if message.role not in {"user", "assistant"}:
             continue
         if message.role == "assistant":
@@ -1219,8 +1244,8 @@ def serialize_messages(messages: list[Message]) -> list[dict[str, Any]]:
                 }
                 visible.append(pending_tool)
                 continue
-        pending_tool = None
         visible.append({"role": message.role, "content": content, "srcIndex": idx})
+    finish_orphaned_tool()
     return visible
 
 
@@ -1512,43 +1537,116 @@ def extract_video_frames(path: Path, *, max_frames: int = 6, timeout: int = 20) 
     return frames
 
 
-def main() -> None:
-    try:
-        import webview
-    except ImportError as exc:
-        raise SystemExit(
-            "桌面端需要 pywebview。安装：py -3 -m pip install --upgrade pywebview"
-        ) from exc
+_DESKTOP_MUTEX_NAME = r"Local\DeepSeekFathom.Desktop"
+_ERROR_ALREADY_EXISTS = 183
 
-    api = DesktopApi()
-    width, height, min_size = desktop_window_geometry()
-    window = webview.create_window(
-        "DeepSeekFathom",
-        str(ASSET_DIR / "index.html"),
-        js_api=api,
-        width=width,
-        height=height,
-        min_size=min_size,
-        text_select=True,
-    )
-    api.bind_window(window)
-    bind_native_file_drop(window, api)
-    # Try common GUI backends in turn so a missing/broken default backend gives a clear,
-    # actionable message instead of an opaque crash. Any failure skips to the next backend
-    # (a raised-on-first-error loop showed up as "crashes twice then works").
-    last_error: Exception | None = None
-    for kwargs in ({}, {"gui": "edgechromium"}, {"gui": "qt"}, {"gui": "gtk"}):
+
+def focus_existing_desktop_window() -> None:
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+
+        user32 = ctypes.WinDLL("user32", use_last_error=True)
+        find_window = user32.FindWindowW
+        find_window.argtypes = [ctypes.c_wchar_p, ctypes.c_wchar_p]
+        find_window.restype = ctypes.c_void_p
+        show_window = user32.ShowWindow
+        show_window.argtypes = [ctypes.c_void_p, ctypes.c_int]
+        show_window.restype = ctypes.c_bool
+        set_foreground = user32.SetForegroundWindow
+        set_foreground.argtypes = [ctypes.c_void_p]
+        set_foreground.restype = ctypes.c_bool
+        hwnd = find_window(None, "DeepSeekFathom")
+        if hwnd:
+            show_window(hwnd, 9)  # SW_RESTORE
+            set_foreground(hwnd)
+    except (AttributeError, OSError, ValueError):
+        return
+
+
+def acquire_desktop_instance() -> tuple[bool, Any]:
+    """Allow one desktop process per Windows login session and focus the first one."""
+    if sys.platform != "win32":
+        return True, None
+    try:
+        import ctypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        create_mutex = kernel32.CreateMutexW
+        create_mutex.argtypes = [ctypes.c_void_p, ctypes.c_bool, ctypes.c_wchar_p]
+        create_mutex.restype = ctypes.c_void_p
+        close_handle = kernel32.CloseHandle
+        close_handle.argtypes = [ctypes.c_void_p]
+        close_handle.restype = ctypes.c_bool
+        ctypes.set_last_error(0)
+        handle = create_mutex(None, False, _DESKTOP_MUTEX_NAME)
+        if not handle:
+            return True, None
+        if ctypes.get_last_error() == _ERROR_ALREADY_EXISTS:
+            close_handle(handle)
+            focus_existing_desktop_window()
+            return False, None
+        return True, (kernel32, handle)
+    except (AttributeError, OSError, ValueError):
+        # Do not make the app unusable on an unusual Windows runtime; atomic session
+        # and config writes remain the second line of defence.
+        return True, None
+
+
+def release_desktop_instance(instance: Any) -> None:
+    if not instance:
+        return
+    kernel32, handle = instance
+    try:
+        kernel32.CloseHandle(handle)
+    except (AttributeError, OSError, ValueError):
+        pass
+
+
+def main() -> None:
+    acquired, instance = acquire_desktop_instance()
+    if not acquired:
+        return
+    try:
         try:
-            webview.start(debug=False, **kwargs)
-            return
-        except Exception as exc:  # backend unavailable/broken — try the next one
-            last_error = exc
-            continue
-    raise SystemExit(
-        "找不到可用的界面后端。Windows 请安装 Microsoft Edge WebView2 运行时；"
-        "Linux 请安装 gtk（python3-gi / gir1.2-webkit2）或 Qt（pip install pyqt6 qtpy）。"
-        + (f"\n最后一个错误：{last_error}" if last_error else "")
-    )
+            import webview
+        except ImportError as exc:
+            raise SystemExit(
+                "桌面端需要 pywebview。安装：py -3 -m pip install --upgrade pywebview"
+            ) from exc
+
+        api = DesktopApi()
+        width, height, min_size = desktop_window_geometry()
+        window = webview.create_window(
+            "DeepSeekFathom",
+            str(ASSET_DIR / "index.html"),
+            js_api=api,
+            width=width,
+            height=height,
+            min_size=min_size,
+            text_select=True,
+        )
+        api.bind_window(window)
+        bind_native_file_drop(window, api)
+        # Try common GUI backends in turn so a missing/broken default backend gives a clear,
+        # actionable message instead of an opaque crash. Any failure skips to the next backend
+        # (a raised-on-first-error loop showed up as "crashes twice then works").
+        last_error: Exception | None = None
+        for kwargs in ({}, {"gui": "edgechromium"}, {"gui": "qt"}, {"gui": "gtk"}):
+            try:
+                webview.start(debug=False, **kwargs)
+                return
+            except Exception as exc:  # backend unavailable/broken — try the next one
+                last_error = exc
+                continue
+        raise SystemExit(
+            "找不到可用的界面后端。Windows 请安装 Microsoft Edge WebView2 运行时；"
+            "Linux 请安装 gtk（python3-gi / gir1.2-webkit2）或 Qt（pip install pyqt6 qtpy）。"
+            + (f"\n最后一个错误：{last_error}" if last_error else "")
+        )
+    finally:
+        release_desktop_instance(instance)
 
 
 if __name__ == "__main__":
