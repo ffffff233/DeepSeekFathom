@@ -850,6 +850,36 @@ def test_local_create_requires_real_tool_result_and_holds_long_arguments(tmp_pat
         assert pending_index < tool_index
 
 
+def test_ordinary_markdown_stream_does_not_lock_or_emit_toolpending(tmp_path: Path):
+    answer = (
+        "使用 `print()` 输出。\n\n"
+        "```python\nprint('hello')\n```\n\n"
+        "普通 JSON 示例：\n```json\n{\"name\":\"DeepSeekFathom\",\"arguments\":\"not a tool\"}\n```\n"
+        "以上内容都只是示例。"
+    )
+
+    class MarkdownClient:
+        def stream_chat(self, _messages):
+            yield from answer
+
+    visible: list[str] = []
+    finals: list[str] = []
+    events: list[str] = []
+    result = TuLAgent(settings(tmp_path), mode="root", client=MarkdownClient()).run(
+        "解释代码和 JSON 示例",
+        stream=True,
+        on_delta=visible.append,
+        on_final=finals.append,
+        on_event=events.append,
+        require_todo=False,
+    )
+
+    assert result.answer == answer
+    assert "".join(visible) == answer
+    assert finals == [answer]
+    assert "toolpending" not in events
+
+
 def test_repeated_fake_local_completion_is_replaced_with_honest_failure(tmp_path: Path):
     class FakeCompletionClient:
         def __init__(self):
@@ -866,6 +896,18 @@ def test_repeated_fake_local_completion_is_replaced_with_honest_failure(tmp_path
 
     assert result.answer == "未执行请求：模型没有调用完成本机操作所需的工具。"
     assert not (tmp_path / "result.txt").exists()
+
+
+def test_local_tool_evidence_detection_covers_natural_create_wording():
+    from deepseek_tulagent.agent import claims_local_action_completed, requires_local_tool_action
+
+    assert requires_local_tool_action("在桌面做一个小游戏 HTML")
+    assert requires_local_tool_action("帮我生成 result.txt 文件")
+    assert requires_local_tool_action("build a local desktop app")
+    assert not requires_local_tool_action("如何创建 result.txt 文件？")
+    assert claims_local_action_completed("game.html 创建成功，可以双击打开。")
+    assert claims_local_action_completed("刚才失败了，现在 game.html 已创建。")
+    assert not claims_local_action_completed("game.html 未创建成功，权限不足。")
 
 
 def test_initial_messages_keep_large_system_prompt_cacheable(tmp_path: Path):
@@ -2838,7 +2880,7 @@ def test_desktop_brand_uses_transparent_whale_asset():
     assert '<img src="app-icon.png" alt="">' in brand
     assert "<svg" not in brand
     assert 'class="introLogo" src="app-icon.png"' in html
-    assert '<span id="version">v0.1.11</span>' in html
+    assert '<span id="version">v0.1.12</span>' in html
     assert 'id="settingsView"' in html and '<dialog id="settingsDialog"' not in html
     assert 'id="settingsBackTop"' in html and 'id="settingsBackBottom"' in html
     js = (root / "app.js").read_text(encoding="utf-8")
@@ -2854,7 +2896,7 @@ def test_desktop_brand_uses_transparent_whale_asset():
     assert 'id="sessionScrollbar"' in html and 'id="sessionScrollThumb"' in html
     assert 'class="convItem" data-act="exportMd">导出 Markdown</button>' in html
     assert "window.pywebview.api.export_session(sid)" in js
-    assert 'style.css?v=0.1.11' in html and 'app.js?v=0.1.11' in html
+    assert 'style.css?v=0.1.12' in html and 'app.js?v=0.1.12' in html
     assert 'state.currentAssistant.remove();' in js
     assert "suppressedTurnIds: new Set()" in js
     assert "state.suppressedTurnIds.add(turnId)" in js
@@ -3875,12 +3917,12 @@ def test_cli_and_desktop_versions_are_independent():
     assert project["name"] == "deepseek-tulagent"
     assert project["version"] == __version__ == "0.1.108"
     assert project["scripts"]["deepseekfathom"] == "deepseek_tulagent.cli:main"
-    assert DESKTOP_VERSION == "0.1.11"
+    assert DESKTOP_VERSION == "0.1.12"
     assert REPO == "ffffff233/DeepSeekFathom"
-    assert '#define MyAppVersion "0.1.11"' in (root / "scripts" / "windows_installer.iss").read_text(encoding="utf-8")
+    assert '#define MyAppVersion "0.1.12"' in (root / "scripts" / "windows_installer.iss").read_text(encoding="utf-8")
     version_info = (root / "assets" / "windows-version-info.txt").read_text(encoding="utf-8")
-    assert 'filevers=(0, 1, 11, 0)' in version_info
-    assert "StringStruct('FileVersion', '0.1.11')" in version_info
+    assert 'filevers=(0, 1, 12, 0)' in version_info
+    assert "StringStruct('FileVersion', '0.1.12')" in version_info
 
 
 def test_update_refuses_dirty_source_tree(monkeypatch, tmp_path: Path):

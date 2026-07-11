@@ -1,5 +1,19 @@
 # 桌面端更新记录 / Desktop Changelog
 
+## v0.1.12
+
+中文：
+
+- **普通 Markdown 不再误触发工具状态**：反引号、代码围栏和未闭合的普通 JSON 只作为临时流式边界；确认不是工具后会继续实时显示，不再从第一段行内代码开始卡住并显示“准备调用工具”。
+- **普通配置 JSON 不再被 `name` 字段误判**：只有 `tool` / `name` 的值是已知工具名，或出现明确的结构化工具协议时，才会永久扣留并创建工具状态；`package.json`、应用配置和代码示例可以正常流式展示。
+- **扩大本机操作证据覆盖**：“做一个”“生成”“制作”以及 `build` / `make` 等自然表达也必须等真实工具成功后才能宣称完成；同时识别“创建成功/生成完成/写入成功”等更多完成说法，并正确区分“未创建成功”。
+
+English:
+
+- **Stopped ordinary Markdown from falsely entering tool-pending state**, keeping backticks, code fences, and ambiguous JSON boundaries provisional until classified.
+- **Stopped normal configuration JSON from being treated as a tool merely because it starts with `name`**, requiring a known tool name or an explicit structured protocol marker before locking the stream.
+- **Expanded local-action evidence checks** to natural create/build wording and more completion phrases while preserving negative statements such as “not created successfully”.
+
 ## v0.1.11
 
 中文：
