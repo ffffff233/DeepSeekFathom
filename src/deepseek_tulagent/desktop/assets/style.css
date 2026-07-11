@@ -69,11 +69,12 @@ body {
 }
 .brand { display: flex; align-items: center; gap: 9px; padding: 2px 4px; }
 .logo {
-  width: 26px; height: 26px; border-radius: var(--r-sm);
+  width: 30px; height: 30px;
   display: grid; place-items: center;
-  color: var(--text); background: var(--hover-strong);
+  background: transparent;
   flex-shrink: 0;
 }
+.logo img { width: 30px; height: 30px; display: block; object-fit: contain; }
 .brandText { display: flex; align-items: baseline; gap: 7px; line-height: 1.2; }
 .brandText strong { font-size: 13px; font-weight: 600; color: var(--text); letter-spacing: .2px; }
 .brandText span { color: var(--text-4); font-size: 11px; font-family: var(--mono); }
@@ -162,7 +163,7 @@ body.is-running .pulse { animation: pulseDot 1s ease-in-out infinite; }
 .messages { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 20px 0 10px; display: flex; flex-direction: column; gap: 2px; }
 
 .empty, .intro { margin: auto; max-width: 420px; text-align: center; color: var(--text-3); padding: 40px 20px; }
-.introMark { display: inline-block; font-family: var(--mono); letter-spacing: 3px; color: var(--text-4); font-size: 11px; margin-bottom: 14px; text-transform: uppercase; }
+.introLogo { width: 64px; height: 64px; display: block; object-fit: contain; margin: 0 auto 14px; }
 .intro h1, .empty h1 { font-size: 19px; margin: 0 0 8px; color: var(--text); font-weight: 600; }
 .intro p, .empty p { line-height: 1.7; margin: 0; font-size: 13px; }
 .intro kbd, .empty kbd { font-family: var(--mono); font-size: 11px; background: var(--hover-strong); border: 1px solid var(--line); border-radius: 4px; padding: 0 5px; color: var(--text-2); }

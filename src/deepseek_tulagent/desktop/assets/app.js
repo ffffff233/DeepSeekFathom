@@ -420,6 +420,8 @@ function updateContextBadge(ctx) {
   badge.className = `contextBadge ${known ? level : "idle"}`;
   setText("ctxPct", known ? `上下文 ${pct.toFixed(pct >= 10 ? 0 : 1)}%` : "上下文未知");
   setText("ctxUsage", known ? `${ctx.accurate ? "" : "≈"}${fmtTokens(ctx.tokens)} / ${fmtTokens(ctx.limit)}` : `未知 / ${fmtTokens(ctx.limit)}`);
+  setText("ctxInput", ctx.inputTokens > 0 ? fmtTokens(ctx.inputTokens) : "未知");
+  setText("ctxSessionInput", ctx.sessionInputTokens > 0 ? fmtTokens(ctx.sessionInputTokens) : "未知");
   setText("ctxThreshold", `${fmtTokens(ctx.threshold)} (${ctx.thresholdPercent || 95}%)`);
   setText("ctxRemaining", known ? fmtTokens(ctx.remainingTokens || 0) : "未知");
   const limitSource = ctx.customLimit ? "手动窗口" : sourceLabel(ctx.limitSource || ctx.source);
@@ -1706,7 +1708,7 @@ $("newSession").onclick = async () => {
   state.events = 0;
   state.stickToBottom = true;
   setText("eventCount", "0");
-  $("messages").innerHTML = '<div class="empty intro"><div class="introMark">DeepSeekFathom</div><h1>新对话已创建</h1><p>输入任务开始，输入 <kbd>/</kbd> 调出命令。工具调用与输出会内联展开。</p></div>';
+  $("messages").innerHTML = '<div class="empty intro"><img class="introLogo" src="app-icon.png" alt=""><h1>新对话已创建</h1><p>输入任务开始，输入 <kbd>/</kbd> 调出命令。工具调用与输出会内联展开。</p></div>';
   setText("eventMirror", "工具、思考和子代理事件会显示在这里。");
   setText("sessionState", "新会话");
   setSaveState("idle", "新会话", "未保存");

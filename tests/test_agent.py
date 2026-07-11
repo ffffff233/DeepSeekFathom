@@ -1950,6 +1950,10 @@ def test_desktop_context_usage_survives_restart(monkeypatch, tmp_path: Path):
     session.messages = [Message("system", "system"), Message("user", "hello"), Message("assistant", "world")]
     session.rewrite()
     first.session = session
+    first._record_session_usage(
+        session.session_id,
+        UsageStats(input_tokens=180_000, output_tokens=800, cached_input_tokens=150_000, total_tokens=180_800, source="upstream"),
+    )
     first._record_context_usage(
         session.session_id,
         UsageStats(input_tokens=140_000, output_tokens=500, cached_input_tokens=120_000, total_tokens=140_500, source="upstream"),
@@ -1959,6 +1963,7 @@ def test_desktop_context_usage_survives_restart(monkeypatch, tmp_path: Path):
 
     measured = first.context_status()
     assert measured["tokens"] == 140_000
+    assert measured["sessionInputTokens"] == 180_000
     assert measured["accurate"] is True
 
     restarted = desktop.DesktopApi()
@@ -1966,6 +1971,9 @@ def test_desktop_context_usage_survives_restart(monkeypatch, tmp_path: Path):
     assert restored["tokens"] == 140_000
     assert restored["inputTokens"] == 140_000
     assert restored["cachedTokens"] == 120_000
+    assert restored["sessionInputTokens"] == 180_000
+    assert restored["sessionOutputTokens"] == 800
+    assert restored["sessionTotalTokens"] == 180_800
     assert restored["accurate"] is True
     assert restored["usageState"] == "current"
 
@@ -1976,6 +1984,21 @@ def test_desktop_context_usage_survives_restart(monkeypatch, tmp_path: Path):
     assert adjusted["usageAvailable"] is True
     assert adjusted["usageState"] == "adjusted"
     assert adjusted["measure"] == "上次上游输入 + 当前会话增量"
+
+
+def test_desktop_brand_uses_transparent_whale_asset():
+    root = Path(__file__).parents[1] / "src" / "deepseek_tulagent" / "desktop" / "assets"
+    html = (root / "index.html").read_text(encoding="utf-8")
+    css = (root / "style.css").read_text(encoding="utf-8")
+    icon = (root / "app-icon.png").read_bytes()
+
+    brand = html.split('<div class="brand">', 1)[1].split('<div class="brandText">', 1)[0]
+    assert '<img src="app-icon.png" alt="">' in brand
+    assert "<svg" not in brand
+    assert 'class="introLogo" src="app-icon.png"' in html
+    assert ".logo img" in css
+    assert "background: transparent" in css
+    assert icon.startswith(b"\x89PNG\r\n\x1a\n")
 
 
 def test_desktop_send_only_exposes_folder_attachment_paths(monkeypatch, tmp_path: Path):
@@ -2768,10 +2791,10 @@ def test_cli_and_desktop_versions_are_independent():
     assert project["name"] == "deepseek-tulagent"
     assert project["version"] == __version__ == "0.1.108"
     assert project["scripts"]["deepseekfathom"] == "deepseek_tulagent.cli:main"
-    assert DESKTOP_VERSION == "0.1.1"
+    assert DESKTOP_VERSION == "0.1.2"
     assert REPO == "ffffff233/DeepSeekFathom"
-    assert '#define MyAppVersion "0.1.1"' in (root / "scripts" / "windows_installer.iss").read_text(encoding="utf-8")
-    assert 'filevers=(0, 1, 1, 0)' in (root / "assets" / "windows-version-info.txt").read_text(encoding="utf-8")
+    assert '#define MyAppVersion "0.1.2"' in (root / "scripts" / "windows_installer.iss").read_text(encoding="utf-8")
+    assert 'filevers=(0, 1, 2, 0)' in (root / "assets" / "windows-version-info.txt").read_text(encoding="utf-8")
 
 
 def test_update_refuses_dirty_source_tree(monkeypatch, tmp_path: Path):
