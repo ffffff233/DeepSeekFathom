@@ -1,5 +1,19 @@
 # 桌面端更新记录 / Desktop Changelog
 
+## v0.1.2
+
+中文：
+
+- **软件内左上角和新会话空白页改用专属透明鲸鱼图标**，移除旧波浪 SVG、图标底色和文字占位标记，只显示鲸鱼本体。
+- **上下文面板新增“当前请求输入”和“会话累计输入”**。当前上下文继续表示最后一次模型请求实际携带的输入，会话累计输入则展示同一会话多轮工具调用产生的累计提示词 token，避免把两者混为一谈。
+- **会话累计 usage 写入会话元数据**，重启或切换会话后仍保留；拆分显示可直接看出为什么一次任务累计消耗十几万 token，而最后一次请求上下文可能较小。
+
+English:
+
+- **Replaced the in-app top-left mark and new-session placeholder with the transparent whale icon**, removing the old wave SVG, icon background, and text-only mark.
+- **Added separate “current request input” and “session cumulative input” metrics**. Current context remains the latest model-request input, while cumulative input shows prompt tokens spent across all model/tool rounds in the session.
+- **Persisted cumulative session usage in metadata**, so both figures survive app restarts and session switches.
+
 ## v0.1.1
 
 中文：

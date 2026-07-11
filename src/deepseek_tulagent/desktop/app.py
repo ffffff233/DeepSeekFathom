@@ -241,6 +241,7 @@ class DesktopApi:
     def resume(self, session_id: str) -> dict[str, Any]:
         self.session = SessionStore(self.settings.workspace).load(session_id)
         self._restore_context_usage(session_id)
+        self._restore_session_usage(session_id)
         return {
             "ok": True,
             "sessionId": self.session.session_id,
@@ -287,6 +288,7 @@ class DesktopApi:
         local_delta = local_tokens - baseline if use_upstream else 0
         context_tokens = max(0, int(snapshot["tokens"]) + local_delta) if use_upstream else local_tokens
         usage = snapshot.get("usage") if use_upstream else UsageStats()
+        session_usage = self._usage_by_session.get(session_id, UsageStats()) if session_id else UsageStats()
         exact_upstream = bool(use_upstream and local_delta == 0)
         known_context = use_upstream
         percent = round((context_tokens / limit * 100), 1) if known_context and limit else None
@@ -303,6 +305,9 @@ class DesktopApi:
             "cachedTokens": int(getattr(usage, "cached_input_tokens", 0)),
             "cachePercent": round(int(getattr(usage, "cached_input_tokens", 0)) / max(1, int(getattr(usage, "input_tokens", 0))) * 100, 1),
             "usageTotalTokens": int(getattr(usage, "total_tokens", 0)),
+            "sessionInputTokens": int(getattr(session_usage, "input_tokens", 0)),
+            "sessionOutputTokens": int(getattr(session_usage, "output_tokens", 0)),
+            "sessionTotalTokens": int(getattr(session_usage, "total_tokens", 0)),
             "limit": limit,
             "detectedLimit": detected_limit,
             "customLimit": bool(self.settings.context_window_tokens),
@@ -713,6 +718,37 @@ class DesktopApi:
         self._usage_total.merge(usage)
         bucket = self._usage_by_session.setdefault(session_id, UsageStats())
         bucket.merge(usage)
+        SessionStore(self.settings.workspace).update_metadata(
+            session_id,
+            session_usage={
+                "input_tokens": bucket.input_tokens,
+                "output_tokens": bucket.output_tokens,
+                "cached_input_tokens": bucket.cached_input_tokens,
+                "total_tokens": bucket.total_tokens,
+                "source": bucket.source,
+            },
+        )
+
+    def _restore_session_usage(self, session_id: str) -> None:
+        stored = SessionStore(self.settings.workspace).metadata(session_id).get("session_usage")
+        if not isinstance(stored, dict):
+            self._usage_by_session.pop(session_id, None)
+            return
+        try:
+            usage = UsageStats(
+                input_tokens=int(stored.get("input_tokens") or 0),
+                output_tokens=int(stored.get("output_tokens") or 0),
+                cached_input_tokens=int(stored.get("cached_input_tokens") or 0),
+                total_tokens=int(stored.get("total_tokens") or 0),
+                source=str(stored.get("source") or "upstream"),
+            )
+        except (TypeError, ValueError):
+            self._usage_by_session.pop(session_id, None)
+            return
+        if usage.input_tokens <= 0:
+            self._usage_by_session.pop(session_id, None)
+            return
+        self._usage_by_session[session_id] = usage
 
     def _record_context_usage(
         self,
