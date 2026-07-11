@@ -248,10 +248,15 @@ class TuLAgent:
                     if stream_live and on_delta:
                         joined = "".join(parts)
                         safe = safe_stream_emit_length(joined)
-                        # Once a possible tool boundary appears, never emit beyond it in
-                        # this model round. A later parser decision may restore ordinary
-                        # JSON through on_final, but raw tool arguments can never flash.
-                        if safe < len(joined) and held_from is None:
+                        # A partial backtick/fence/JSON opener is only provisional: keep
+                        # it buffered until enough text arrives to classify it. Permanently
+                        # lock the boundary only after a real tool-protocol marker appears,
+                        # otherwise ordinary Markdown would freeze at its first backtick.
+                        if (
+                            safe < len(joined)
+                            and held_from is None
+                            and confirmed_tool_stream_boundary(joined, safe)
+                        ):
                             held_from = safe
                             if not held_notified and on_event:
                                 on_event("toolpending")
@@ -1001,9 +1006,9 @@ def requires_local_tool_action(prompt: str) -> bool:
     if not normalized or any(cue in normalized for cue in ("怎么", "如何", "为什么", "教程", "示例", "howto", "howdo", "why")):
         return False
     actions = (
-        "创建", "新建", "写入", "保存", "修改", "改一下", "删除", "下载", "安装",
+        "创建", "新建", "生成", "制作", "做一个", "写入", "保存", "修改", "改一下", "删除", "下载", "安装",
         "运行", "启动", "停止", "克隆", "拉取", "解压", "上传",
-        "create", "write", "save", "modify", "edit", "delete", "download", "install",
+        "create", "generate", "build", "make", "write", "save", "modify", "edit", "delete", "download", "install",
         "run", "start", "stop", "clone", "pull", "extract", "upload",
     )
     targets = (
@@ -1017,17 +1022,26 @@ def requires_local_tool_action(prompt: str) -> bool:
 
 def claims_local_action_completed(text: str) -> bool:
     normalized = re.sub(r"\s+", "", (text or "").lower())
-    if not normalized or any(cue in normalized for cue in ("无法", "不能", "失败", "未创建", "没有创建", "未执行", "blocked")):
+    if not normalized:
         return False
     cues = (
-        "已创建", "已经创建", "创建好了", "创建完成", "已新建", "已经新建",
-        "已写入", "已经写入", "写好了", "已保存", "保存好了", "已修改", "已经修改",
-        "修改完成", "已删除", "已经删除", "已下载", "下载完成", "已安装", "安装完成",
-        "已运行", "已经运行", "已启动", "已经启动", "已停止", "已经停止", "已上传",
-        "created", "written", "saved", "modified", "deleted", "downloaded", "installed",
+        "已创建", "已经创建", "创建好了", "创建完成", "创建成功", "已新建", "已经新建",
+        "已生成", "已经生成", "生成完成", "生成成功", "做好了", "制作完成",
+        "已写入", "已经写入", "写入成功", "写好了", "已保存", "保存好了", "保存成功", "已修改", "已经修改",
+        "修改完成", "修改成功", "已删除", "已经删除", "删除成功", "已下载", "下载完成", "下载成功", "已安装", "安装完成", "安装成功",
+        "已运行", "已经运行", "运行成功", "已启动", "已经启动", "启动成功", "已停止", "已经停止", "已上传", "上传成功",
+        "created", "generated", "built", "written", "saved", "modified", "deleted", "downloaded", "installed",
         "started", "stopped", "uploaded",
     )
-    return any(cue in normalized for cue in cues)
+    negative_prefixes = ("未", "没有", "并未", "尚未", "无法", "不能", "not", "never", "failedto")
+    for cue in cues:
+        start = normalized.find(cue)
+        while start >= 0:
+            prefix = normalized[max(0, start - 10):start]
+            if not any(prefix.endswith(negative) for negative in negative_prefixes):
+                return True
+            start = normalized.find(cue, start + len(cue))
+    return False
 
 
 def todo_result_has_open_items(output: str) -> bool:
@@ -1237,6 +1251,35 @@ def safe_stream_emit_length(text: str) -> int:
     except json.JSONDecodeError:
         return start  # incomplete JSON outside a fence — keep holding
     return start if normalize_tool_call(data) else len(text)
+
+
+def confirmed_tool_stream_boundary(text: str, boundary: int) -> bool:
+    """Whether a provisional stream boundary is definitely tool protocol.
+
+    ``safe_stream_emit_length`` intentionally buffers ambiguous prefixes such as one
+    backtick, an open JSON fence, or a line-start ``{``. Those are common in ordinary
+    answers and must be released later. This predicate becomes true only once the tail
+    contains a protocol-specific marker, at which point the boundary can be locked for
+    the rest of the model round.
+    """
+    if boundary < 0 or boundary >= len(text):
+        return False
+    tail = text[boundary:]
+    if DSML_PREFIX in tail:
+        return True
+    if re.search(r"(?i)<tool_call\b", tail):
+        return True
+    if re.search(r"(?im)^[ \t]*(?:tool|工具)[ \t]*:[ \t]*[A-Za-z_][\w-]*[ \t]*$", tail):
+        return True
+    structured = re.search(r"(?i)\{\s*\"(?:function_call|tool_calls)\"", tail)
+    if structured:
+        candidate = tail[structured.start():]
+        return not tool_json_is_explanatory_example(text, candidate)
+    named = re.search(r'(?i)\{\s*"(?:tool|name)"\s*:\s*"([A-Za-z_][\w-]*)"', tail)
+    if named and named.group(1) in KNOWN_TOOL_NAMES:
+        candidate = tail[named.start():]
+        return not tool_json_is_explanatory_example(text, candidate)
+    return parse_tool_call(text) is not None
 
 
 def is_tool_intro_only(text: str) -> bool:
