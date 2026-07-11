@@ -785,6 +785,89 @@ def test_streamed_tool_call_with_preface_is_not_printed_as_visible_delta(tmp_pat
     assert '{"tool"' not in "".join(visible)
 
 
+def test_local_create_requires_real_tool_result_and_holds_long_arguments(tmp_path: Path):
+    false_claim = (
+        "我来先在桌面路径下创建一个简单的小游戏 HTML 文件。先确认桌面位置。\n\n"
+        "好的，小游戏 HTML 已创建在桌面，文件名 `game.html`。这是一个躲避小游戏。"
+    )
+
+    for case, chunk_size in (("characters", 1), ("single-chunk", 100_000)):
+        workspace = tmp_path / case
+        workspace.mkdir()
+        target = workspace / "game.html"
+        html = "<!doctype html><html><body>" + ("<main>小游戏内容</main>" * 320) + "</body></html>"
+        tool_reply = "抱歉，刚才只是口头说创建，没有实际写文件。现在马上做。\n\n" + json.dumps(
+            {"tool": "write_file", "arguments": {"path": str(target), "content": html}},
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+
+        class RealConversationClient:
+            def __init__(self):
+                self.calls = 0
+
+            def stream_chat(self, _messages):
+                replies = [false_claim, tool_reply, "文件已经真实创建完成。"]
+                text = replies[self.calls]
+                self.calls += 1
+                for start in range(0, len(text), chunk_size):
+                    yield text[start:start + chunk_size]
+
+        visible: list[str] = []
+        finals: list[str] = []
+        timeline: list[str] = []
+        client = RealConversationClient()
+
+        def delta(text: str) -> None:
+            visible.append(text)
+            timeline.append("delta:" + text)
+
+        def final(text: str) -> None:
+            finals.append(text)
+            timeline.append("final:" + text)
+
+        def event(text: str) -> None:
+            timeline.append("event:" + text)
+
+        result = TuLAgent(settings(workspace), mode="root", client=client).run(
+            "在桌面上创建一个小游戏HTML",
+            stream=True,
+            on_delta=delta,
+            on_final=final,
+            on_event=event,
+            require_todo=False,
+        )
+
+        assert client.calls == 3
+        assert result.answer == "文件已经真实创建完成。"
+        assert target.read_text(encoding="utf-8") == html
+        assert false_claim not in "".join(visible)
+        assert '"arguments"' not in "".join(visible)
+        assert "<main>小游戏内容</main>" not in "".join(visible)
+        assert '"arguments"' not in "".join(finals)
+        pending_index = timeline.index("event:toolpending")
+        tool_index = next(i for i, item in enumerate(timeline) if item.startswith("event:tool write_file"))
+        assert pending_index < tool_index
+
+
+def test_repeated_fake_local_completion_is_replaced_with_honest_failure(tmp_path: Path):
+    class FakeCompletionClient:
+        def __init__(self):
+            self.calls = 0
+
+        def chat(self, _messages):
+            self.calls += 1
+            return "文件已经创建好了。"
+
+    result = TuLAgent(settings(tmp_path), mode="root", client=FakeCompletionClient()).run(
+        "在桌面创建 result.txt",
+        require_todo=False,
+    )
+
+    assert result.answer == "未执行请求：模型没有调用完成本机操作所需的工具。"
+    assert not (tmp_path / "result.txt").exists()
+
+
 def test_initial_messages_keep_large_system_prompt_cacheable(tmp_path: Path):
     SkillStore(tmp_path).create("repo-debug", "Debug this repository.", "Run tests.")
     agent = TuLAgent(settings(tmp_path), client=FakeClient(["done"]))
@@ -2755,7 +2838,7 @@ def test_desktop_brand_uses_transparent_whale_asset():
     assert '<img src="app-icon.png" alt="">' in brand
     assert "<svg" not in brand
     assert 'class="introLogo" src="app-icon.png"' in html
-    assert '<span id="version">v0.1.10</span>' in html
+    assert '<span id="version">v0.1.11</span>' in html
     assert 'id="settingsView"' in html and '<dialog id="settingsDialog"' not in html
     assert 'id="settingsBackTop"' in html and 'id="settingsBackBottom"' in html
     js = (root / "app.js").read_text(encoding="utf-8")
@@ -2771,7 +2854,7 @@ def test_desktop_brand_uses_transparent_whale_asset():
     assert 'id="sessionScrollbar"' in html and 'id="sessionScrollThumb"' in html
     assert 'class="convItem" data-act="exportMd">导出 Markdown</button>' in html
     assert "window.pywebview.api.export_session(sid)" in js
-    assert 'style.css?v=0.1.10' in html and 'app.js?v=0.1.10' in html
+    assert 'style.css?v=0.1.11' in html and 'app.js?v=0.1.11' in html
     assert 'state.currentAssistant.remove();' in js
     assert "suppressedTurnIds: new Set()" in js
     assert "state.suppressedTurnIds.add(turnId)" in js
@@ -3792,12 +3875,12 @@ def test_cli_and_desktop_versions_are_independent():
     assert project["name"] == "deepseek-tulagent"
     assert project["version"] == __version__ == "0.1.108"
     assert project["scripts"]["deepseekfathom"] == "deepseek_tulagent.cli:main"
-    assert DESKTOP_VERSION == "0.1.10"
+    assert DESKTOP_VERSION == "0.1.11"
     assert REPO == "ffffff233/DeepSeekFathom"
-    assert '#define MyAppVersion "0.1.10"' in (root / "scripts" / "windows_installer.iss").read_text(encoding="utf-8")
+    assert '#define MyAppVersion "0.1.11"' in (root / "scripts" / "windows_installer.iss").read_text(encoding="utf-8")
     version_info = (root / "assets" / "windows-version-info.txt").read_text(encoding="utf-8")
-    assert 'filevers=(0, 1, 10, 0)' in version_info
-    assert "StringStruct('FileVersion', '0.1.10')" in version_info
+    assert 'filevers=(0, 1, 11, 0)' in version_info
+    assert "StringStruct('FileVersion', '0.1.11')" in version_info
 
 
 def test_update_refuses_dirty_source_tree(monkeypatch, tmp_path: Path):

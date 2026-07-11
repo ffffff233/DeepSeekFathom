@@ -47,6 +47,7 @@ Rules:
 - Keep changes scoped to the user's request.
 - Tool use must be emitted as the JSON object above. Do not put commands in bash/code fences when you want them executed.
 - Never say a command, download, search, or file operation was executed unless it came from a Tool result.
+- For an explicit local create/write/modify/delete/download/run request, do not announce success until the matching tool has returned a successful result in this turn.
 - If the user asks you to inspect a live URL, GitHub repository, local files, shell state, or service state, use the appropriate tool instead of describing what you would run.
 - If the user asks to clone, pull, download, or fetch a Git/GitHub repository into the workspace, prefer clone_repo over manual git clone shell commands. Windows paths like `D:\project\repo` are accepted, but clone_repo writes inside the configured workspace. Report its fallback summary and only ask for a proxy after clone_repo says all methods failed.
 - Keep final replies visually plain. Avoid decorative Markdown, bold markers, and asterisk bullets unless code syntax or shell globbing requires `*`.
@@ -90,6 +91,12 @@ REQUIRE_TODO_WRITE_PROMPT = (
     "Keep exactly one todo in_progress and the rest pending."
 )
 
+REQUIRE_TOOL_EVIDENCE_PROMPT = (
+    "The user explicitly requested a local file/system action, but your previous response claimed it was done "
+    "without any successful tool result. Do not repeat or explain the unsupported claim. Return the required "
+    "tool JSON now. If execution is genuinely impossible, state the concrete blocker without claiming success."
+)
+
 KNOWN_TOOL_NAMES = {
     "ask_user",
     "delegate_agent",
@@ -108,6 +115,15 @@ KNOWN_TOOL_NAMES = {
     "start_service",
     "stop_service",
     "service_status",
+}
+LOCAL_ACTION_TOOLS = {
+    "write_file",
+    "apply_patch",
+    "run_shell",
+    "download_url",
+    "clone_repo",
+    "start_service",
+    "stop_service",
 }
 TOOL_CALL_META_KEYS = {"tool", "name", "type", "id", "function_call", "tool_calls", "arguments", "parameters", "args", "input"}
 DSML_PREFIX = "<｜｜DSML｜｜"
@@ -180,6 +196,9 @@ class TuLAgent:
         todo_was_written = False
         todo_enforced = False
         promise_continuation_used = False
+        tool_evidence_required = requires_local_tool_action(prompt)
+        tool_evidence_recovery_used = False
+        local_action_succeeded = False
         for rounds in range(1, round_limit + 1):
             if should_cancel and should_cancel():
                 raise RuntimeError("turn cancelled")
@@ -216,6 +235,11 @@ class TuLAgent:
                 stream_live = on_final is not None
                 emitted = 0
                 held_notified = False
+                held_from: int | None = None
+                # For an explicit local mutation, keep the model's first prose private
+                # until a real tool call/result proves the action. This prevents a false
+                # "created" message from flashing in the UI before recovery can run.
+                defer_for_tool_evidence = tool_evidence_required and not local_action_succeeded
                 for delta in self.client.stream_chat(model_messages):
                     if should_cancel and should_cancel():
                         raise RuntimeError("turn cancelled")
@@ -223,16 +247,19 @@ class TuLAgent:
                     held_parts.append(delta)
                     if stream_live and on_delta:
                         joined = "".join(parts)
-                        if should_hold_stream_output(joined):
-                            # the emerging output looks like a tool call; its JSON is
-                            # held back from the chat. Signal the UI once so it can show
-                            # a "preparing tool" indicator instead of a dead pause until
-                            # the call is fully parsed at end-of-stream.
+                        safe = safe_stream_emit_length(joined)
+                        # Once a possible tool boundary appears, never emit beyond it in
+                        # this model round. A later parser decision may restore ordinary
+                        # JSON through on_final, but raw tool arguments can never flash.
+                        if safe < len(joined) and held_from is None:
+                            held_from = safe
                             if not held_notified and on_event:
                                 on_event("toolpending")
                                 held_notified = True
+                        if held_from is not None:
+                            safe = min(safe, held_from)
+                        if defer_for_tool_evidence:
                             continue
-                        safe = safe_stream_emit_length(joined)
                         if safe > emitted:
                             on_delta(joined[emitted:safe])
                             emitted = safe
@@ -243,6 +270,19 @@ class TuLAgent:
                 raise RuntimeError("turn cancelled")
             tool_call = None if is_question_mark_only(prompt) else parse_tool_call(assistant_text)
             if not tool_call:
+                assistant_text = plainify_assistant_text(assistant_text)
+                if (
+                    tool_evidence_required
+                    and not local_action_succeeded
+                    and claims_local_action_completed(assistant_text)
+                ):
+                    if stream and on_final:
+                        on_final("")
+                    if not tool_evidence_recovery_used:
+                        pending_internal_prompt = REQUIRE_TOOL_EVIDENCE_PROMPT
+                        tool_evidence_recovery_used = True
+                        continue
+                    assistant_text = "未执行请求：模型没有调用完成本机操作所需的工具。"
                 if (
                     todo_required
                     and not todo_was_written
@@ -256,7 +296,6 @@ class TuLAgent:
                     pending_internal_prompt = REQUIRE_TODO_WRITE_PROMPT
                     todo_enforced = True
                     continue
-                assistant_text = plainify_assistant_text(assistant_text)
                 if (
                     last_turn_had_tool_result
                     and last_tool_name == "todo_write"
@@ -341,6 +380,8 @@ class TuLAgent:
             session.append(Message("user", tool_result_message(name, trim_tool_content(content)), images=tool_images))
             last_turn_had_tool_result = True
             last_turn_had_tool_error = is_failed_tool_result(content)
+            if name in LOCAL_ACTION_TOOLS and not last_turn_had_tool_error:
+                local_action_succeeded = True
             last_tool_name = name
             if should_cancel and should_cancel():
                 raise RuntimeError("turn cancelled")
@@ -946,6 +987,47 @@ def promises_more_work(text: str) -> bool:
     if any(cue in stripped.lower() for cue in completion_cues) and not any(cue in stripped for cue in ("接下来", "下一步", "继续", "然后")):
         return False
     return any(cue in stripped for cue in future_cues) and any(cue in stripped for cue in action_cues)
+
+
+def requires_local_tool_action(prompt: str) -> bool:
+    """Whether a user is directly requesting a local side effect.
+
+    Keep this deliberately narrower than general coding intent: explanatory questions
+    such as "how do I create a file" must remain normal answers, while an imperative
+    request targeting the desktop, machine, path, file, install, or process needs tool
+    evidence before it can be reported as complete.
+    """
+    normalized = re.sub(r"\s+", "", (prompt or "").lower())
+    if not normalized or any(cue in normalized for cue in ("怎么", "如何", "为什么", "教程", "示例", "howto", "howdo", "why")):
+        return False
+    actions = (
+        "创建", "新建", "写入", "保存", "修改", "改一下", "删除", "下载", "安装",
+        "运行", "启动", "停止", "克隆", "拉取", "解压", "上传",
+        "create", "write", "save", "modify", "edit", "delete", "download", "install",
+        "run", "start", "stop", "clone", "pull", "extract", "upload",
+    )
+    targets = (
+        "桌面", "本机", "本地", "电脑", "文件", "目录", "路径", "项目", "仓库", "源码",
+        "程序", "软件", "脚本", "html", "exe", "desktop", "local", "file", "folder",
+        "path", "project", "repo", "repository", "script", "app", "service",
+    )
+    path_like = bool(re.search(r"(?:[a-z]:[\\/]|[/\\][\w.-]+|\.[a-z0-9]{1,8}\b)", prompt or "", flags=re.IGNORECASE))
+    return any(cue in normalized for cue in actions) and (path_like or any(cue in normalized for cue in targets))
+
+
+def claims_local_action_completed(text: str) -> bool:
+    normalized = re.sub(r"\s+", "", (text or "").lower())
+    if not normalized or any(cue in normalized for cue in ("无法", "不能", "失败", "未创建", "没有创建", "未执行", "blocked")):
+        return False
+    cues = (
+        "已创建", "已经创建", "创建好了", "创建完成", "已新建", "已经新建",
+        "已写入", "已经写入", "写好了", "已保存", "保存好了", "已修改", "已经修改",
+        "修改完成", "已删除", "已经删除", "已下载", "下载完成", "已安装", "安装完成",
+        "已运行", "已经运行", "已启动", "已经启动", "已停止", "已经停止", "已上传",
+        "created", "written", "saved", "modified", "deleted", "downloaded", "installed",
+        "started", "stopped", "uploaded",
+    )
+    return any(cue in normalized for cue in cues)
 
 
 def todo_result_has_open_items(output: str) -> bool:

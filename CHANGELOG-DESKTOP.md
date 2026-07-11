@@ -1,5 +1,19 @@
 # 桌面端更新记录 / Desktop Changelog
 
+## v0.1.11
+
+中文：
+
+- **本机操作必须有真实工具结果才能宣称完成**：明确要求在桌面、本机或具体文件路径创建、写入、修改、删除、下载、安装或运行时，模型的无依据“已创建/已完成”不会再显示或写入会话；客户端会自动要求模型立即调用工具，连续不执行时改为明确报告未执行。
+- **工具参数从协议起点开始锁定扣留**：流式输出一旦出现 JSON、DSML、工具标签或工具代码围栏边界，本轮后续内容永久停在该边界，直到最终确认；带说明前缀、超长 HTML、逐字符分片和整段分片都不会先显示参数、再迟到替换成工具卡。
+- **加入真实故障形态回归测试**：使用“桌面创建小游戏 HTML”的虚假完成回复和超长 `write_file` 参数，验证工具卡在执行前出现、文件真实写入后才允许确认，且聊天增量和最终气泡均不包含原始工具参数。
+
+English:
+
+- **Required successful tool evidence before reporting local actions as complete**, suppressing unsupported create/write/modify/delete/download/install/run claims and automatically recovering into a real tool call.
+- **Locked streaming output at the first detected tool-protocol boundary**, preventing prefaced or very large JSON/DSML arguments from flashing before the tool card for both character-split and single-chunk responses.
+- **Added a regression matching the reported desktop HTML creation failure**, verifying real file creation, event order, and complete protocol redaction.
+
 ## v0.1.10
 
 中文：
