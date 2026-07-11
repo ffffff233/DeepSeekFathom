@@ -4,9 +4,11 @@ from dataclasses import asdict, replace as replace_settings
 import base64
 import json
 import mimetypes
+import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import threading
 import time
 import traceback
@@ -57,9 +59,56 @@ THINKING_LABELS = {
 }
 
 
+def _copy_missing_user_data(source: Path, target: Path) -> None:
+    """Migrate legacy install-local data without replacing anything user-owned."""
+    if not source.is_dir() or source.resolve() == target.resolve():
+        return
+    for item in source.rglob("*"):
+        try:
+            relative = item.relative_to(source)
+            destination = target / relative
+            if item.is_dir():
+                destination.mkdir(parents=True, exist_ok=True)
+            elif not destination.exists():
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(item, destination)
+        except OSError:
+            continue
+
+
+def get_desktop_settings() -> Settings:
+    settings = get_settings()
+    if not getattr(sys, "frozen", False) or os.getenv("DSTUL_WORKSPACE"):
+        return settings
+    user_workspace = Path.home().resolve()
+    _copy_missing_user_data(settings.workspace / ".deepseek-tulagent", user_workspace / ".deepseek-tulagent")
+    return replace_settings(settings, workspace=user_workspace)
+
+
+def desktop_window_geometry() -> tuple[int, int, tuple[int, int]]:
+    """Choose logical window dimensions that fit the current Windows DPI/work area."""
+    if sys.platform != "win32":
+        return 1180, 780, (920, 620)
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        rect = wintypes.RECT()
+        ctypes.windll.user32.SystemParametersInfoW(0x0030, 0, ctypes.byref(rect), 0)
+        dpi = int(ctypes.windll.user32.GetDpiForSystem()) or 96
+        scale = max(1.0, dpi / 96.0)
+        work_width = max(640, rect.right - rect.left)
+        work_height = max(480, rect.bottom - rect.top)
+        width = max(640, min(1180, int((work_width - 36) / scale)))
+        height = max(340, min(780, int((work_height - 120) / scale)))
+        return width, height, (min(760, width), min(440, height))
+    except (AttributeError, OSError, ValueError):
+        return 1180, 720, (760, 440)
+
+
 class DesktopApi:
     def __init__(self) -> None:
-        self.settings = get_settings()
+        self.settings = get_desktop_settings()
         self.mode = coerce_permission_tier(self.settings.default_mode)
         self.thinking = ThinkingMode.resolve(self.settings.default_thinking)
         self.session: Session | None = None
@@ -131,7 +180,7 @@ class DesktopApi:
         # changes provider or saves settings.
         keep_model = self.settings.model
         merge_file_config(config)
-        self.settings = get_settings()
+        self.settings = get_desktop_settings()
         if "model" not in config and keep_model:
             self.settings = self.settings.with_runtime(model=keep_model)
         self.mode = coerce_permission_tier(self.settings.default_mode)
@@ -339,7 +388,7 @@ class DesktopApi:
         if threshold is not None:
             current["compact_threshold_percent"] = threshold
         merge_file_config(current)
-        self.settings = get_settings().with_runtime(
+        self.settings = get_desktop_settings().with_runtime(
             max_tokens=self.thinking.max_tokens,
             thinking_enabled=self.thinking.api_thinking,
             reasoning_effort=self.thinking.reasoning_effort,
@@ -1145,13 +1194,14 @@ def main() -> None:
         ) from exc
 
     api = DesktopApi()
+    width, height, min_size = desktop_window_geometry()
     window = webview.create_window(
         "DeepSeekFathom",
         str(ASSET_DIR / "index.html"),
         js_api=api,
-        width=1180,
-        height=780,
-        min_size=(920, 620),
+        width=width,
+        height=height,
+        min_size=min_size,
         text_select=True,
     )
     api.bind_window(window)

@@ -1033,6 +1033,29 @@ def test_write_file_is_atomic_on_replace_failure(monkeypatch, tmp_path: Path):
     assert target.read_text(encoding="utf-8") == "old"
 
 
+def test_write_file_returns_replayable_line_diff(tmp_path: Path):
+    target = tmp_path / "notes.txt"
+    target.write_text("keep\nold\n", encoding="utf-8")
+    tools = ToolRegistry(tmp_path, policy=ApprovalPolicy.from_mode("root"))
+
+    result = tools.run("write_file", {"path": "notes.txt", "content": "keep\nnew\n"})
+    payload = json.loads(result.to_message())
+
+    assert payload["ui"]["kind"] == "file_change"
+    assert payload["ui"]["path"] == "notes.txt"
+    assert "-old" in payload["ui"]["diff"]
+    assert "+new" in payload["ui"]["diff"]
+
+
+def test_write_file_marks_new_file_as_created(tmp_path: Path):
+    tools = ToolRegistry(tmp_path, policy=ApprovalPolicy.from_mode("root"))
+    result = tools.run("write_file", {"path": "new.txt", "content": "first\nsecond\n"})
+
+    assert result.ui["operation"] == "created"
+    assert "+first" in result.ui["diff"]
+    assert "+second" in result.ui["diff"]
+
+
 def test_run_shell_background_command_starts_service(tmp_path: Path):
     tools = ToolRegistry(tmp_path, policy=ApprovalPolicy.from_mode("root"))
     result = tools.run("run_shell", {"command": "python3 -m http.server 0 &", "name": "test-http"})
@@ -1644,6 +1667,24 @@ def test_skill_store_discovers_and_creates_workspace_skills(tmp_path: Path):
     skills = store.list()
     assert [skill.name for skill in skills] == ["repo-debug"]
     assert "debugging this repository" in skills[0].description
+    assert skills[0].source == "user"
+
+
+def test_desktop_user_data_migration_never_overwrites_existing_files(tmp_path: Path):
+    from deepseek_tulagent.desktop.app import _copy_missing_user_data
+
+    legacy = tmp_path / "installed" / ".deepseek-tulagent"
+    stable = tmp_path / "home" / ".deepseek-tulagent"
+    (legacy / "sessions").mkdir(parents=True)
+    (stable / "sessions").mkdir(parents=True)
+    (legacy / "sessions" / "old.jsonl").write_text("legacy", encoding="utf-8")
+    (legacy / "sessions" / "keep.jsonl").write_text("replace me", encoding="utf-8")
+    (stable / "sessions" / "keep.jsonl").write_text("user copy", encoding="utf-8")
+
+    _copy_missing_user_data(legacy, stable)
+
+    assert (stable / "sessions" / "old.jsonl").read_text(encoding="utf-8") == "legacy"
+    assert (stable / "sessions" / "keep.jsonl").read_text(encoding="utf-8") == "user copy"
 
 
 def test_root_mode_has_no_confirmation_gate():
@@ -1996,6 +2037,9 @@ def test_desktop_brand_uses_transparent_whale_asset():
     assert '<img src="app-icon.png" alt="">' in brand
     assert "<svg" not in brand
     assert 'class="introLogo" src="app-icon.png"' in html
+    assert '<span id="version">v0.1.3</span>' in html
+    assert 'id="settingsView"' in html and '<dialog id="settingsDialog"' not in html
+    assert 'id="settingsBackTop"' in html and 'id="settingsBackBottom"' in html
     assert ".logo img" in css
     assert "background: transparent" in css
     assert icon.startswith(b"\x89PNG\r\n\x1a\n")
@@ -2791,10 +2835,10 @@ def test_cli_and_desktop_versions_are_independent():
     assert project["name"] == "deepseek-tulagent"
     assert project["version"] == __version__ == "0.1.108"
     assert project["scripts"]["deepseekfathom"] == "deepseek_tulagent.cli:main"
-    assert DESKTOP_VERSION == "0.1.2"
+    assert DESKTOP_VERSION == "0.1.3"
     assert REPO == "ffffff233/DeepSeekFathom"
-    assert '#define MyAppVersion "0.1.2"' in (root / "scripts" / "windows_installer.iss").read_text(encoding="utf-8")
-    assert 'filevers=(0, 1, 2, 0)' in (root / "assets" / "windows-version-info.txt").read_text(encoding="utf-8")
+    assert '#define MyAppVersion "0.1.3"' in (root / "scripts" / "windows_installer.iss").read_text(encoding="utf-8")
+    assert 'filevers=(0, 1, 3, 0)' in (root / "assets" / "windows-version-info.txt").read_text(encoding="utf-8")
 
 
 def test_update_refuses_dirty_source_tree(monkeypatch, tmp_path: Path):

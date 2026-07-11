@@ -51,6 +51,7 @@ const ICONS = {
   chevron: '<path d="M9 6l6 6-6 6"/>',
   copy: '<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
   refresh: '<path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 4v5h-5"/>',
+  pen: '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/>',
 };
 function icon(name, size = 14) {
   return `<svg class="ic" viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name] || ""}</svg>`;
@@ -779,15 +780,7 @@ function replayMessage(entry) {
     if (entry.name === "todo_write") applyTodoPayload(entry.output || "", currentSessionId());
     const card = addToolEvent(entry.name, entry.detail);
     if (card) {
-      card.dataset.done = "1";
-      const status = card.querySelector(".evStatus");
-      if (status) { status.textContent = "完成"; status.classList.add("ok"); }
-      const out = card.querySelector(".toolOut");
-      const code = out.querySelector("code");
-      code.innerHTML = entry.name === "todo_write"
-        ? todoSnapshotHtml(entry.output)
-        : (truncateForDisplay(String(entry.output || "").trim()) ? highlightCode(truncateForDisplay(String(entry.output || "").trim()), "") : '<span class="t-com">（无输出）</span>');
-      out.hidden = false;
+      completeToolBlock(card, entry.name, entry.output || "");
     }
     state.currentTool = null;
     return;
@@ -843,11 +836,127 @@ function renderBubble(bubble) {
   }
 }
 
-/* ---------- merged tool block: call (args) on top, output below ---------- */
+/* ---------- tool blocks ---------- */
+function isFileChangeTool(name) {
+  return name === "write_file" || name === "apply_patch";
+}
+
+function applyTheme(theme) {
+  const value = theme === "light" ? "light" : "dark";
+  document.documentElement.dataset.theme = value;
+  localStorage.setItem("deepseekfathom.theme", value);
+  document.querySelectorAll("[data-theme-value]").forEach((button) => {
+    button.classList.toggle("active", button.dataset.themeValue === value);
+  });
+}
+
+function openSettings() {
+  $("chatPane")?.setAttribute("hidden", "");
+  $("settingsView").hidden = false;
+  $("settingsBtn").classList.add("active");
+  applyTheme(document.documentElement.dataset.theme);
+}
+
+function closeSettings() {
+  $("settingsView").hidden = true;
+  $("chatPane")?.removeAttribute("hidden");
+  $("settingsBtn").classList.remove("active");
+}
+
+function initialFilePath(name, args) {
+  const text = String(args || "");
+  if (name === "write_file") {
+    const match = text.match(/(?:^|\s)path=(.*?)(?=\s+(?:content|max_bytes|timeout)=|$)/);
+    if (match && match[1]) return match[1].trim();
+  }
+  const patchPath = text.match(/\+\+\+\s+b\/([^\\]+?)(?:\\n|$)/);
+  return patchPath && patchPath[1] ? patchPath[1].trim() : "正在确定文件…";
+}
+
+function parseToolPayload(output) {
+  try {
+    const data = JSON.parse(String(output || ""));
+    return data && typeof data === "object" ? data : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function renderFileDiff(diff) {
+  const text = String(diff || "");
+  if (!text.trim()) return '<div class="filePending">文件内容没有发生变化。</div>';
+  let oldLine = null;
+  let newLine = null;
+  const parsed = text.split(/\r?\n/).map((line) => {
+    let type = "context";
+    let mark = " ";
+    let body = line;
+    let lineNumber = "";
+    if (line.startsWith("+++ ") || line.startsWith("--- ") || line.startsWith("diff ") || line.startsWith("index ")) {
+      type = "meta";
+    } else if (line.startsWith("@@")) {
+      type = "hunk";
+      const hunk = line.match(/^@@\s+-(\d+)(?:,\d+)?\s+\+(\d+)(?:,\d+)?\s+@@/);
+      if (hunk) {
+        oldLine = Number(hunk[1]);
+        newLine = Number(hunk[2]);
+      }
+    } else if (line.startsWith("+")) {
+      type = "add"; mark = "+"; body = line.slice(1);
+      if (newLine !== null) lineNumber = String(newLine++);
+    } else if (line.startsWith("-")) {
+      type = "del"; mark = "-"; body = line.slice(1);
+      if (oldLine !== null) lineNumber = String(oldLine++);
+    } else if (line.startsWith("\\ No newline")) {
+      type = "meta";
+    } else if (line.startsWith(" ")) {
+      body = line.slice(1);
+      if (newLine !== null) lineNumber = String(newLine++);
+      if (oldLine !== null) oldLine += 1;
+    }
+    return { type, mark, body, lineNumber };
+  });
+
+  const ordered = [];
+  for (let index = 0; index < parsed.length;) {
+    if (parsed[index].type !== "add" && parsed[index].type !== "del") {
+      ordered.push(parsed[index++]);
+      continue;
+    }
+    const changed = [];
+    while (index < parsed.length && (parsed[index].type === "add" || parsed[index].type === "del")) {
+      changed.push(parsed[index++]);
+    }
+    const removed = changed.filter((row) => row.type === "del");
+    const added = changed.filter((row) => row.type === "add");
+    ordered.push(...removed, ...added);
+  }
+
+  const rows = ordered.map(({ type, mark, body, lineNumber }) =>
+    `<div class="diffLine ${type}"><span class="diffMark"><span class="diffNumber">${escapeHtml(lineNumber)}</span><span class="diffSign">${escapeHtml(mark)}</span></span><code>${escapeHtml(body || " ")}</code></div>`
+  ).join("");
+  return `<div class="diffTable">${rows}</div>`;
+}
+
+function addFileChangeEvent(name, args) {
+  const details = document.createElement("details");
+  const verb = name === "write_file" ? "写入文件" : "修改文件";
+  details.className = "threadEvent fileChange";
+  details.dataset.tool = name || "";
+  details.innerHTML = `
+    <summary><span class="eventIcon">${icon("pen")}</span><span class="fileVerb">${verb}</span><strong class="filePath">${escapeHtml(initialFilePath(name, args))}</strong><span class="evStatus">运行中</span><span class="evChevron">${icon("chevron", 13)}</span></summary>
+    <div class="fileDiff"><div class="filePending">正在准备文件差异…</div></div>`;
+  appendTranscriptNode(details);
+  scrollMessages();
+  mirror(`[文件修改] ${name || ""} ${args || ""}`);
+  return details;
+}
+
 function addToolEvent(name, args) {
   bumpEventCount();
   const intro = document.querySelector(".empty, .intro");
   if (intro) intro.remove();
+  if (isFileChangeTool(name)) return addFileChangeEvent(name, args);
   const details = document.createElement("details");
   details.className = "threadEvent tool";
   details.dataset.tool = name || "";
@@ -866,7 +975,7 @@ function addToolEvent(name, args) {
 function completeToolEvent(name, output) {
   let block = state.currentTool;
   if (!block || block.dataset.done || (name && block.dataset.tool && block.dataset.tool !== name)) {
-    const blocks = Array.from($("messages").querySelectorAll(".threadEvent.tool")).reverse();
+    const blocks = Array.from($("messages").querySelectorAll(".threadEvent[data-tool]")).reverse();
     block = blocks.find((b) => !b.dataset.done && b.dataset.tool === name)
       || blocks.find((b) => !b.dataset.done)
       || null;
@@ -875,17 +984,40 @@ function completeToolEvent(name, output) {
     addEvent("done", name, output);
     return;
   }
-  block.dataset.done = "1";
+  completeToolBlock(block, name, output);
   state.currentTool = null;
+  scrollMessages();
+  mirror(`[工具完成] ${name || ""} ${(output || "").slice(0, 200)}`);
+}
+
+function completeToolBlock(block, name, output) {
+  block.dataset.done = "1";
+  const payload = parseToolPayload(output);
+  const failed = Boolean(payload && payload.ok === false);
   const status = block.querySelector(".evStatus");
-  if (status) { status.textContent = "完成"; status.classList.add("ok"); }
+  if (status) {
+    status.textContent = failed ? "失败" : "完成";
+    status.classList.toggle("ok", !failed);
+  }
+  block.classList.toggle("error", failed);
+  if (block.classList.contains("fileChange")) {
+    const ui = payload && payload.ui && payload.ui.kind === "file_change" ? payload.ui : null;
+    const path = ui && (ui.path || (Array.isArray(ui.paths) ? ui.paths.join("、") : ""));
+    if (path) block.querySelector(".filePath").textContent = path;
+    const verb = block.querySelector(".fileVerb");
+    if (verb && ui) verb.textContent = ui.operation === "created" ? "创建文件" : "修改文件";
+    const diff = ui ? ui.diff : "";
+    const fallback = payload && payload.output ? String(payload.output) : String(output || "");
+    block.querySelector(".fileDiff").innerHTML = diff
+      ? renderFileDiff(diff)
+      : `<div class="filePending">${escapeHtml(fallback || "没有可显示的差异。")}</div>`;
+    return;
+  }
   const out = block.querySelector(".toolOut");
   const code = out.querySelector("code");
   const text = truncateForDisplay(String(output || "").trim());
   code.innerHTML = name === "todo_write" ? todoSnapshotHtml(output) : (text ? highlightCode(text, "") : "<span class=\"t-com\">（无输出）</span>");
   out.hidden = false;
-  scrollMessages();
-  mirror(`[工具完成] ${name || ""} ${(output || "").slice(0, 200)}`);
 }
 
 function todoSnapshotHtml(output) {
@@ -1608,7 +1740,13 @@ $("format").addEventListener("change", async () => {
   // the new provider serves a different model list — refresh it
   await refreshModels().catch(() => {});
 });
-$("settingsBtn").onclick = () => $("settingsDialog").showModal();
+$("settingsBtn").onclick = openSettings;
+$("settingsBackTop").onclick = closeSettings;
+$("settingsBackBottom").onclick = closeSettings;
+document.querySelectorAll("[data-theme-value]").forEach((button) => {
+  button.onclick = () => applyTheme(button.dataset.themeValue);
+});
+applyTheme(document.documentElement.dataset.theme);
 $("ctxSave").onclick = async () => {
   const configureContext = await apiMethod("configure_context");
   const result = await configureContext({
@@ -1686,8 +1824,8 @@ $("saveSettings").onclick = async (event) => {
     defaultMode: $("mode").value,
     defaultThinking: $("thinking").value,
   });
-  $("settingsDialog").close();
   await boot();
+  toast("设置已保存");
 };
 $("newSession").onclick = async () => {
   const result = await window.pywebview.api.new_session();
