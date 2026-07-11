@@ -1,5 +1,5 @@
 #ifndef MyAppVersion
-  #define MyAppVersion "0.1.107"
+  #define MyAppVersion "0.1.0"
 #endif
 
 [Setup]
@@ -7,8 +7,8 @@ AppId={{D20DC02D-40E2-486A-88B1-AC597D6B45C7}
 AppName=DeepSeekFathom
 AppVersion={#MyAppVersion}
 AppPublisher=DeepSeekFathom
-AppPublisherURL=https://github.com/ffffff233/deepseek-tulagent
-AppSupportURL=https://github.com/ffffff233/deepseek-tulagent/issues
+AppPublisherURL=https://github.com/ffffff233/DeepSeekFathom
+AppSupportURL=https://github.com/ffffff233/DeepSeekFathom/issues
 DefaultDirName={localappdata}\Programs\DeepSeekFathom
 DefaultGroupName=DeepSeekFathom
 DisableProgramGroupPage=yes

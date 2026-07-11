@@ -1,6 +1,6 @@
 [project]
 name = "deepseek-tulagent"
-version = "0.1.107"
+version = "0.1.108"
 description = "A lightweight TuL-style coding agent tailored for DeepSeek's OpenAI-compatible API."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -14,6 +14,9 @@ desktop = [
 ]
 
 [project.scripts]
+deepseekfathom = "deepseek_tulagent.cli:main"
+deepseekfathom-desktop = "deepseek_tulagent.desktop.app:main"
+# Compatibility aliases retained for existing installations.
 dstul = "deepseek_tulagent.cli:main"
 deepseek-tulagent = "deepseek_tulagent.cli:main"
 deepseekTul = "deepseek_tulagent.cli:main"

@@ -13,12 +13,14 @@ English
 DeepSeekFathom is a terminal coding agent built specifically around DeepSeek's OpenAI-compatible chat API. It provides local tools, session resume, slash commands, permission modes, thinking modes, and installable skills while keeping the implementation independent and compact.
 It also includes a desktop entrypoint that can be packaged as a Windows exe.
 
+The product, repository, and CLI all use **DeepSeekFathom**. Only the pip distribution identifier and user-data directory retain `deepseek-tulagent` so existing installations can upgrade in place without losing sessions.
+
 ## Features
 
 - DeepSeek-first provider config: `DEEPSEEK_API_KEY`, `DEEPSEEK_BASE_URL`, `DEEPSEEK_MODEL`
 - Native DeepSeek V4 aliases: `pro`, `v4-pro`, `flash`, `v4-flash`
-- Live model discovery through `deepseekTul models` and `deepseekTul doctor --live`
-- Global `deepseekTul` command for interactive use
+- Live model discovery through `deepseekfathom models` and `deepseekfathom doctor --live`
+- Global `deepseekfathom` command for interactive use
 - Tool registry: files, local search, web search, git status, shell, patch, downloads, resilient repository cloning, background services
 - Subagents: `delegate_agent` supports both one isolated subtask and an `agents=[...]` batch for multiple subagents in one tool call
 - Desktop app: chat, file attachments, skill list, collapsible tool calls, collapsible internal thinking, quick model/thinking/permission switching, and third-party OpenAI-compatible API configuration
@@ -31,57 +33,61 @@ It also includes a desktop entrypoint that can be packaged as a Windows exe.
 
 ## Quickstart
 
+Windows users can download and run the installer directly:
+
+**[DeepSeekFathom-0.1.0-Setup.exe](https://github.com/ffffff233/DeepSeekFathom/releases/download/desktop-v0.1.0/DeepSeekFathom-0.1.0-Setup.exe)**
+
 Linux / macOS:
 
 ```bash
-git clone https://github.com/ffffff233/deepseek-tulagent.git
-cd deepseek-tulagent
+git clone https://github.com/ffffff233/DeepSeekFathom.git
+cd DeepSeekFathom
 python3 -m venv .venv
 . .venv/bin/activate
 pip install -e .
-deepseekTul config set --base-url https://api.deepseek.com --api-key sk-... --model deepseek-v4-flash
-deepseekTul doctor --live
-deepseekTul
+deepseekfathom config set --base-url https://api.deepseek.com --api-key sk-... --model deepseek-v4-flash
+deepseekfathom doctor --live
+deepseekfathom
 ```
 
 Start the desktop app:
 
 ```bash
 python3 -m pip install --upgrade ".[desktop]"
-deepseekTul desktop
+deepseekfathom desktop
 ```
 
 On Windows after installation:
 
 ```powershell
-py -3 -m pip install --upgrade "deepseek-tulagent[desktop] @ https://github.com/ffffff233/deepseek-tulagent/archive/refs/tags/v0.1.107.tar.gz"
-deepseekTulDesktop
+py -3 -m pip install --upgrade "deepseek-tulagent[desktop] @ https://github.com/ffffff233/DeepSeekFathom/archive/refs/tags/v0.1.108.tar.gz"
+deepseekfathom-desktop
 ```
 
 Native Windows PowerShell:
 
 ```powershell
-py -3 -m pip install --upgrade https://github.com/ffffff233/deepseek-tulagent/archive/refs/tags/v0.1.107.tar.gz
-deepseekTul config set --base-url https://api.deepseek.com --api-key sk-... --model deepseek-v4-flash
-deepseekTul doctor --live
-deepseekTul
+py -3 -m pip install --upgrade https://github.com/ffffff233/DeepSeekFathom/archive/refs/tags/v0.1.108.tar.gz
+deepseekfathom config set --base-url https://api.deepseek.com --api-key sk-... --model deepseek-v4-flash
+deepseekfathom doctor --live
+deepseekfathom
 ```
 
 Windows CMD:
 
 ```bat
-py -3 -m pip install --upgrade https://github.com/ffffff233/deepseek-tulagent/archive/refs/tags/v0.1.107.tar.gz
-deepseekTul version
-deepseekTul
+py -3 -m pip install --upgrade https://github.com/ffffff233/DeepSeekFathom/archive/refs/tags/v0.1.108.tar.gz
+deepseekfathom version
+deepseekfathom
 ```
 
-Native Windows supports `deepseekTul run`, `config`, `update`, `sessions`, and line-mode interactive chat. The Unix-style full TUI depends on `curses`; when it is unavailable on Windows, the CLI falls back to line mode instead of crashing at startup.
+Native Windows supports `deepseekfathom run`, `config`, `update`, `sessions`, and line-mode interactive chat. The Unix-style full TUI depends on `curses`; when it is unavailable on Windows, the CLI falls back to line mode instead of crashing at startup.
 The desktop app uses `pywebview` and is suitable for native Windows use.
 
 If `git clone` is blocked by local proxy/git configuration, install directly from the tagged source tarball instead:
 
 ```bash
-python3 -m pip install --upgrade https://github.com/ffffff233/deepseek-tulagent/archive/refs/tags/v0.1.107.tar.gz
+python3 -m pip install --upgrade https://github.com/ffffff233/DeepSeekFathom/archive/refs/tags/v0.1.108.tar.gz
 ```
 
 Proxy-compatible examples:
@@ -89,7 +95,7 @@ Proxy-compatible examples:
 ```bash
 export HTTPS_PROXY=http://127.0.0.1:7890
 export HTTP_PROXY=http://127.0.0.1:7890
-python3 -m pip install --upgrade https://github.com/ffffff233/deepseek-tulagent/archive/refs/tags/v0.1.107.tar.gz
+python3 -m pip install --upgrade https://github.com/ffffff233/DeepSeekFathom/archive/refs/tags/v0.1.108.tar.gz
 ```
 
 Windows PowerShell proxy example:
@@ -97,7 +103,7 @@ Windows PowerShell proxy example:
 ```powershell
 $env:HTTPS_PROXY="http://127.0.0.1:7890"
 $env:HTTP_PROXY="http://127.0.0.1:7890"
-py -3 -m pip install --upgrade https://github.com/ffffff233/deepseek-tulagent/archive/refs/tags/v0.1.107.tar.gz
+py -3 -m pip install --upgrade https://github.com/ffffff233/DeepSeekFathom/archive/refs/tags/v0.1.108.tar.gz
 ```
 
 Windows CMD proxy example:
@@ -105,7 +111,7 @@ Windows CMD proxy example:
 ```bat
 set HTTPS_PROXY=http://127.0.0.1:7890
 set HTTP_PROXY=http://127.0.0.1:7890
-py -3 -m pip install --upgrade https://github.com/ffffff233/deepseek-tulagent/archive/refs/tags/v0.1.107.tar.gz
+py -3 -m pip install --upgrade https://github.com/ffffff233/DeepSeekFathom/archive/refs/tags/v0.1.108.tar.gz
 ```
 
 When asking the agent to fetch another GitHub repository, say something like `clone owner/repo into path`. The agent should use `clone_repo`, which tries direct git, mirror URLs, and GitHub archive download before asking you to configure `HTTP_PROXY`, `HTTPS_PROXY`, or git proxy settings.
@@ -121,17 +127,17 @@ The tool maps Windows-style paths into the configured workspace to avoid writing
 One-shot usage:
 
 ```bash
-deepseekTul run --mode root --think fast "inspect this repo"
+deepseekfathom run --mode root --think fast "inspect this repo"
 ```
 
 Startup commands:
 
 ```bash
-deepseekTul                                    # default: root + fast + flash
-deepseekTul start --mode agent --think balanced
-deepseekTul start --mode trusted --think deep --yes
-deepseekTul start --mode root --think max
-deepseekTul run --mode agent --think fast --yes "run tests and fix failures"
+deepseekfathom                                    # default: root + fast + flash
+deepseekfathom start --mode agent --think balanced
+deepseekfathom start --mode trusted --think deep --yes
+deepseekfathom start --mode root --think max
+deepseekfathom run --mode agent --think fast --yes "run tests and fix failures"
 ```
 
 ## Desktop App and Windows exe
@@ -147,23 +153,23 @@ The desktop app includes:
 You do **not** need to build an exe. Just install the desktop extra and run it:
 
 ```powershell
-py -3 -m pip install --upgrade "deepseek-tulagent[desktop]"
-deepseekTulDesktop           # or: deepseekTul desktop
+py -3 -m pip install --upgrade "deepseek-tulagent[desktop] @ https://github.com/ffffff233/DeepSeekFathom/archive/refs/tags/v0.1.108.tar.gz"
+deepseekfathom-desktop           # or: deepseekfathom desktop
 ```
 
-On Linux / macOS use `python3 -m pip install --upgrade "deepseek-tulagent[desktop]"` then `deepseekTulDesktop`. The desktop uses your system WebView (Edge WebView2 on Windows, WebKitGTK on Linux, WKWebView on macOS); no compilation step is involved.
+On Linux / macOS use the same tagged source install command with `python3 -m pip`, then run `deepseekfathom-desktop`. The desktop uses your system WebView (Edge WebView2 on Windows, WebKitGTK on Linux, WKWebView on macOS); no compilation step is involved.
 
 ### Optional: standalone Windows exe (advanced)
 
 Only if you want a double-clickable bundle for machines without Python:
 
 ```powershell
-git clone https://github.com/ffffff233/deepseek-tulagent.git
-cd deepseek-tulagent
+git clone https://github.com/ffffff233/DeepSeekFathom.git
+cd DeepSeekFathom
 .\scripts\build_windows_exe.ps1
 ```
 
-Outputs: `dist\DeepSeekFathom\DeepSeekFathom.exe` and, when Inno Setup 6 is installed, `dist\installer\DeepSeekFathom-0.1.107-Setup.exe`. The installer installs per user and creates branded **DeepSeekFathom** desktop and Start menu entries. GitHub Actions builds the same installer on tags and attaches it directly to the GitHub Release.
+Outputs: `dist\DeepSeekFathom\DeepSeekFathom.exe` and, when Inno Setup 6 is installed, `dist\installer\DeepSeekFathom-0.1.0-Setup.exe`. The installer installs per user and creates branded **DeepSeekFathom** desktop and Start menu entries. Desktop releases use independent `desktop-vX.Y.Z` tags; GitHub Actions builds the installer from those tags and attaches it to the matching Release.
 
 ## Conversations
 
@@ -177,32 +183,32 @@ When you actively leave an interactive conversation with `/exit`, `/quit`, Ctrl-
 
 ```text
 [session] <SESSION_ID>
-[resume]  deepseekTul start --resume <SESSION_ID>
+[resume]  deepseekfathom start --resume <SESSION_ID>
 ```
 
 Session commands:
 
 ```bash
-deepseekTul sessions list
-deepseekTul sessions show <SESSION_ID>
-deepseekTul sessions resume <SESSION_ID>
-deepseekTul start --resume <SESSION_ID>
-deepseekTul version
-deepseekTul update --check
-deepseekTul update
+deepseekfathom sessions list
+deepseekfathom sessions show <SESSION_ID>
+deepseekfathom sessions resume <SESSION_ID>
+deepseekfathom start --resume <SESSION_ID>
+deepseekfathom version
+deepseekfathom update --check
+deepseekfathom update
 ```
 
 Resume example:
 
 ```bash
-deepseekTul start --resume 022a00cb-e1cf-49af-9e11-0cbc6b2e3ab8
+deepseekfathom start --resume 022a00cb-e1cf-49af-9e11-0cbc6b2e3ab8
 ```
 
 Current local default config lives at `~/.deepseek-tulagent/config.json`. Environment variables still override it.
 
 ## Slash Palette
 
-Inside `deepseekTul`, press `/` to open the command palette immediately:
+Inside `deepseekfathom`, press `/` to open the command palette immediately:
 
 - type letters to filter, for example `m` matches `/model` and `/mode`
 - use `↑` / `↓` to select
@@ -230,7 +236,7 @@ Discovered skills are shown in the same palette as `/skill <name>` entries.
 `/think` opens the thinking-mode picker. `/compact` manually compresses older context while keeping recent messages exact.
 Selecting a skill from the `/` palette inserts `Use skill <name>: ` into the composer so you can keep typing the task before sending it to the agent.
 
-See [CHANGELOG.md](CHANGELOG.md) for update history.
+Update history is split by product: [CLI changelog](CHANGELOG-CLI.md) | [Desktop changelog](CHANGELOG-DESKTOP.md) | [Legacy combined history](CHANGELOG-LEGACY.md).
 
 ## Context Compaction
 
@@ -251,16 +257,16 @@ This follows the same broad strategy used by terminal agents such as Codex: summ
 ## Versions and Updates
 
 ```bash
-deepseekTul version
-deepseekTul update --check
-deepseekTul update
+deepseekfathom version
+deepseekfathom update --check
+deepseekfathom update
 ```
 
 Interactive startup checks the latest GitHub tag. If a newer version exists, the update picker opens with `update` selected by default; press Enter to update, or press Down then Enter to skip.
 
 The updater does not touch user configuration, API keys, model defaults, sessions, or skill directories. If the source checkout has local uncommitted changes, the update stops instead of overwriting user edits.
 
-If git update fails because git/proxy syntax is unsupported, `deepseekTul update` falls back to installing the GitHub tag tarball with pip. You can also set `HTTP_PROXY` / `HTTPS_PROXY` for the tarball path, or configure git separately:
+If git update fails because git/proxy syntax is unsupported, `deepseekfathom update` falls back to installing the GitHub tag tarball with pip. You can also set `HTTP_PROXY` / `HTTPS_PROXY` for the tarball path, or configure git separately:
 
 ```bash
 git config --global http.proxy http://127.0.0.1:7890
@@ -321,9 +327,9 @@ Run tests first, inspect failures, then patch narrowly.
 Skill commands:
 
 ```bash
-deepseekTul skills list
-deepseekTul skills show repo-debug
-deepseekTul skills new repo-debug --description "Use when debugging this repository." --body "Run tests first."
+deepseekfathom skills list
+deepseekfathom skills show repo-debug
+deepseekfathom skills new repo-debug --description "Use when debugging this repository." --body "Run tests first."
 ```
 
 Discovered skill summaries are injected into the agent prompt at startup/run time. The implementation is independent from Codex; it only follows the same useful convention of local `SKILL.md` instruction packs.

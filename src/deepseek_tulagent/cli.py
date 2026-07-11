@@ -36,7 +36,7 @@ def main(argv: list[str] | None = None) -> int:
     if not argv:
         settings = get_settings()
         argv = ["start", "--mode", settings.default_mode, "--think", settings.default_thinking]
-    parser = argparse.ArgumentParser(prog="dstul")
+    parser = argparse.ArgumentParser(prog="deepseekfathom")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     run_parser = sub.add_parser("run", help="run a one-shot DeepSeek TuLAgent task")
@@ -214,7 +214,7 @@ def update_command(check_only: bool = False) -> int:
         print(f"update check failed: {exc}", file=sys.stderr)
         return 2
     if not info:
-        print(f"deepseekTul is up to date: {__version__}")
+        print(f"deepseekfathom is up to date: {__version__}")
         return 0
     print(f"update available: {info.current} -> {info.latest}")
     print(info.url)
@@ -736,7 +736,7 @@ def choose_auto_thinking(settings, prompt: str) -> ThinkingMode:
 
 def print_session_handoff(session_id: str) -> None:
     print(f"\n[session] {session_id}", file=sys.stderr)
-    print(f"[resume] deepseekTul start --resume {session_id}", file=sys.stderr)
+    print(f"[resume] deepseekfathom start --resume {session_id}", file=sys.stderr)
 
 
 def print_recent_session_messages(session, limit: int = 3) -> None:

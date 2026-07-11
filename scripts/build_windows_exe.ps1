@@ -2,7 +2,7 @@
 #
 # You do NOT need this to run the desktop app. The simplest path is:
 #     py -3 -m pip install --upgrade "deepseek-tulagent[desktop]"
-#     deepseekTulDesktop
+#     deepseekfathom-desktop
 # Build an exe only if you want a double-clickable bundle for machines without Python.
 
 $ErrorActionPreference = "Stop"
@@ -38,7 +38,7 @@ $iscc = @(
   "$env:ProgramFiles\Inno Setup 6\ISCC.exe"
 ) | Where-Object { Test-Path $_ } | Select-Object -First 1
 if ($iscc) {
-  $version = python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])"
+  $version = python -c "from deepseek_tulagent.desktop import DESKTOP_VERSION; print(DESKTOP_VERSION)"
   & $iscc "/DMyAppVersion=$version" scripts/windows_installer.iss
   if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed with exit code $LASTEXITCODE" }
 } else {

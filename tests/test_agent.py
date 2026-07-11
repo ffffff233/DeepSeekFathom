@@ -1121,7 +1121,7 @@ def test_clone_repo_rejects_non_empty_target(tmp_path: Path):
     target.mkdir()
     (target / "keep.txt").write_text("keep", encoding="utf-8")
     tools = ToolRegistry(tmp_path, policy=ApprovalPolicy.from_mode("root"))
-    result = tools.run("clone_repo", {"repo": "ffffff233/deepseek-tulagent", "path": "repo"})
+    result = tools.run("clone_repo", {"repo": "ffffff233/DeepSeekFathom", "path": "repo"})
     assert result.ok is False
     assert "not empty" in result.output
     assert (target / "keep.txt").read_text(encoding="utf-8") == "keep"
@@ -2227,7 +2227,7 @@ def test_session_handoff_prints_resume_command(capsys):
     print_session_handoff("abc-123")
     err = capsys.readouterr().err
     assert "[session] abc-123" in err
-    assert "deepseekTul start --resume abc-123" in err
+    assert "deepseekfathom start --resume abc-123" in err
 
 
 def test_slash_palette_prints_commands_and_tools(tmp_path: Path, monkeypatch, capsys):
@@ -2703,6 +2703,24 @@ def test_update_version_comparison():
     assert normalize_version("v0.1.2") == "0.1.2"
     assert is_newer("v0.1.2", "0.1.1") is True
     assert is_newer("v0.1.1", "0.1.1") is False
+
+
+def test_cli_and_desktop_versions_are_independent():
+    import tomllib
+
+    from deepseek_tulagent import __version__
+    from deepseek_tulagent.desktop import DESKTOP_VERSION
+    from deepseek_tulagent.updates import REPO
+
+    root = Path(__file__).parents[1]
+    project = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))["project"]
+    assert project["name"] == "deepseek-tulagent"
+    assert project["version"] == __version__ == "0.1.108"
+    assert project["scripts"]["deepseekfathom"] == "deepseek_tulagent.cli:main"
+    assert DESKTOP_VERSION == "0.1.0"
+    assert REPO == "ffffff233/DeepSeekFathom"
+    assert '#define MyAppVersion "0.1.0"' in (root / "scripts" / "windows_installer.iss").read_text(encoding="utf-8")
+    assert 'filevers=(0, 1, 0, 0)' in (root / "assets" / "windows-version-info.txt").read_text(encoding="utf-8")
 
 
 def test_update_refuses_dirty_source_tree(monkeypatch, tmp_path: Path):
