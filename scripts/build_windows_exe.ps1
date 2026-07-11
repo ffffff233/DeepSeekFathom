@@ -11,26 +11,9 @@ python -m pip install --upgrade pip
 # pywebview pulls in its Windows backend (pythonnet / WebView2) via environment markers.
 python -m pip install --upgrade ".[desktop]" pyinstaller
 
-# --collect-all bundles data files (the desktop assets/ HTML/CSS/JS) AND submodules;
-# the explicit hidden-imports cover pywebview's Windows backend, which PyInstaller's
-# static analysis otherwise misses (the usual source of "module not found" crashes).
-python -m PyInstaller `
-  --noconfirm `
-  --clean `
-  --windowed `
-  --name DeepSeekFathom `
-  --icon assets/app-icon.ico `
-  --version-file assets/windows-version-info.txt `
-  --collect-all deepseek_tulagent `
-  --collect-all webview `
-  --collect-submodules webview `
-  --hidden-import clr `
-  --hidden-import proxy_tools `
-  --hidden-import bottle `
-  --hidden-import webview.platforms.edgechromium `
-  --hidden-import webview.platforms.winforms `
-  --hidden-import webview.platforms.mshtml `
-  scripts/desktop_launcher.py
+# The checked-in spec pins package discovery and UI assets to this checkout. Generating
+# a spec with --collect-all here can silently pull an older site-packages frontend.
+python -m PyInstaller --noconfirm --clean DeepSeekFathom.spec
 
 $iscc = @(
   "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe",

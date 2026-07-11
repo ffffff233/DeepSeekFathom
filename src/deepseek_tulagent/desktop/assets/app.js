@@ -27,6 +27,7 @@ const state = {
   katexRenderToString: null,
   katexLoadPromise: null,
   activeGoal: "",
+  pendingNativeDrop: null,
 };
 
 const $ = (id) => document.getElementById(id);
@@ -141,6 +142,17 @@ function installDemoApi() {
 window.DeepSeekDesktop = {
   onNativeEvent(message) {
     const { event, payload } = message;
+    if (event === "native:drop") {
+      const files = Array.isArray(payload && payload.files) ? payload.files : [];
+      files.forEach(addAttachmentOnce);
+      if (state.pendingNativeDrop) {
+        clearTimeout(state.pendingNativeDrop.timer);
+        state.pendingNativeDrop.resolve(files.length > 0);
+        state.pendingNativeDrop = null;
+      }
+      renderAttachments();
+      return;
+    }
     const sid = String((payload && payload.sessionId) || "");
     const tid = String((payload && payload.turnId) || "");
     const activeSid = currentSessionId();
@@ -211,12 +223,7 @@ window.DeepSeekDesktop = {
       const text = payload.text || "";
       if (!text.trim()) {
         if (state.currentAssistant) {
-          const bubble = state.currentAssistant.querySelector(".bubble");
-          if ((bubble && (bubble.dataset.raw || "").trim())) {
-            state.currentAssistant.classList.remove("streaming");
-          } else {
-            state.currentAssistant.remove();
-          }
+          state.currentAssistant.remove();
           state.currentAssistant = null;
         }
         return;
@@ -2037,6 +2044,28 @@ async function uploadFile(file, relPath) {
   } catch (_) { /* skip unreadable file */ }
 }
 
+function addAttachmentOnce(file) {
+  if (!file || !file.path) return;
+  const key = String(file.path).toLowerCase();
+  if (state.attachments.some((item) => String(item.path || "").toLowerCase() === key)) return;
+  state.attachments.push(file);
+}
+
+function waitForNativeDrop(timeoutMs = 500) {
+  if (state.pendingNativeDrop) {
+    clearTimeout(state.pendingNativeDrop.timer);
+    state.pendingNativeDrop.resolve(false);
+  }
+  return new Promise((resolve) => {
+    const pending = { resolve, timer: 0 };
+    pending.timer = setTimeout(() => {
+      if (state.pendingNativeDrop === pending) state.pendingNativeDrop = null;
+      resolve(false);
+    }, timeoutMs);
+    state.pendingNativeDrop = pending;
+  });
+}
+
 // walk a dropped FileSystemEntry (file or directory) and upload every file
 function collectEntry(entry, prefix) {
   return new Promise((resolve) => {
@@ -2080,6 +2109,7 @@ composeCard.addEventListener("drop", async (e) => {
     renderAttachments();
     return;
   }
+  if (dt && dt.files && dt.files.length && await waitForNativeDrop()) return;
   const items = dt && dt.items ? Array.from(dt.items) : [];
   const entries = items.map((it) => it.webkitGetAsEntry && it.webkitGetAsEntry()).filter(Boolean);
   if (entries.length) {

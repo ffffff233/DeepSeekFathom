@@ -1245,6 +1245,44 @@ def describe_local_paths(paths: list[str] | tuple[str, ...]) -> list[dict[str, A
     return files
 
 
+def native_drop_paths(event: dict[str, Any] | None) -> list[str]:
+    """Extract WebView2 file paths populated by pywebview's native drop bridge."""
+    if not isinstance(event, dict):
+        return []
+    transfer = event.get("dataTransfer")
+    if not isinstance(transfer, dict):
+        return []
+    paths: list[str] = []
+    for item in transfer.get("files") or []:
+        if not isinstance(item, dict):
+            continue
+        path = str(item.get("pywebviewFullPath") or "").strip()
+        if path and path not in paths:
+            paths.append(path)
+    return paths
+
+
+def bind_native_file_drop(window: Any, api: DesktopApi) -> None:
+    """Use pywebview's WebView2 bridge so an Explorer drop keeps its real path."""
+    def on_loaded() -> None:
+        try:
+            compose = window.dom.get_element(".composeCard")
+            if compose is None:
+                return
+
+            def on_drop(event: dict[str, Any]) -> None:
+                files = describe_local_paths(native_drop_paths(event))
+                if files:
+                    api._emit("native:drop", {"files": files})
+
+            compose.events.drop += on_drop
+        except Exception:
+            # Browser content upload remains available when a backend has no paths.
+            return
+
+    window.events.loaded += on_loaded
+
+
 def video_duration_seconds(path: Path, timeout: int = 8) -> float | None:
     ffprobe = shutil.which("ffprobe")
     if not ffprobe:
@@ -1333,6 +1371,7 @@ def main() -> None:
         text_select=True,
     )
     api.bind_window(window)
+    bind_native_file_drop(window, api)
     # Try common GUI backends in turn so a missing/broken default backend gives a clear,
     # actionable message instead of an opaque crash. Any failure skips to the next backend
     # (a raised-on-first-error loop showed up as "crashes twice then works").

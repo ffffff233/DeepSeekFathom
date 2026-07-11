@@ -72,6 +72,31 @@ def test_parse_text_wrapped_tool_json():
     assert call == ("search_text", {"query": "DeepSeek"})
 
 
+def test_parse_deepseek_dsml_tool_call_with_multiline_html():
+    text = '''<｜｜DSML｜｜tool_calls>
+<｜｜DSML｜｜invoke name="write_file">
+<｜｜DSML｜｜parameter name="content" string="true"><!doctype html>
+<html><body><script>const game = true;</script></body></html></｜｜DSML｜｜parameter>
+<｜｜DSML｜｜parameter name="path">C:\\Users\\admin\\Desktop\\snake.html</｜｜DSML｜｜parameter>
+</｜｜DSML｜｜invoke>
+</｜｜DSML｜｜tool_calls>'''
+    assert parse_tool_call(text) == (
+        "write_file",
+        {
+            "content": '<!doctype html>\n<html><body><script>const game = true;</script></body></html>',
+            "path": r"C:\Users\admin\Desktop\snake.html",
+        },
+    )
+
+
+def test_explanatory_tool_json_example_is_not_executed():
+    text = '''正确格式应该是纯 JSON 对象，比如：
+```json
+{"tool":"write_file","arguments":{"path":"...","content":"..."}}
+```'''
+    assert parse_tool_call(text) is None
+
+
 def test_parse_provider_usage_stats():
     chat = parse_usage_stats(
         {
@@ -633,6 +658,105 @@ def test_streamed_fenced_tool_json_is_not_printed_as_visible_delta(tmp_path: Pat
     assert result.answer == "完成。"
     assert "".join(visible) == "完成。"
     assert "```json" not in "".join(visible)
+
+
+def test_character_split_tool_fence_is_removed_from_desktop_stream(tmp_path: Path):
+    class CharacterStreamingClient:
+        def __init__(self):
+            self.calls = 0
+
+        def stream_chat(self, _messages):
+            self.calls += 1
+            text = (
+                '```json\n{"tool":"read_file","arguments":{"path":"README.md"}}\n```'
+                if self.calls == 1 else "完成。"
+            )
+            yield from text
+
+    (tmp_path / "README.md").write_text("hello", encoding="utf-8")
+    visible: list[str] = []
+    finals: list[str] = []
+    result = TuLAgent(settings(tmp_path), mode="root", client=CharacterStreamingClient()).run(
+        "读取 README",
+        stream=True,
+        on_delta=visible.append,
+        on_final=finals.append,
+    )
+
+    assert result.answer == "完成。"
+    assert "".join(visible) == "完成。"
+    assert finals[0] == ""
+    assert finals[-1] == "完成。"
+    assert "`" not in "".join(visible)
+
+
+def test_character_split_dsml_executes_without_leaking_markup(tmp_path: Path):
+    target = tmp_path / "snake.html"
+
+    class DsmlClient:
+        def __init__(self):
+            self.calls = 0
+
+        def stream_chat(self, _messages):
+            self.calls += 1
+            text = (
+                '<｜｜DSML｜｜tool_calls>\n'
+                '<｜｜DSML｜｜invoke name="write_file">\n'
+                '<｜｜DSML｜｜parameter name="content" string="true"><html>game</html></｜｜DSML｜｜parameter>\n'
+                f'<｜｜DSML｜｜parameter name="path">{target}</｜｜DSML｜｜parameter>\n'
+                '</｜｜DSML｜｜invoke>\n'
+                '</｜｜DSML｜｜tool_calls>'
+                if self.calls == 1 else "文件已经写入。"
+            )
+            yield from text
+
+    visible: list[str] = []
+    finals: list[str] = []
+    result = TuLAgent(settings(tmp_path), mode="root", client=DsmlClient()).run(
+        "在桌面写一个 HTML 游戏",
+        stream=True,
+        on_delta=visible.append,
+        on_final=finals.append,
+        require_todo=False,
+    )
+
+    assert result.answer == "文件已经写入。"
+    assert target.read_text(encoding="utf-8") == "<html>game</html>"
+    assert finals[0] == ""
+    assert "DSML" not in "".join(visible)
+
+
+def test_promised_attachment_read_continues_without_user_nudge(tmp_path: Path):
+    class PromiseThenToolClient:
+        def __init__(self):
+            self.calls = 0
+
+        def stream_chat(self, _messages):
+            self.calls += 1
+            replies = [
+                "让我先读取您提及的附件。",
+                '{"tool":"read_file","arguments":{"path":"CHANGELOG.md"}}',
+                "附件已经读取完成。",
+            ]
+            yield replies[self.calls - 1]
+
+    (tmp_path / "CHANGELOG.md").write_text("release notes", encoding="utf-8")
+    visible: list[str] = []
+    finals: list[str] = []
+    client = PromiseThenToolClient()
+    result = TuLAgent(settings(tmp_path), mode="root", client=client).run(
+        "请读取附件 CHANGELOG.md",
+        stream=True,
+        on_delta=visible.append,
+        on_final=finals.append,
+    )
+
+    assert client.calls == 3
+    assert result.answer == "附件已经读取完成。"
+    assert finals[0] == ""
+    assert finals[-1] == "附件已经读取完成。"
+    loaded = SessionStore(tmp_path).load(result.session_id)
+    assert any(message.content.startswith("TOOL_RESULT name=read_file") for message in loaded.messages)
 
 
 def test_streamed_tool_call_with_preface_is_not_printed_as_visible_delta(tmp_path: Path):
@@ -2108,7 +2232,7 @@ def test_desktop_brand_uses_transparent_whale_asset():
     assert '<img src="app-icon.png" alt="">' in brand
     assert "<svg" not in brand
     assert 'class="introLogo" src="app-icon.png"' in html
-    assert '<span id="version">v0.1.4</span>' in html
+    assert '<span id="version">v0.1.5</span>' in html
     assert 'id="settingsView"' in html and '<dialog id="settingsDialog"' not in html
     assert 'id="settingsBackTop"' in html and 'id="settingsBackBottom"' in html
     js = (root / "app.js").read_text(encoding="utf-8")
@@ -2122,7 +2246,9 @@ def test_desktop_brand_uses_transparent_whale_asset():
     assert ".logo img" in css
     assert "background: transparent" in css
     assert 'id="sessionScrollbar"' in html and 'id="sessionScrollThumb"' in html
-    assert 'style.css?v=0.1.4' in html and 'app.js?v=0.1.4' in html
+    assert 'style.css?v=0.1.5' in html and 'app.js?v=0.1.5' in html
+    assert 'state.currentAssistant.remove();' in js
+    assert 'event === "native:drop"' in js
     assert "sessions.slice(0, 40)" not in js
     assert "sessions.forEach" in js
     assert "function initSessionScrollbar()" in js
@@ -2172,6 +2298,20 @@ def test_desktop_local_file_selection_does_not_copy_contents(tmp_path: Path):
         "size": 10,
         "kind": "local_file",
     }]
+
+
+def test_native_drop_extracts_pywebview_full_paths(tmp_path: Path):
+    from deepseek_tulagent.desktop.app import native_drop_paths
+
+    first = str(tmp_path / "one.txt")
+    second = str(tmp_path / "two.txt")
+    event = {"dataTransfer": {"files": [
+        {"name": "one.txt", "pywebviewFullPath": first},
+        {"name": "one.txt", "pywebviewFullPath": first},
+        {"name": "two.txt", "pywebviewFullPath": second},
+        {"name": "missing.txt"},
+    ]}}
+    assert native_drop_paths(event) == [first, second]
 
 
 def test_pyinstaller_uses_checkout_assets_instead_of_stale_site_package():
@@ -2943,10 +3083,10 @@ def test_cli_and_desktop_versions_are_independent():
     assert project["name"] == "deepseek-tulagent"
     assert project["version"] == __version__ == "0.1.108"
     assert project["scripts"]["deepseekfathom"] == "deepseek_tulagent.cli:main"
-    assert DESKTOP_VERSION == "0.1.4"
+    assert DESKTOP_VERSION == "0.1.5"
     assert REPO == "ffffff233/DeepSeekFathom"
-    assert '#define MyAppVersion "0.1.4"' in (root / "scripts" / "windows_installer.iss").read_text(encoding="utf-8")
-    assert 'filevers=(0, 1, 4, 0)' in (root / "assets" / "windows-version-info.txt").read_text(encoding="utf-8")
+    assert '#define MyAppVersion "0.1.5"' in (root / "scripts" / "windows_installer.iss").read_text(encoding="utf-8")
+    assert 'filevers=(0, 1, 5, 0)' in (root / "assets" / "windows-version-info.txt").read_text(encoding="utf-8")
 
 
 def test_update_refuses_dirty_source_tree(monkeypatch, tmp_path: Path):
@@ -3314,6 +3454,16 @@ def test_stream_holds_fenced_tool_call_from_fence_start():
     prose = strip_tool_call_display(text)
     assert prose == "我来调用工具："
     assert is_tool_intro_only(prose) is True
+
+
+def test_stream_holds_partial_markdown_tool_fence():
+    from deepseek_tulagent.agent import safe_stream_emit_length
+
+    for text in ("`", "``", "```", "```j", "```js", "```jso", "```json"):
+        assert safe_stream_emit_length(text) == 0
+
+    normal = "```python\nprint('ok')"
+    assert safe_stream_emit_length(normal) == len(normal)
 
 
 def test_normal_code_blocks_are_not_inferred_or_partially_held():
