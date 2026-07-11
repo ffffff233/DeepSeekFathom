@@ -1,5 +1,23 @@
 # 桌面端更新记录 / Desktop Changelog
 
+## v0.1.9
+
+中文：
+
+- **修复旧会话继续污染模型上下文**：历史版本遗留的未执行 DSML / JSON 工具调用和孤立 `TOOL_RESULT` 不再重复发送给模型；原始会话文件保持不变，界面会把缺少结果的工具卡明确标成“没有执行结果，已按未执行处理”。
+- **运行时选择会在重启后保留**：模型、权限模式和思考强度切换后立即原子合并到用户配置，不再每次启动恢复旧默认值。
+- **修正停止按钮与真实请求的时序**：只有后端返回有效 `turnId` 后才显示停止按钮；取消、切换或新建会话会清理旧请求标识，避免出现点了却无法停止的假按钮。
+- **Windows 桌面端改为单实例**：重复启动会唤醒已有 DeepSeekFathom 窗口，不再同时运行多个进程争用会话和设置文件。
+- **统一 Windows 版本信息**：界面、安装器、EXE 文字版本与固定数字版本全部更新为 `0.1.9`，修复固定版本元组长期停留在 `0.1.5` 造成的属性页版本异常。
+
+English:
+
+- **Stopped damaged legacy tool records from poisoning future model context** while preserving source JSONL files and marking result-less tool cards as not executed.
+- **Persisted runtime model, permission, and thinking selections** through atomic configuration merges so restarts keep the user's choices.
+- **Tied the Stop control to a real backend turn id**, clearing stale ids on cancellation and session changes.
+- **Made the Windows desktop app single-instance**, focusing the existing DeepSeekFathom window on duplicate launches.
+- **Unified UI, installer, string, and fixed numeric Windows versions at `0.1.9`**, correcting the stale `0.1.5` executable tuple.
+
 ## v0.1.8
 
 中文：

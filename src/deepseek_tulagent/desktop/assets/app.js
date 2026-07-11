@@ -508,14 +508,18 @@ function truncateInline(text, max = 120) {
 
 function setRunning(running) {
   state.running = running;
-  $("send").hidden = running;
-  $("cancel").hidden = !running;
+  syncRunControls();
   // Keep the composer editable while a turn runs (Codex-style: compose your next
   // message meanwhile). Send is already guarded by `if (state.running) return`, so an
   // enabled box can't double-send — and you never get locked out if an event is missed.
   $("prompt").disabled = false;
   $("attach").disabled = false;
   document.body.classList.toggle("is-running", running);
+}
+
+function syncRunControls() {
+  $("send").hidden = state.running;
+  $("cancel").hidden = !state.running || !state.activeTurnId;
 }
 
 function goalStorageKey() {
@@ -775,6 +779,7 @@ async function refreshSessions() {
       state.activeTurnId = "";
       state.pendingOutbound = false;
       state.pendingOutboundId = "";
+      syncRunControls();
       state.suppressLocalUserEcho = false;
       state.stickToBottom = true;
       $("messages").innerHTML = "";
@@ -1556,6 +1561,7 @@ $("send").onclick = async () => {
   addUserMessageWithImages(outgoing, images, attachments);
   state.suppressLocalUserEcho = true;  // turn:start would double-add it
   state.stickToBottom = true;
+  state.activeTurnId = "";
   setRunning(true);
   state.pendingOutbound = true;
   const outboundId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -1579,7 +1585,10 @@ $("send").onclick = async () => {
         setText("sessionState", String(result.sessionId).slice(0, 8));
       }
     }
-    if (result.turnId && stillVisibleOutbound) state.activeTurnId = result.turnId;
+    if (result.turnId && stillVisibleOutbound) {
+      state.activeTurnId = result.turnId;
+      syncRunControls();
+    }
   } catch (error) {
     if (state.pendingOutboundId === outboundId) {
       state.pendingOutbound = false;
@@ -1830,6 +1839,8 @@ $("cancel").onclick = async () => {
   markMessageActions();
   state.cancelPromise = window.pywebview.api.cancel({ turnId });
   try { await state.cancelPromise; } catch (_) {}
+  if (state.activeTurnId === turnId) state.activeTurnId = "";
+  syncRunControls();
 };
 
 ["thinking", "mode"].forEach((id) => $(id).addEventListener("change", updateRuntime));
@@ -1940,6 +1951,7 @@ $("newSession").onclick = async () => {
   state.activeTurnId = "";
   state.pendingOutbound = false;
   state.pendingOutboundId = "";
+  syncRunControls();
   state.suppressLocalUserEcho = false;
   delete state.goalsBySession[state.goalDraftId];
   delete state.dismissedGoalSnapshots[state.goalDraftId];
