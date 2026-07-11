@@ -109,6 +109,12 @@ KNOWN_TOOL_NAMES = {
     "service_status",
 }
 TOOL_CALL_META_KEYS = {"tool", "name", "type", "id", "function_call", "tool_calls", "arguments", "parameters", "args", "input"}
+DSML_PREFIX = "<｜｜DSML｜｜"
+_DSML_TAG = r"[|｜]{2}DSML[|｜]{2}"
+_DSML_TOOL_BLOCK_RE = re.compile(
+    rf"(?is)<{_DSML_TAG}tool_calls\b[^>]*>.*?</{_DSML_TAG}tool_calls\s*>",
+)
+_DSML_TOOL_OPEN_RE = re.compile(rf"(?is)<{_DSML_TAG}tool_calls\b[^>]*>.*$")
 
 
 @dataclass(frozen=True)
@@ -172,6 +178,7 @@ class TuLAgent:
         todo_required = require_todo and complex_task
         todo_was_written = False
         todo_enforced = False
+        promise_continuation_used = False
         for rounds in range(1, round_limit + 1):
             if should_cancel and should_cancel():
                 raise RuntimeError("turn cancelled")
@@ -261,15 +268,23 @@ class TuLAgent:
                     last_turn_had_tool_result = False
                     last_todo_has_open_items = False
                     continue
+                if (
+                    not promise_continuation_used
+                    and not goal
+                    and promises_more_work(assistant_text)
+                    and not declares_blocked_or_complete(assistant_text)
+                ):
+                    if stream and on_final:
+                        on_final("")
+                    pending_internal_prompt = CONTINUE_AFTER_PROMISE_PROMPT
+                    promise_continuation_used = True
+                    last_turn_had_tool_result = False
+                    continue
                 if stream and on_final:
                     on_final(assistant_text)
                 elif stream and held_parts and on_delta:
                     on_delta(assistant_text)
                 session.append(Message("assistant", assistant_text))
-                if last_turn_had_tool_result and promises_more_work(assistant_text):
-                    pending_internal_prompt = CONTINUE_AFTER_PROMISE_PROMPT
-                    last_turn_had_tool_result = False
-                    continue
                 if last_turn_had_tool_error and not declares_blocked_or_complete(assistant_text):
                     pending_internal_prompt = RECOVER_AFTER_TOOL_FAILURE_PROMPT
                     last_turn_had_tool_error = False
@@ -553,11 +568,16 @@ class TuLAgent:
 
 def parse_tool_call(text: str) -> tuple[str, dict[str, Any]] | None:
     stripped = text.strip()
+    dsml = parse_dsml_tool_call(stripped)
+    if dsml:
+        return dsml
     candidates = [stripped]
     fenced = re.findall(r"```(?:json)?\s*(\{.*?\})\s*```", stripped, flags=re.DOTALL)
     candidates.extend(fenced)
     candidates.extend(extract_json_objects(stripped))
     for candidate in candidates:
+        if tool_json_is_explanatory_example(stripped, candidate):
+            continue
         try:
             data = json.loads(candidate)
         except json.JSONDecodeError:
@@ -578,6 +598,50 @@ def parse_tool_call(text: str) -> tuple[str, dict[str, Any]] | None:
     if os.getenv("DSTUL_PARSE_ACTION_SHELL", "0").lower() in {"1", "true", "yes"}:
         return parse_action_shell_block(stripped)
     return None
+
+
+def parse_dsml_tool_call(text: str) -> tuple[str, dict[str, Any]] | None:
+    invoke = re.search(
+        rf"(?is)<{_DSML_TAG}invoke\b([^>]*)>(.*?)</{_DSML_TAG}invoke\s*>",
+        text,
+    )
+    if not invoke:
+        return None
+    name_match = re.search(r'''(?i)\bname\s*=\s*["']([^"']+)["']''', invoke.group(1))
+    if not name_match or name_match.group(1) not in KNOWN_TOOL_NAMES:
+        return None
+    arguments: dict[str, Any] = {}
+    for parameter in re.finditer(
+        rf"(?is)<{_DSML_TAG}parameter\b([^>]*)>(.*?)</{_DSML_TAG}parameter\s*>",
+        invoke.group(2),
+    ):
+        attrs, raw_value = parameter.groups()
+        parameter_name = re.search(r'''(?i)\bname\s*=\s*["']([^"']+)["']''', attrs)
+        if not parameter_name:
+            continue
+        value: Any = raw_value
+        string_flag = re.search(r'''(?i)\bstring\s*=\s*["']true["']''', attrs)
+        if not string_flag:
+            try:
+                value = json.loads(raw_value.strip())
+            except json.JSONDecodeError:
+                value = raw_value
+        arguments[parameter_name.group(1)] = value
+    return name_match.group(1), arguments
+
+
+def tool_json_is_explanatory_example(text: str, candidate: str) -> bool:
+    if text.strip() == candidate.strip():
+        return False
+    position = text.find(candidate)
+    if position < 0:
+        return False
+    context = (text[max(0, position - 240):position] + text[position + len(candidate):position + len(candidate) + 80]).lower()
+    cues = (
+        "正确格式", "格式应该", "格式应为", "比如", "例如", "示例", "例子",
+        "correct format", "format should", "for example", "example", "e.g.",
+    )
+    return any(cue in context for cue in cues)
 
 
 # Hermes/Qwen/GLM/Kimi-style tool calls wrapped in <tool_call>…</tool_call> tags.
@@ -793,6 +857,8 @@ def promises_more_work(text: str) -> bool:
         "随后",
         "然后",
         "现在继续",
+        "让我先",
+        "我先",
         "next",
         "continue",
     )
@@ -803,6 +869,10 @@ def promises_more_work(text: str) -> bool:
         "验证",
         "运行",
         "查看",
+        "读取",
+        "打开",
+        "分析",
+        "处理",
         "创建",
         "写入",
         "修改",
@@ -863,6 +933,8 @@ def todo_followup_is_placeholder(text: str) -> bool:
 def plainify_assistant_text(text: str) -> str:
     # never surface a raw tool-call tag as prose (e.g. a stream that ended mid-tag and
     # failed to parse) — drop closed blocks and any dangling opener
+    text = _DSML_TOOL_BLOCK_RE.sub("", text)
+    text = _DSML_TOOL_OPEN_RE.sub("", text)
     text = _TOOL_TAG_RE.sub("", text)
     text = _TOOL_TAG_OPEN_RE.sub("", text)
     dangling_fence = dangling_tool_json_fence_start(text)
@@ -884,6 +956,8 @@ def should_hold_stream_output(text: str) -> bool:
     stripped = text.lstrip()
     if not stripped:
         return True
+    if DSML_PREFIX.startswith(stripped) or stripped.startswith(DSML_PREFIX):
+        return len(stripped) < 32000
     # A leading '<' may be the start of a <tool_call> tag building up char-by-char.
     # Hold while the buffer is still a prefix of "<tool_call" or already opens one.
     tag = "<tool_call"
@@ -915,23 +989,23 @@ def should_hold_stream_output(text: str) -> bool:
 
 
 def dangling_tool_json_fence_start(text: str) -> int | None:
-    fence_start = text.rfind("```")
-    if fence_start == -1 or text.find("```", fence_start + 3) != -1:
+    fences = list(re.finditer(r"```", text))
+    if not fences or len(fences) % 2 == 0:
         return None
-    open_fence = re.match(r"(?is)```\s*([a-z0-9_-]*)[^\n]*\n?(.*)$", text[fence_start:])
-    if not open_fence:
-        return None
-    lang = (open_fence.group(1) or "").lower()
-    if lang not in {"json", "tool", "tools"}:
-        return None
-    body = (open_fence.group(2) or "").lstrip()
-    if (
-        not body
-        or re.match(r'^\{\s*(?:"(?:tool|name|function_call|tool_calls)"?)?$', body, flags=re.IGNORECASE)
-        or re.match(r'^\{\s*"(?:tool|name|function_call|tool_calls)"', body, flags=re.IGNORECASE)
+    fence_start = fences[-1].start()
+    tail = text[fence_start + 3:]
+    if "\n" in tail:
+        header, body = tail.split("\n", 1)
+    else:
+        header, body = tail, ""
+    lang = header.strip().lower()
+    if lang not in {"json", "tool", "tools"} and not any(
+        candidate.startswith(lang) for candidate in ("json", "tool", "tools")
     ):
-        return fence_start
-    return None
+        return None
+    # Keep the whole open JSON/tool fence buffered. Once a closing fence arrives,
+    # normal JSON examples are released while parse_tool_call consumes real calls.
+    return fence_start
 
 
 def safe_stream_emit_length(text: str) -> int:
@@ -943,6 +1017,22 @@ def safe_stream_emit_length(text: str) -> int:
     everything before it (real prose) stays visible. on_final re-sends the full cleaned
     text at end-of-turn, so holding a false positive back only delays it, never drops it.
     """
+    # A stream may split a Markdown fence one character at a time. Hold a trailing
+    # one/two-backtick prefix until we know whether it becomes a tool JSON fence.
+    partial_fence = re.search(r"`+$", text)
+    if partial_fence:
+        run_length = len(partial_fence.group(0))
+        complete_fences = len(list(re.finditer(r"```", text)))
+        if run_length < 3 or complete_fences % 2 == 1:
+            return partial_fence.start()
+
+    dsml = text.find(DSML_PREFIX)
+    if dsml != -1:
+        return dsml
+    possible_dsml = text.rfind("<")
+    if possible_dsml != -1 and DSML_PREFIX.startswith(text[possible_dsml:]):
+        return possible_dsml
+
     # 1) specific, high-signal tool-call openers that may appear mid-line.
     # If the marker is inside a ```json fence, hold from the fence opener too — otherwise
     # the UI briefly renders an empty JSON/code box before the tool card appears.
@@ -1040,8 +1130,10 @@ def strip_tool_call_display(text: str) -> str:
             pass
         return whole
 
-    # drop <tool_call>…</tool_call> blocks and any dangling unterminated opener
-    out = _TOOL_TAG_RE.sub("", text)
+    # drop DSML / <tool_call> blocks and any dangling unterminated opener
+    out = _DSML_TOOL_BLOCK_RE.sub("", text)
+    out = _DSML_TOOL_OPEN_RE.sub("", out)
+    out = _TOOL_TAG_RE.sub("", out)
     out = _TOOL_TAG_OPEN_RE.sub("", out)
     # scrub any remaining bare tool_call tag fragment (with extra angle brackets) and
     # empty <> pairs left behind — but never touch legit prose like "a < b"

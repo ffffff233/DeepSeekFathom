@@ -1,5 +1,21 @@
 # 桌面端更新记录 / Desktop Changelog
 
+## v0.1.5
+
+中文：
+
+- **修复工具参数偶尔作为 Markdown JSON 泄露到对话**：流式解析现在会缓存逐字符到达的反引号和未完整的 `json` 围栏；后端确认内容为工具调用后，界面会无条件移除临时气泡，只保留真实工具卡片。
+- **支持 DeepSeek 原生 DSML 工具调用并阻止示例误执行**：`DSML tool_calls / invoke / parameter` 会转换为真实工具卡片并正常执行，多行 HTML 等参数不再整段露出；带“正确格式、比如、示例”等解释语境的 JSON 代码块只展示，不会再把 `"..."` 当路径误写文件。
+- **修复模型承诺读取附件后停住**：对“让我先读取附件”这类明确要执行本机操作却未发出工具调用的短回复，自动隐藏中间话并续跑一次，不再要求用户再催一句。
+- **修复从 Windows 桌面拖入文件时丢失原路径**：接入 pywebview/WebView2 的原生拖放路径桥，直接引用本机原文件，不再因为浏览器 `File` 对象缺少路径而复制到上传目录；浏览器兼容回退会等待原生路径结果，避免重复附件和错误引用。
+
+English:
+
+- **Prevented tool arguments from leaking as Markdown JSON into chat** by buffering character-split fence prefixes and always removing the temporary streamed bubble once the backend confirms a tool call.
+- **Added native DeepSeek DSML tool-call support and blocked explanatory examples from executing**, so multiline HTML parameters become real tool calls while JSON shown after phrases such as “correct format” or “for example” remains display-only.
+- **Continued automatically after short unfulfilled action promises** such as “let me read the attachment first,” removing the placeholder reply instead of waiting for another user nudge.
+- **Preserved original Windows paths for files dragged from Explorer or the desktop** through pywebview's native WebView2 drop bridge, with a coordinated browser fallback that avoids duplicate uploads and incorrect attachment references.
+
 ## v0.1.4
 
 中文：
