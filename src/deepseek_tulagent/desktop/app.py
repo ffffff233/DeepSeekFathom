@@ -13,7 +13,7 @@ import traceback
 from typing import Any
 from uuid import uuid4
 
-from .. import __version__
+from . import DESKTOP_VERSION
 from ..agent import TuLAgent, compact_context_messages, context_window_info, estimate_message_tokens, summarize_arguments
 from ..config import Settings, get_settings, merge_file_config
 from ..messages import Message
@@ -83,7 +83,7 @@ class DesktopApi:
 
     def boot(self) -> dict[str, Any]:
         return {
-            "version": __version__,
+            "version": DESKTOP_VERSION,
             "workspace": str(self.settings.workspace),
             "baseUrl": self.settings.base_url,
             "model": self.settings.model,
@@ -1051,7 +1051,7 @@ def main() -> None:
         import webview
     except ImportError as exc:
         raise SystemExit(
-            "桌面端需要 pywebview。安装：py -3 -m pip install --upgrade \"deepseek-tulagent[desktop]\""
+            "桌面端需要 pywebview。安装：py -3 -m pip install --upgrade pywebview"
         ) from exc
 
     api = DesktopApi()

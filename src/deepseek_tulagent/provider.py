@@ -119,7 +119,7 @@ def prompt_cache_key(settings: Settings) -> str:
     """Stable, non-secret cache key for providers/gateways that support prompt cache affinity."""
     seed = "|".join(
         [
-            "deepseek-tulagent",
+            "DeepSeekFathom",
             settings.base_url or "",
             settings.api_key or "",
         ]

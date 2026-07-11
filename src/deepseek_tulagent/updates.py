@@ -9,7 +9,7 @@ import sys
 import urllib.request
 
 
-REPO = "ffffff233/deepseek-tulagent"
+REPO = "ffffff233/DeepSeekFathom"
 REPO_URL = f"https://github.com/{REPO}"
 
 
@@ -38,7 +38,7 @@ def is_newer(latest: str, current: str) -> bool:
 
 def fetch_latest_tag(timeout: float = 2.0) -> str | None:
     url = f"https://api.github.com/repos/{REPO}/tags"
-    request = urllib.request.Request(url, headers={"User-Agent": "DeepSeekTuLAgent"})
+    request = urllib.request.Request(url, headers={"User-Agent": "DeepSeekFathom"})
     with urllib.request.urlopen(request, timeout=timeout) as response:
         data = json.loads(response.read(200_000).decode("utf-8", errors="replace"))
     if not isinstance(data, list):
@@ -72,7 +72,7 @@ def update_to(version: str, timeout: int = 180) -> tuple[bool, str]:
             return (
                 False,
                 "local source changes detected; update stopped to avoid overwriting user edits. "
-                "Commit, stash, or back up your changes, then run deepseekTul update again. "
+                "Commit, stash, or back up your changes, then run deepseekfathom update again. "
                 "User config and skills are never touched by the updater.",
             )
         commands = [
@@ -97,7 +97,7 @@ def update_to(version: str, timeout: int = 180) -> tuple[bool, str]:
                     "Proxy tips: use HTTP_PROXY/HTTPS_PROXY for pip/tarball fallback, or configure git with "
                     "`git config --global http.proxy http://127.0.0.1:PORT`."
                 ).strip()
-        return True, f"updated source tree to {target}. Restart deepseekTul."
+        return True, f"updated source tree to {target}. Restart deepseekfathom."
 
     return pip_install_archive(target, timeout=timeout)
 
@@ -116,4 +116,4 @@ def pip_install_archive(target: str, timeout: int = 180) -> tuple[bool, str]:
     env.setdefault("PIP_DISABLE_PIP_VERSION_CHECK", "1")
     completed = subprocess.run(command, text=True, capture_output=True, timeout=timeout, env=env)
     output = completed.stdout + completed.stderr
-    return completed.returncode == 0, (output.strip() or f"updated to {target}. Restart deepseekTul.")
+    return completed.returncode == 0, (output.strip() or f"updated to {target}. Restart deepseekfathom.")
