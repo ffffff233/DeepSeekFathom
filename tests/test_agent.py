@@ -2628,6 +2628,42 @@ def test_capability_report_is_deterministic_and_path_redacted(tmp_path: Path):
     assert "<workspace>/.deepseekfathom/skills/demo/SKILL.md" in serialized
 
 
+def test_capability_report_distinguishes_prompted_runtime_and_contextual_tools(tmp_path: Path):
+    report = collect_capability_report(
+        tmp_path,
+        mode="root",
+        home=tmp_path / "home",
+        runtime_tool_names={"configure_mcp_server", "list_mcp_servers"},
+    )
+    tools = {tool["name"]: tool for tool in report["tools"]["entries"]}
+    runtime_missing = {
+        issue["name"]
+        for issue in report["issues"]
+        if issue["code"] == "tool.runtime_missing"
+    }
+
+    assert runtime_missing == set()
+    assert tools["configure_mcp_server"]["runtimeRegistered"] is True
+    assert tools["configure_mcp_server"]["providerPrompted"] is True
+    assert tools["list_mcp_servers"]["runtimeRegistered"] is True
+    assert tools["list_mcp_servers"]["providerPrompted"] is True
+    assert tools["read_review_diff"]["runtimeRegistered"] is False
+    assert tools["read_review_diff"]["providerPrompted"] is False
+
+
+def test_capability_report_disables_mcp_configuration_in_plan_mode(tmp_path: Path):
+    report = collect_capability_report(
+        tmp_path,
+        mode="plan",
+        home=tmp_path / "home",
+        runtime_tool_names={"configure_mcp_server", "list_mcp_servers"},
+    )
+    tools = {tool["name"]: tool for tool in report["tools"]["entries"]}
+
+    assert tools["configure_mcp_server"]["enabled"] is False
+    assert tools["list_mcp_servers"]["enabled"] is True
+
+
 def test_desktop_user_data_migration_never_overwrites_existing_files(tmp_path: Path):
     from deepseekfathom._core.desktop.app import _copy_missing_user_data
 
@@ -3758,7 +3794,7 @@ def test_desktop_edit_resend_drops_old_tool_result_context(monkeypatch, tmp_path
     assert captured["messages"] == ["system"]
 
 
-def test_desktop_edit_resend_preserves_later_turns_after_regeneration(monkeypatch, tmp_path: Path):
+def test_desktop_edit_resend_creates_persistent_full_branch_versions(monkeypatch, tmp_path: Path):
     import time
 
     import deepseekfathom._core.desktop.app as desktop
@@ -3805,7 +3841,36 @@ def test_desktop_edit_resend_preserves_later_turns_after_regeneration(monkeypatc
     assert captured["prompt"] == "第二问新版"
     assert captured["messages"] == ["system", "第一问", "第一答"]
     persisted = [message.content for message in SessionStore(tmp_path).load("edit-preserve-session").messages]
-    assert persisted == ["system", "第一问", "第一答", "第二问新版", "第二答新版", "第三问", "第三答"]
+    assert persisted == ["system", "第一问", "第一答", "第二问新版", "第二答新版"]
+
+    old_branch = api.select_version({
+        "sessionId": "edit-preserve-session",
+        "versionId": result["baseVersionId"],
+        "navigationId": 1,
+    })
+    assert old_branch["ok"] is True
+    assert [message.content for message in SessionStore(tmp_path).load("edit-preserve-session").messages] == [
+        "system", "第一问", "第一答", "第二问原文", "第二答原文", "第三问", "第三答",
+    ]
+
+    new_branch = api.select_version({
+        "sessionId": "edit-preserve-session",
+        "versionId": result["versionId"],
+        "navigationId": 2,
+    })
+    assert new_branch["ok"] is True
+    assert [message.content for message in SessionStore(tmp_path).load("edit-preserve-session").messages] == [
+        "system", "第一问", "第一答", "第二问新版", "第二答新版",
+    ]
+
+    restarted = desktop.DesktopApi()
+    resumed = restarted.resume("edit-preserve-session", navigation_id=1)
+    assert resumed["ok"] is True
+    assert len(resumed["messageVersions"]) == 1
+    assert {item["versionId"] for item in resumed["messageVersions"][0]["versions"]} == {
+        result["baseVersionId"],
+        result["versionId"],
+    }
 
 
 def test_desktop_retry_preserves_images_and_commits_only_after_success(monkeypatch, tmp_path: Path):
@@ -4609,6 +4674,8 @@ def test_cli_and_desktop_versions_are_independent():
     assert "78e9e2656ae5275cbdd29429053fdcc1cc97373c" in notice
     assert 'Source: "..\\NOTICE"; DestDir: "{app}"; DestName: "NOTICE.txt"' in installer
     assert 'Source: "..\\LICENSE"; DestDir: "{app}"; DestName: "LICENSE.txt"' in installer
+    assert 'LegacyDistInfoPrefix "deepseek_" + "tulagent-"' in installer
+    assert '{#LegacyDistInfoPrefix}*.dist-info' in installer
     assert "third-party-licenses" in (root / "DeepSeekFathom.spec").read_text(encoding="utf-8")
 
 

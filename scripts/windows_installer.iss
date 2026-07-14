@@ -3,6 +3,7 @@
 #endif
 #define LegacyAppName "DeepSeek" + "TuLAgent"
 #define LegacyPackageDir "deepseek_" + "tulagent"
+#define LegacyDistInfoPrefix "deepseek_" + "tulagent-"
 
 [Setup]
 AppId={{D20DC02D-40E2-486A-88B1-AC597D6B45C7}
@@ -41,6 +42,7 @@ Source: "Languages\LICENSE"; DestDir: "{app}"; DestName: "LICENSE-Inno-Chinese-T
 Type: files; Name: "{autodesktop}\{#LegacyAppName}.lnk"
 Type: files; Name: "{autoprograms}\{#LegacyAppName}.lnk"
 Type: filesandordirs; Name: "{app}\_internal\{#LegacyPackageDir}"
+Type: filesandordirs; Name: "{app}\_internal\{#LegacyDistInfoPrefix}*.dist-info"
 Type: files; Name: "{app}\DeepSeekFathom-*.ico"
 
 [Icons]

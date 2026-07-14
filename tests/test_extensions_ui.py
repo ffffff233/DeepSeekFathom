@@ -80,9 +80,21 @@ def test_retry_and_edit_restore_removed_turn_after_sync_failure() -> None:
     assert "removedTurn.nodes.forEach" in restore
     assert "box.insertBefore(node, before)" in restore
     for operation in (retry, edit):
-        assert "const removedTurn = removeTurnFrom" in operation
+        assert "const removedTurn = removeBranchFrom" in operation
         assert "restoreRemovedTurn(removedTurn)" in operation
         assert operation.index("restoreRemovedTurn(removedTurn)") < operation.index("resetPendingVersionState()")
+
+
+def test_response_versions_use_persistent_backend_branches() -> None:
+    js = (ASSET_ROOT / "app.js").read_text(encoding="utf-8")
+
+    assert "function installMessageVersionPagers" in js
+    assert "async function selectMessageVersion" in js
+    assert 'apiMethod("select_version")' in js
+    assert "messageVersions" in js
+    assert "removeBranchNodes" in js
+    assert "tailHTMLFrom" not in js
+    assert "applyVersion" not in js
 
 
 def test_extension_mutations_are_disabled_during_active_runtime() -> None:

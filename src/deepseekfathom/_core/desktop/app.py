@@ -44,6 +44,12 @@ from ..policy import ThinkingMode
 from ..processes import run_hidden
 from ..provider import DeepSeekClient, UsageStats, apply_thinking_payload
 from ..reviews import ChangeManifest, ChangeSnapshot, ChangeSnapshotService
+from ..reply_versions import (
+    CorruptReplyVersionDocumentError,
+    ReplyVersionStore,
+    ReplyVersionStoreError,
+    snapshot_record,
+)
 from ..session import Session, SessionStore
 from ..skills import SkillStore
 from ..tool_contracts import ToolContract, normalize_tool_schema
@@ -208,7 +214,15 @@ class DesktopApi:
         }
 
     def capability_diagnostics(self) -> dict[str, Any]:
-        return collect_capability_report(self.settings.workspace, mode=self.mode)
+        runtime_tool_names = [
+            contract.name
+            for contract in self._mcp_management_contracts()
+        ]
+        return collect_capability_report(
+            self.settings.workspace,
+            mode=self.mode,
+            runtime_tool_names=runtime_tool_names,
+        )
 
     def _skill_catalog(self) -> list[dict[str, Any]]:
         with self._extension_lock:
@@ -838,6 +852,10 @@ class DesktopApi:
         if session_id == pending_session_id:
             return {"ok": False, "error": "当前会话有一条回复正在排队，停止回复后再删除"}
         SessionStore(self.settings.workspace).delete(session_id)
+        try:
+            self._reply_version_store().delete_session(session_id)
+        except ReplyVersionStoreError:
+            pass
         self._context_by_session.pop(session_id, None)
         self._usage_by_session.pop(session_id, None)
         if self.session is not None and self.session.session_id == session_id:
@@ -857,12 +875,17 @@ class DesktopApi:
             self.session = loaded
             self._restore_context_usage(session_id)
             self._restore_session_usage(session_id)
+            try:
+                message_versions = self._refresh_active_reply_version(loaded)
+            except (ReplyVersionStoreError, TypeError, ValueError):
+                message_versions = self._safe_message_version_groups(session_id)
             return {
                 "ok": True,
                 "activated": True,
                 "navigationId": self._session_navigation_id,
                 "sessionId": loaded.session_id,
                 "messages": serialize_messages(loaded.messages),
+                "messageVersions": message_versions,
                 "context": self.context_status(),
             }
 
@@ -912,8 +935,12 @@ class DesktopApi:
         self._context_by_session.pop(self.session.session_id, None)
         SessionStore(self.settings.workspace).update_metadata(self.session.session_id, context_usage=None)
         self.session.rewrite()
+        try:
+            message_versions = self._refresh_active_reply_version(self.session)
+        except (ReplyVersionStoreError, TypeError, ValueError):
+            message_versions = self._safe_message_version_groups(self.session.session_id)
         after = estimate_message_tokens(self.session.messages)
-        return {"ok": True, "before": before, "after": after, "messages": serialize_messages(self.session.messages), "context": self.context_status()}
+        return {"ok": True, "before": before, "after": after, "messages": serialize_messages(self.session.messages), "messageVersions": message_versions, "context": self.context_status()}
 
     def context_status(self) -> dict[str, Any]:
         messages = self.session.messages if self.session else []
@@ -1548,6 +1575,9 @@ class DesktopApi:
         ui_kind: str | None = None,
         review_request: dict[str, Any] | None = None,
         native_command_name: str | None = None,
+        message_version_id: str | None = None,
+        base_message_version_id: str | None = None,
+        message_version_plan: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         with self._turn_state_lock:
             if self._running:
@@ -1574,6 +1604,9 @@ class DesktopApi:
                     ui_kind,
                     review_request,
                     native_command_name,
+                    message_version_id,
+                    base_message_version_id,
+                    message_version_plan,
                 ),
                 daemon=True,
             )
@@ -1582,7 +1615,12 @@ class DesktopApi:
             except Exception:
                 self._running = False
                 raise
-        return {"ok": True, "sessionId": session_id, "turnId": turn_id}
+        result = {"ok": True, "sessionId": session_id, "turnId": turn_id}
+        if message_version_id:
+            result["versionId"] = message_version_id
+        if base_message_version_id:
+            result["baseVersionId"] = base_message_version_id
+        return result
 
     def _queue_turn_after_cancel(
         self,
@@ -1693,22 +1731,25 @@ class DesktopApi:
             message = messages[i]
             if self._is_real_user_message(message):
                 prompt = message.content
-                suffix_start = len(messages)
-                for j in range(i + 1, len(messages)):
-                    if self._is_real_user_message(messages[j]):
-                        suffix_start = j
-                        break
                 prefix = [clone_message(m) for m in messages[:i]]
-                restore_suffix = [clone_message(m) for m in messages[suffix_start:]]
-                return prompt, list(message.images), prefix, restore_suffix, clone_message(message)
+                # Regenerating an earlier answer creates a new branch. Later turns
+                # belong to the previous version and must not be grafted onto it.
+                return prompt, list(message.images), prefix, [], clone_message(message)
         return None, [], [], [], None
 
     def _user_index_for(self, src_index: int | None) -> int | None:
         """Given a transcript index (any message), return the index to truncate at
         for a retry/edit: the user message at/just before src_index."""
-        if self.session is None or src_index is None:
+        if self.session is None or not self.session.messages:
             return None
-        return min(src_index, len(self.session.messages) - 1)
+        start = len(self.session.messages) - 1 if src_index is None else min(
+            int(src_index),
+            len(self.session.messages) - 1,
+        )
+        for index in range(start, -1, -1):
+            if self._is_real_user_message(self.session.messages[index]):
+                return index
+        return None
 
     def _restore_regenerated_suffix(self, session_id: str | None, suffix: list[Message] | None) -> None:
         if not session_id or not suffix:
@@ -1718,6 +1759,316 @@ class DesktopApi:
         restored.rewrite()
         if self.session is not None and self.session.session_id == session_id:
             self.session = restored
+
+    @staticmethod
+    def _valid_message_version_id(value: Any) -> str | None:
+        candidate = str(value or "").strip().lower()
+        return candidate if re.fullmatch(r"[0-9a-f]{32}", candidate) else None
+
+    def _reply_version_store(self) -> ReplyVersionStore:
+        return ReplyVersionStore(self.settings.workspace)
+
+    @staticmethod
+    def _reply_version_memberships(snapshot: dict[str, Any] | None) -> list[dict[str, str]]:
+        metadata = snapshot.get("metadata") if isinstance(snapshot, dict) else None
+        raw = metadata.get("memberships") if isinstance(metadata, dict) else None
+        memberships: list[dict[str, str]] = []
+        for item in raw if isinstance(raw, list) else []:
+            if not isinstance(item, dict):
+                continue
+            group_id = str(item.get("groupId") or "").strip()
+            lineage_id = str(item.get("lineageId") or "").strip()
+            if group_id and lineage_id:
+                memberships.append({"groupId": group_id, "lineageId": lineage_id})
+        return memberships
+
+    @staticmethod
+    def _reply_version_graph(document: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+        graph = document.get("graph")
+        if not isinstance(graph, dict):
+            graph = {}
+        groups = graph.get("groups")
+        tips = graph.get("lineageTips")
+        groups = groups if isinstance(groups, dict) else {}
+        tips = tips if isinstance(tips, dict) else {}
+        normalized = {"groups": groups, "lineageTips": tips}
+        document["graph"] = normalized
+        return normalized, groups, tips
+
+    @staticmethod
+    def _reply_version_anchor_ordinal(messages: list[Message], anchor_index: int) -> int:
+        return max(
+            0,
+            sum(
+                1
+                for index, message in enumerate(messages)
+                if index <= anchor_index and DesktopApi._is_real_user_message(message)
+            ) - 1,
+        )
+
+    def _begin_reply_version(self, anchor_index: int) -> dict[str, Any]:
+        if self.session is None:
+            raise RuntimeError("no active session")
+        session_id = self.session.session_id
+        base_version_id = uuid4().hex
+        new_version_id = uuid4().hex
+        messages = [clone_message(message) for message in self.session.messages]
+        anchor_ordinal = self._reply_version_anchor_ordinal(messages, anchor_index)
+
+        def update(document: dict[str, Any]) -> None:
+            nonlocal base_version_id
+            active_id = self._valid_message_version_id(document.get("activeVersionId"))
+            if active_id and active_id in document["snapshots"]:
+                base_version_id = active_id
+                previous = document["snapshots"][active_id]
+                metadata = previous.get("metadata") if isinstance(previous, dict) else {}
+            else:
+                metadata = {}
+            document["snapshots"][base_version_id] = snapshot_record(messages, metadata)
+            document["activeVersionId"] = base_version_id
+            _graph, _groups, tips = self._reply_version_graph(document)
+            for membership in self._reply_version_memberships(document["snapshots"][base_version_id]):
+                tips[membership["lineageId"]] = base_version_id
+
+        self._reply_version_store().update_document(session_id, update)
+        return {
+            "sessionId": session_id,
+            "baseVersionId": base_version_id,
+            "versionId": new_version_id,
+            "anchorSrcIndex": int(anchor_index),
+            "anchorUserOrdinal": anchor_ordinal,
+        }
+
+    def _commit_reply_version(self, plan: dict[str, Any], messages: list[Message]) -> dict[str, Any]:
+        session_id = str(plan["sessionId"])
+        base_version_id = str(plan["baseVersionId"])
+        new_version_id = str(plan["versionId"])
+        anchor_index = int(plan["anchorSrcIndex"])
+        anchor_ordinal = int(plan["anchorUserOrdinal"])
+
+        def update(document: dict[str, Any]) -> None:
+            base_snapshot = document["snapshots"].get(base_version_id)
+            if not isinstance(base_snapshot, dict):
+                raise KeyError(f"reply version not found: {base_version_id}")
+            graph, groups, tips = self._reply_version_graph(document)
+            base_memberships = self._reply_version_memberships(base_snapshot)
+            selected_membership: dict[str, str] | None = None
+            selected_group: dict[str, Any] | None = None
+            for membership in base_memberships:
+                group = groups.get(membership["groupId"])
+                if isinstance(group, dict) and group.get("anchorSrcIndex") == anchor_index:
+                    selected_membership = membership
+                    selected_group = group
+                    break
+
+            if selected_membership is None or selected_group is None:
+                group_id = uuid4().hex
+                base_lineage_id = uuid4().hex
+                new_lineage_id = uuid4().hex
+                selected_group = {
+                    "groupId": group_id,
+                    "anchorSrcIndex": anchor_index,
+                    "anchorUserOrdinal": anchor_ordinal,
+                    "lineages": [base_lineage_id, new_lineage_id],
+                }
+                groups[group_id] = selected_group
+                selected_membership = {"groupId": group_id, "lineageId": base_lineage_id}
+                base_memberships.append(selected_membership)
+            else:
+                group_id = selected_membership["groupId"]
+                base_lineage_id = selected_membership["lineageId"]
+                new_lineage_id = uuid4().hex
+                lineages = selected_group.get("lineages")
+                if not isinstance(lineages, list):
+                    lineages = []
+                    selected_group["lineages"] = lineages
+                if base_lineage_id not in lineages:
+                    lineages.append(base_lineage_id)
+                lineages.append(new_lineage_id)
+
+            base_metadata = dict(base_snapshot.get("metadata") or {})
+            base_metadata["memberships"] = base_memberships
+            base_snapshot["metadata"] = base_metadata
+            tips[base_lineage_id] = base_version_id
+
+            new_memberships: list[dict[str, str]] = []
+            for membership in base_memberships:
+                group = groups.get(membership["groupId"])
+                if not isinstance(group, dict):
+                    continue
+                group_anchor = group.get("anchorSrcIndex")
+                if isinstance(group_anchor, int) and group_anchor < anchor_index:
+                    new_memberships.append(dict(membership))
+            new_memberships.append({"groupId": group_id, "lineageId": new_lineage_id})
+            document["snapshots"][new_version_id] = snapshot_record(
+                messages,
+                {"memberships": new_memberships},
+            )
+            for membership in new_memberships:
+                tips[membership["lineageId"]] = new_version_id
+            document["activeVersionId"] = new_version_id
+            document["graph"] = graph
+
+        document = self._reply_version_store().update_document(session_id, update)
+        return {
+            "versionId": new_version_id,
+            "baseVersionId": base_version_id,
+            "messageVersions": self._message_version_groups_from_document(document),
+        }
+
+    def _refresh_active_reply_version(self, session: Session) -> list[dict[str, Any]]:
+        store = self._reply_version_store()
+        document = store.load_document(session.session_id)
+        active_id = self._valid_message_version_id(document.get("activeVersionId"))
+        if active_id is None or active_id not in document["snapshots"]:
+            return []
+        active_snapshot = store.get(session.session_id, active_id)
+        stored_messages = active_snapshot["messages"] if active_snapshot is not None else []
+        same_branch = len(stored_messages) <= len(session.messages) and all(
+            stored == current
+            for stored, current in zip(stored_messages, session.messages)
+        )
+        recovery_id = uuid4().hex if not same_branch else None
+
+        def update(current: dict[str, Any]) -> None:
+            snapshot = current["snapshots"].get(active_id)
+            if not isinstance(snapshot, dict):
+                return
+            if recovery_id is not None:
+                current["snapshots"][recovery_id] = snapshot_record(
+                    session.messages,
+                    {"memberships": []},
+                )
+                current["activeVersionId"] = recovery_id
+                return
+            metadata = snapshot.get("metadata") if isinstance(snapshot.get("metadata"), dict) else {}
+            current["snapshots"][active_id] = snapshot_record(session.messages, metadata)
+            _graph, _groups, tips = self._reply_version_graph(current)
+            for membership in self._reply_version_memberships(current["snapshots"][active_id]):
+                tips[membership["lineageId"]] = active_id
+
+        updated = store.update_document(session.session_id, update)
+        return self._message_version_groups_from_document(updated)
+
+    def _message_version_groups_from_document(self, document: dict[str, Any]) -> list[dict[str, Any]]:
+        active_id = self._valid_message_version_id(document.get("activeVersionId"))
+        active_snapshot = document.get("snapshots", {}).get(active_id) if active_id else None
+        if not isinstance(active_snapshot, dict):
+            return []
+        _graph, groups, tips = self._reply_version_graph(document)
+        snapshots = document.get("snapshots") if isinstance(document.get("snapshots"), dict) else {}
+        result: list[dict[str, Any]] = []
+        for membership in self._reply_version_memberships(active_snapshot):
+            group = groups.get(membership["groupId"])
+            if not isinstance(group, dict):
+                continue
+            versions: list[dict[str, str]] = []
+            for lineage_id in group.get("lineages") if isinstance(group.get("lineages"), list) else []:
+                target_id = self._valid_message_version_id(tips.get(str(lineage_id)))
+                if target_id and target_id in snapshots and all(item["versionId"] != target_id for item in versions):
+                    versions.append({"versionId": target_id})
+            selected_id = self._valid_message_version_id(tips.get(membership["lineageId"]))
+            if len(versions) < 2 or selected_id is None:
+                continue
+            result.append({
+                "groupId": membership["groupId"],
+                "anchorSrcIndex": group.get("anchorSrcIndex"),
+                "anchorUserOrdinal": group.get("anchorUserOrdinal"),
+                "activeVersionId": selected_id,
+                "versions": versions,
+            })
+        return sorted(
+            result,
+            key=lambda group: (
+                int(group["anchorSrcIndex"]) if isinstance(group.get("anchorSrcIndex"), int) else 10**9,
+                str(group["groupId"]),
+            ),
+        )
+
+    def _message_version_groups(self, session_id: str) -> list[dict[str, Any]]:
+        return self._message_version_groups_from_document(
+            self._reply_version_store().load_document(session_id)
+        )
+
+    def _safe_message_version_groups(self, session_id: str | None) -> list[dict[str, Any]]:
+        if not session_id:
+            return []
+        try:
+            return self._message_version_groups(str(session_id))
+        except (ReplyVersionStoreError, OSError, TypeError, ValueError):
+            return []
+
+    def select_version(self, data: dict[str, Any]) -> dict[str, Any]:
+        """Atomically switch the active transcript to a persisted response branch."""
+
+        payload = data if isinstance(data, dict) else {}
+        with self._session_navigation_lock:
+            requested_navigation = self._coerce_navigation_id(payload.get("navigationId"))
+            if requested_navigation is not None and requested_navigation < self._session_navigation_id:
+                return {"ok": False, "stale": True, "error": "stale navigation"}
+            with self._turn_state_lock:
+                if self._running:
+                    return {"ok": False, "error": "turn already running"}
+                if self.session is None:
+                    return {"ok": False, "error": "no active session"}
+                requested_session_id = str(payload.get("sessionId") or self.session.session_id)
+                if requested_session_id != self.session.session_id:
+                    return {"ok": False, "error": "session changed"}
+                target_id = self._valid_message_version_id(payload.get("versionId"))
+                if target_id is None:
+                    return {"ok": False, "error": "invalid version"}
+                try:
+                    store = self._reply_version_store()
+                    target = store.get(requested_session_id, target_id)
+                except CorruptReplyVersionDocumentError:
+                    return {"ok": False, "error": "版本记录已损坏，未覆盖原对话"}
+                if target is None:
+                    return {"ok": False, "error": "version not found"}
+                current_session = self.session
+                current_messages = [clone_message(message) for message in current_session.messages]
+                restored = SessionStore(self.settings.workspace).load(requested_session_id)
+                restored.messages = [clone_message(message) for message in target["messages"]]
+                restored.rewrite()
+                try:
+                    def update(document: dict[str, Any]) -> None:
+                        current_id = self._valid_message_version_id(document.get("activeVersionId"))
+                        if current_id and current_id in document["snapshots"]:
+                            current_snapshot = document["snapshots"][current_id]
+                            metadata = current_snapshot.get("metadata") if isinstance(current_snapshot, dict) else {}
+                            document["snapshots"][current_id] = snapshot_record(current_messages, metadata)
+                        target_snapshot = document["snapshots"].get(target_id)
+                        if not isinstance(target_snapshot, dict):
+                            raise KeyError(f"reply version not found: {target_id}")
+                        _graph, _groups, tips = self._reply_version_graph(document)
+                        for membership in self._reply_version_memberships(target_snapshot):
+                            tips[membership["lineageId"]] = target_id
+                        document["activeVersionId"] = target_id
+
+                    document = store.update_document(requested_session_id, update)
+                except Exception:
+                    current_session.messages = current_messages
+                    current_session.rewrite()
+                    raise
+                self.session = restored
+                self._session_navigation_id = (
+                    requested_navigation
+                    if requested_navigation is not None
+                    else self._session_navigation_id + 1
+                )
+                self._context_by_session.pop(requested_session_id, None)
+                SessionStore(self.settings.workspace).update_metadata(
+                    requested_session_id,
+                    context_usage=None,
+                )
+                return {
+                    "ok": True,
+                    "navigationId": self._session_navigation_id,
+                    "sessionId": requested_session_id,
+                    "versionId": target_id,
+                    "messages": serialize_messages(restored.messages),
+                    "messageVersions": self._message_version_groups_from_document(document),
+                    "context": self.context_status(),
+                }
 
     def _native_agent_command_from_display(self, value: str | None):
         match = re.match(r"^/([a-z0-9][a-z0-9-]*)(?:\s+([\s\S]*))?$", str(value or "").strip(), re.I)
@@ -1735,9 +2086,16 @@ class DesktopApi:
         if self.session is None:
             return {"ok": False, "error": "no active session"}
         src = payload.get("srcIndex") if isinstance(payload, dict) else None
-        prompt, images, prefix, restore_suffix, target = self._prepare_regenerated_turn(self._user_index_for(src))
+        anchor_index = self._user_index_for(src)
+        prompt, images, prefix, restore_suffix, target = self._prepare_regenerated_turn(anchor_index)
         if prompt is None:
             return {"ok": False, "error": "no user message to retry"}
+        if anchor_index is None:
+            anchor_index = next(
+                index for index in range(len(self.session.messages) - 1, -1, -1)
+                if self._is_real_user_message(self.session.messages[index])
+            )
+        version_plan = self._begin_reply_version(anchor_index)
         native_command, _instructions = self._native_agent_command_from_display(
             target.display_content if target is not None and target.ui_kind == "command" else None
         )
@@ -1749,6 +2107,9 @@ class DesktopApi:
             display_prompt=target.display_content if target is not None else None,
             ui_kind=target.ui_kind if target is not None else None,
             native_command_name=native_command.name if native_command is not None else None,
+            message_version_id=version_plan["versionId"],
+            base_message_version_id=version_plan["baseVersionId"],
+            message_version_plan=version_plan,
         )
 
     def edit_resend(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -1760,11 +2121,16 @@ class DesktopApi:
         text = str(payload.get("prompt") or "").strip()
         if not text:
             return {"ok": False, "error": "empty prompt"}
-        old_prompt, images, prefix, restore_suffix, target = self._prepare_regenerated_turn(
-            self._user_index_for(payload.get("srcIndex"))
-        )
+        anchor_index = self._user_index_for(payload.get("srcIndex"))
+        old_prompt, images, prefix, restore_suffix, target = self._prepare_regenerated_turn(anchor_index)
         if old_prompt is None:
             return {"ok": False, "error": "no user message to edit"}
+        if anchor_index is None:
+            anchor_index = next(
+                index for index in range(len(self.session.messages) - 1, -1, -1)
+                if self._is_real_user_message(self.session.messages[index])
+            )
+        version_plan = self._begin_reply_version(anchor_index)
         native_command, instructions = self._native_agent_command_from_display(
             text if target is not None and target.ui_kind == "command" else None
         )
@@ -1781,6 +2147,9 @@ class DesktopApi:
             display_prompt=text if target is not None and target.ui_kind else None,
             ui_kind=target.ui_kind if target is not None else None,
             native_command_name=native_command.name if native_command is not None else None,
+            message_version_id=version_plan["versionId"],
+            base_message_version_id=version_plan["baseVersionId"],
+            message_version_plan=version_plan,
         )
 
     def branch(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -1926,6 +2295,9 @@ class DesktopApi:
         ui_kind: str | None = None,
         review_request: dict[str, Any] | None = None,
         native_command_name: str | None = None,
+        message_version_id: str | None = None,
+        base_message_version_id: str | None = None,
+        message_version_plan: dict[str, Any] | None = None,
     ) -> None:
         with self._lock:
             turn_session_id = turn_session_id or (self.session.session_id if self.session else None)
@@ -2068,6 +2440,8 @@ class DesktopApi:
                     "mode": "review" if review_context is not None else (
                         native_command.mode if native_command is not None else self.mode
                     ),
+                    "versionId": message_version_id,
+                    "baseVersionId": base_message_version_id,
                 })
                 if is_cancelled():
                     raise RuntimeError("turn cancelled")
@@ -2217,6 +2591,20 @@ class DesktopApi:
                 else:
                     self._restore_regenerated_suffix(result.session_id, restore_suffix)
                 finished_session = SessionStore(self.settings.workspace).load(result.session_id)
+                version_state: dict[str, Any] = {"messageVersions": []}
+                version_warning: str | None = None
+                try:
+                    if message_version_plan is not None:
+                        version_state = self._commit_reply_version(
+                            message_version_plan,
+                            finished_session.messages,
+                        )
+                    else:
+                        version_state["messageVersions"] = self._refresh_active_reply_version(
+                            finished_session
+                        )
+                except (ReplyVersionStoreError, KeyError, TypeError, ValueError) as exc:
+                    version_warning = str(exc)
                 self._record_context_usage(
                     result.session_id,
                     getattr(client, "last_usage", UsageStats()),
@@ -2228,6 +2616,13 @@ class DesktopApi:
                 ensure_session_title(self.settings.workspace, finished_session)
                 terminal_review = finish_lifecycle("completed")
                 done_payload: dict[str, Any] = {"sessionId": result.session_id, "rounds": result.rounds}
+                done_payload["messageVersions"] = version_state.get("messageVersions", [])
+                if message_version_id:
+                    done_payload["versionId"] = message_version_id
+                if base_message_version_id:
+                    done_payload["baseVersionId"] = base_message_version_id
+                if version_warning:
+                    done_payload["versionWarning"] = version_warning
                 if terminal_review is not None:
                     done_payload["review"] = terminal_review
                 emit_turn("turn:done", done_payload)
@@ -2236,6 +2631,7 @@ class DesktopApi:
                     payload: dict[str, Any] = {"message": "当前回复已取消"}
                     if prepared_messages is not None:
                         payload["messages"] = persisted_transcript()
+                        payload["messageVersions"] = self._safe_message_version_groups(turn_session_id)
                     terminal_review = finish_lifecycle("cancelled")
                     if terminal_review is not None:
                         payload["review"] = terminal_review
@@ -2244,6 +2640,7 @@ class DesktopApi:
                     payload = desktop_error_payload(exc)
                     if prepared_messages is not None:
                         payload["messages"] = persisted_transcript()
+                        payload["messageVersions"] = self._safe_message_version_groups(turn_session_id)
                     terminal_review = finish_lifecycle("error")
                     if terminal_review is not None:
                         payload["review"] = terminal_review
@@ -2253,6 +2650,7 @@ class DesktopApi:
                     payload = {"message": "当前回复已取消"}
                     if prepared_messages is not None:
                         payload["messages"] = persisted_transcript()
+                        payload["messageVersions"] = self._safe_message_version_groups(turn_session_id)
                     terminal_review = finish_lifecycle("cancelled")
                     if terminal_review is not None:
                         payload["review"] = terminal_review
@@ -2261,6 +2659,7 @@ class DesktopApi:
                     payload = desktop_error_payload(exc)
                     if prepared_messages is not None:
                         payload["messages"] = persisted_transcript()
+                        payload["messageVersions"] = self._safe_message_version_groups(turn_session_id)
                     terminal_review = finish_lifecycle("error")
                     if terminal_review is not None:
                         payload["review"] = terminal_review

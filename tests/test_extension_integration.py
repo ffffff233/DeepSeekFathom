@@ -545,6 +545,30 @@ def test_desktop_turn_start_claim_is_atomic(monkeypatch, tmp_path: Path):
         api._shutdown_extensions()
 
 
+def test_desktop_capability_diagnostics_uses_mcp_management_runtime(monkeypatch, tmp_path: Path):
+    home = tmp_path / "config"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    monkeypatch.setenv("DEEPSEEKFATHOM_CONFIG_HOME", str(home))
+    monkeypatch.setenv("DEEPSEEKFATHOM_WORKSPACE", str(workspace))
+    api = DesktopApi()
+
+    try:
+        report = api.capability_diagnostics()
+    finally:
+        api._shutdown_extensions()
+
+    tools = {tool["name"]: tool for tool in report["tools"]["entries"]}
+    runtime_missing = {
+        issue["name"]
+        for issue in report["issues"]
+        if issue["code"] == "tool.runtime_missing"
+    }
+    assert runtime_missing == set()
+    assert tools["configure_mcp_server"]["runtimeRegistered"] is True
+    assert tools["list_mcp_servers"]["runtimeRegistered"] is True
+
+
 def test_extension_actions_are_rejected_before_mutation_while_turn_runs(monkeypatch, tmp_path: Path):
     monkeypatch.setenv("DEEPSEEKFATHOM_CONFIG_HOME", str(tmp_path / "config"))
     monkeypatch.setenv("DEEPSEEKFATHOM_WORKSPACE", str(tmp_path / "workspace"))

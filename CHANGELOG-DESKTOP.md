@@ -7,6 +7,8 @@
 - **新增 6 个可启停的官方原生插件**：代码审查、测试诊断、安全审查、提交助手、更新记录和项目体检会动态进入 `/` 命令列表；插件提示词由后端可信生成，每条命令声明的权限模式和思考等级只作用于当前一轮，重试和编辑重发也不会退回全权限。
 - **代码审查改为独立只读会话**：冻结上一轮或当前工作区改动，使用分页、哈希校验和失效检测读取完整差异；审查不会修改 Git 索引或工作区，未读完、快照变化或页数超限时会明确失败，不会伪造“审查完成”。
 - **命令输入与消息存储重新接线**：本地斜杠命令只保存一次、在会话中可见但不进入模型上下文；官方命令、重试、取消和排队回合按 `sessionId + turnId` 隔离，避免重复回答和跨会话串线。
+- **重新生成改为可持久化的完整分支版本**：较早回复重新生成后不会再接回旧的后续消息；左右箭头切换会同时恢复界面、磁盘会话和模型上下文。每个版本的完整消息、图片和展示元数据独立原子保存，嵌套版本、重启和覆盖升级后仍可恢复，不再依赖易失的界面 HTML 或 64 条内存缓存。
+- **修复三个工具的运行时误报**：能力诊断现在读取桌面端每轮真实注入的 `configure_mcp_server`、`list_mcp_servers`，并只在代码审查上下文统计 `read_review_diff`；只读模式会正确禁用 MCP 配置写入，不再出现“提示词声明但运行时未注册”的假错误。
 - **桌面界面支持完整中英文切换**：设置、扩展、动态状态、命令菜单和错误提示均可切换语言；用户消息、模型内容、代码、路径和工具输出保持原文。输入区改为克制的边框式命令输入，桌面与 390px 窄屏均无横向溢出。
 - **扩展可见性补齐**：官方插件和用户插件分来源展示并独立持久化；插件提供的 Skills 会进入真实运行时和 `/` 菜单，并在插件启停或重新加载后同步刷新。`/mcp` 只连接已经配置、启用且可信的服务器，不会顺带改配置、打开设置或授予项目权限。
 - **所有对外品牌统一为 DeepSeekFathom**：安装包、pip 分发、命令、界面和默认数据目录不再显示旧名称；首次启动会把历史配置、会话、Skills 和插件只补缺失地迁移到 `.deepseekfathom`。
@@ -21,6 +23,8 @@ English:
 - Added six toggleable native plugins with dynamic slash commands and backend-owned prompts. Each command now enforces its declared permission mode and thinking level for that turn, including retries and edited resends.
 - Added isolated, read-only AI review sessions backed by frozen, paginated, hash-verified diffs with stale detection and fail-closed completion rules.
 - Persisted local slash commands exactly once while keeping them out of model context, and scoped queued/retried turn state by session and turn IDs.
+- Persisted complete regeneration branches atomically, including messages, images, nested version metadata, active selection, and backend transcript state. Switching versions now restores the full descendant conversation and remains available after restart or upgrade.
+- Corrected capability diagnostics for dynamically injected MCP management tools and the review-only `read_review_diff` contract, including read-only permission handling.
 - Added complete Chinese/English UI switching for static and dynamic controls while preserving user content, model output, code, paths, and tool output verbatim.
 - Refined the composer, mobile layout, plugin/Skill refresh behavior, and connection-only `/mcp` semantics.
 - Preserved sessions and settings across the current and compatibility data locations without overwriting newer user-owned data.

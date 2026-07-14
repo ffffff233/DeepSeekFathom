@@ -15,6 +15,8 @@ const state = {
   pendingVersions: null,
   pendingVersionMarker: null,
   pendingVersionUser: null,
+  messageVersions: [],
+  versionSwitching: false,
   models: [],
   currentSessionId: "",
   activeTurnId: "",
@@ -774,6 +776,25 @@ function installDemoApi() {
         setTimeout(() => D.onNativeEvent({ event: "turn:done", payload: { sessionId: "demo-session-0001", rounds: 1 } }), 420);
         return { ok: true };
       },
+      select_version: async ({ versionId }) => ({
+        ok: true,
+        sessionId: "demo-session-0001",
+        versionId,
+        messages: [
+          { role: "user", content: "检查项目并修复问题", srcIndex: 0 },
+          { role: "assistant", content: versionId === "11111111111111111111111111111111" ? "原回答。" : "这是重试后的新回答。", srcIndex: 1 },
+        ],
+        messageVersions: [{
+          groupId: "demo-versions",
+          anchorSrcIndex: 0,
+          anchorUserOrdinal: 0,
+          activeVersionId: versionId,
+          versions: [
+            { versionId: "11111111111111111111111111111111" },
+            { versionId: "22222222222222222222222222222222" },
+          ],
+        }],
+      }),
     },
   };
 }
@@ -961,10 +982,10 @@ window.DeepSeekDesktop = {
       setText("sessionState", doneSid ? doneSid.slice(0, 8) : "新会话");
       if (!wasSuppressed) setSaveState("saved", "已保存", doneSid || "未保存");
       markMessageActions();
-      // if this turn was a retry, attach the ‹ i/n › version pager to the retried
-      // USER message (Codex-style: versions live on your message, not the reply)
-      if (!wasSuppressed) attachVersionPager(doneSid, tid);
-      else resetPendingVersionState(doneSid, tid);
+      // The backend owns the persistent version graph. Rebuild every visible pager
+      // from that graph so nested regenerations survive switching and app restarts.
+      if (!wasSuppressed) installMessageVersionPagers(payload.messageVersions || []);
+      resetPendingVersionState(doneSid, tid);
       clearVersionInsertMarker(doneSid, tid);
       refreshContextBadge().catch(() => {});
     }
@@ -1025,6 +1046,7 @@ function restoreTranscriptFromEvent(payload) {
   resetPendingVersionState();
   state.currentAssistant = null;
   state.currentTool = null;
+  installMessageVersionPagers(payload.messageVersions || []);
   markMessageActions();
   scrollMessages(true);
   return true;
@@ -1186,21 +1208,21 @@ function setRunning(running) {
   // Keep the composer editable while a turn runs (Codex-style: compose your next
   // message meanwhile). Send is already guarded by `if (state.running) return`, so an
   // enabled box can't double-send — and you never get locked out if an event is missed.
-  $("prompt").disabled = state.resuming;
-  $("attach").disabled = state.resuming;
+  $("prompt").disabled = state.resuming || state.versionSwitching;
+  $("attach").disabled = state.resuming || state.versionSwitching;
   document.body.classList.toggle("is-running", running);
 }
 
 function syncRunControls() {
   $("send").hidden = state.running;
-  $("send").disabled = state.resuming;
+  $("send").disabled = state.resuming || state.versionSwitching;
   $("cancel").hidden = !state.running || !state.activeTurnId;
-  $("prompt").disabled = state.resuming;
-  $("attach").disabled = state.resuming;
+  $("prompt").disabled = state.resuming || state.versionSwitching;
+  $("attach").disabled = state.resuming || state.versionSwitching;
   const review = $("reviewChanges");
-  if (review) review.disabled = state.running || state.resuming || state.branching;
-  document.querySelectorAll('.msgAct.branch, .convItem[data-act="branch"]').forEach((button) => {
-    button.disabled = state.running || state.resuming || state.branching;
+  if (review) review.disabled = state.running || state.resuming || state.branching || state.versionSwitching;
+  document.querySelectorAll('.msgAct.branch, .msgAct.retry, .msgAct.edit, .convItem[data-act="branch"]').forEach((button) => {
+    button.disabled = state.running || state.resuming || state.branching || state.versionSwitching;
   });
   syncExtensionControls();
 }
@@ -1493,6 +1515,7 @@ async function refreshSessions() {
         $("messages").innerHTML = "";
         (result.messages || []).forEach((entry) => replayMessage(entry, result.sessionId));
         state.suppressReplayScroll = false;
+        installMessageVersionPagers(result.messageVersions || []);
         markMessageActions();
         scrollMessages(true);
         state.currentSessionId = result.sessionId;
@@ -2918,7 +2941,7 @@ async function updateRuntime() {
 }
 
 $("send").onclick = async () => {
-  if (state.running || state.resuming) return;
+  if (state.running || state.resuming || state.versionSwitching) return;
   const raw = state.activeCommand ? commandTextFromComposer() : $("prompt").value.trim();
   if (!raw && !state.attachments.length && !state.images.length) return;
   const cmd = raw ? interpretPrompt(raw) : { send: raw };
@@ -3690,6 +3713,7 @@ $("newSession").onclick = async () => {
     state.stickToBottom = true;
     setText("eventCount", "0");
     $("messages").innerHTML = '<div class="empty intro"><img class="introLogo" src="app-icon.png" alt=""><h1>新对话已创建</h1><p>输入任务开始，输入 <kbd>/</kbd> 调出命令。工具调用与输出会内联展开。</p></div>';
+    installMessageVersionPagers([]);
     setText("eventMirror", "工具、思考和子代理事件会显示在这里。");
     setText("sessionState", "新会话");
     setSaveState("idle", "新会话", "未保存");
@@ -3779,6 +3803,8 @@ $("manualCompact").onclick = async () => {
   }
   $("messages").innerHTML = "";
   result.messages.forEach(replayMessage);
+  installMessageVersionPagers(result.messageVersions || []);
+  markMessageActions();
   addEvent("compact", "手动压缩", `${result.before} -> ${result.after} estimated tokens`);
   updateContextBadge(result.context || null);
 };
@@ -3968,44 +3994,6 @@ function removeLastExchange() {
   state.currentTool = null;
 }
 
-// Snapshot only this user's answer/tool tail. Stop before the next user turn so
-// edit/retry version arrows never delete later messages.
-function tailHTMLFrom(anchorUserEl) {
-  let html = "";
-  let n = anchorUserEl.nextElementSibling;
-  while (n && !(n.classList && n.classList.contains("message") && n.classList.contains("user"))) {
-    html += n.outerHTML;
-    n = n.nextElementSibling;
-  }
-  return html;
-}
-
-// Replace only this user's answer/tool tail; preserve later turns.
-function applyVersion(anchorUserEl, version) {
-  const bubble = anchorUserEl.querySelector(".bubble");
-  if (bubble && version.prompt != null) { bubble.dataset.raw = version.prompt; renderBubble(bubble); }
-  let n = anchorUserEl.nextElementSibling;
-  while (n && !(n.classList && n.classList.contains("message") && n.classList.contains("user"))) {
-    const nx = n.nextElementSibling;
-    n.remove();
-    n = nx;
-  }
-  const safeTail = currentTurnHTMLOnly(version.tailHTML || "");
-  if (safeTail) anchorUserEl.insertAdjacentHTML("afterend", safeTail);
-}
-
-function currentTurnHTMLOnly(html) {
-  if (!html) return "";
-  const template = document.createElement("template");
-  template.innerHTML = html;
-  let out = "";
-  for (const node of Array.from(template.content.children)) {
-    if (node.classList && node.classList.contains("message") && node.classList.contains("user")) break;
-    out += node.outerHTML;
-  }
-  return out;
-}
-
 /* ---------- approval request card (Codex approvalRequestCard: 受限模式弹批准) ---------- */
 function showApproval(payload) {
   dismissApproval();
@@ -4039,28 +4027,19 @@ function dismissApproval() {
   });
 }
 
-// Remove an element and following siblings until the next user turn. Version/edit
-// operations must never delete adjacent conversations.
-function removeTurnNodes(el) {
+// Regenerating an earlier reply creates a new branch. Remove the anchor user message
+// and the complete descendant transcript; the detached nodes are retained for an
+// immediate rollback if the backend request cannot start.
+function removeBranchNodes(el) {
   const removed = [];
   let node = el;
   while (node) {
     const next = node.nextSibling;
     removed.push(node);
     node.remove();
-    if (next && next.classList && next.classList.contains("message") && next.classList.contains("user")) break;
     node = next;
   }
   return removed;
-}
-
-function nextUserAfterTurn(el) {
-  let node = el ? el.nextElementSibling : null;
-  while (node) {
-    if (node.classList && node.classList.contains("message") && node.classList.contains("user")) return node;
-    node = node.nextElementSibling;
-  }
-  return null;
 }
 
 function versionScopeMatches(holder, sessionId, turnId) {
@@ -4126,20 +4105,18 @@ function resetPendingVersionState(sessionId, turnId) {
   return true;
 }
 
-// For retrying/editing an assistant/user message: strip only that turn. Do not remove
-// later user turns; those are separate conversation branches in the visible transcript.
-function removeTurnFrom(msg) {
+// For retry/edit, detach the full branch rooted at the selected user turn.
+function removeBranchFrom(msg) {
   let anchor = msg;
   if (msg.classList.contains("assistant")) {
     let p = msg.previousElementSibling;
     while (p && !(p.classList && p.classList.contains("message") && p.classList.contains("user"))) p = p.previousElementSibling;
     if (p) anchor = p;
   }
-  const nextUser = nextUserAfterTurn(anchor);
-  const nodes = removeTurnNodes(anchor);
+  const nodes = removeBranchNodes(anchor);
   state.currentAssistant = null;
   state.currentTool = null;
-  return { nextUser, nodes };
+  return { nextUser: null, nodes };
 }
 
 function restoreRemovedTurn(removedTurn) {
@@ -4157,28 +4134,23 @@ function restoreRemovedTurn(removedTurn) {
 }
 
 async function doRetry(src) {
-  if (state.running) return;
+  if (state.running || state.resuming || state.versionSwitching) return;
   const box = $("messages");
   const target = src != null ? box.querySelector(`.message.assistant[data-src="${src}"]`)
                              : [...box.querySelectorAll(".message.assistant")].pop();
   if (!target) return;
-  // find the user message that starts this turn, and snapshot the FULL tail being
-  // replaced (old answer + tool cards + any later turns) so the version pager can bring
-  // all of it back — not just one answer bubble's text.
   let userEl = target.previousElementSibling;
   while (userEl && !(userEl.classList && userEl.classList.contains("message") && userEl.classList.contains("user"))) userEl = userEl.previousElementSibling;
-  const priorVersions = (userEl && userEl.__versions) ? userEl.__versions.slice() : [];
-  const replacedVersion = {
-    prompt: userEl ? (userEl.querySelector(".bubble").dataset.raw || "") : "",
-    tailHTML: userEl ? tailHTMLFrom(userEl) : "",
-  };
+  if (!userEl) return;
+  const users = Array.from(box.querySelectorAll(".message.user"));
+  const anchorSrc = userEl.dataset.src !== undefined ? Number(userEl.dataset.src) : null;
   state.pendingVersions = {
     sessionId: String(currentSessionId() || ""),
     turnId: "",
-    versions: priorVersions.length ? priorVersions : [replacedVersion],
-    newPrompt: replacedVersion.prompt,  // retry keeps the same prompt
+    anchorSrcIndex: Number.isInteger(anchorSrc) ? anchorSrc : null,
+    anchorUserOrdinal: users.indexOf(userEl),
   };
-  const removedTurn = removeTurnFrom(target);
+  const removedTurn = removeBranchFrom(target);
   setVersionInsertMarker(removedTurn.nextUser);
   state.stickToBottom = true;
   setRunning(true);
@@ -4196,55 +4168,98 @@ async function doRetry(src) {
   }
 }
 
-/* Codex-style response versions: after a retry/edit, the ‹ i/n › arrows live on the USER
-   message; each version is a full snapshot of the turn's prompt AND its entire tail
-   (answer, tool cards, later turns), so flipping restores everything — never leaves a
-   dangling half-conversation. */
-function attachVersionPager(sessionId, turnId) {
-  const snap = state.pendingVersions;
-  if (!versionScopeMatches(snap, sessionId || currentSessionId(), turnId || "")) return;
-  state.pendingVersions = null;
-  if (!snap) return;
-  const box = $("messages");
-  // Prefer the user row created at the edit/retry insertion point. Falling back to
-  // the last user is only for older/demo event paths.
-  const pendingUser = state.pendingVersionUser;
-  const userEl = (pendingUser && pendingUser.element && pendingUser.element.isConnected
-      && versionScopeMatches(pendingUser, sessionId || currentSessionId(), turnId || ""))
-    ? pendingUser.element
-    : [...box.querySelectorAll(".message.user")].pop();
-  if (!userEl) return;
-  const newVersion = {
-    prompt: snap.newPrompt != null ? snap.newPrompt : (userEl.querySelector(".bubble").dataset.raw || ""),
-    tailHTML: tailHTMLFrom(userEl),
-  };
-  const versions = (snap.versions || []).concat([newVersion]);
-  userEl.__versions = versions;
-  let index = versions.length - 1;
+function normalizeMessageVersionGroups(rawGroups) {
+  if (!Array.isArray(rawGroups)) return [];
+  return rawGroups.map((raw) => {
+    const versions = Array.isArray(raw && raw.versions)
+      ? raw.versions.map((entry) => ({
+          versionId: String((entry && entry.versionId) || entry || "").trim().toLowerCase(),
+        })).filter((entry) => /^[0-9a-f]{32}$/.test(entry.versionId))
+      : [];
+    return {
+      groupId: String((raw && raw.groupId) || ""),
+      anchorSrcIndex: Number.isInteger(raw && raw.anchorSrcIndex) ? raw.anchorSrcIndex : null,
+      anchorUserOrdinal: Number.isInteger(raw && raw.anchorUserOrdinal) ? raw.anchorUserOrdinal : null,
+      activeVersionId: String((raw && raw.activeVersionId) || "").trim().toLowerCase(),
+      versions,
+    };
+  }).filter((group) => group.versions.length > 1
+      && group.versions.some((entry) => entry.versionId === group.activeVersionId));
+}
 
-  let pager = userEl.querySelector(".versionPager");
-  if (!pager) {
-    pager = document.createElement("span");
-    pager.className = "versionPager";
-    userEl.querySelector(".msgActions").prepend(pager);
+function findVersionAnchor(group) {
+  const box = $("messages");
+  if (Number.isInteger(group.anchorSrcIndex)) {
+    const exact = box.querySelector(`.message.user[data-src="${group.anchorSrcIndex}"]`);
+    if (exact) return exact;
   }
-  const total = versions.length;
-  const render = () => {
+  const users = box.querySelectorAll(".message.user");
+  return Number.isInteger(group.anchorUserOrdinal) ? (users[group.anchorUserOrdinal] || null) : null;
+}
+
+function installMessageVersionPagers(rawGroups) {
+  document.querySelectorAll(".versionPager").forEach((pager) => pager.remove());
+  const groups = normalizeMessageVersionGroups(rawGroups);
+  state.messageVersions = groups;
+  groups.forEach((group) => {
+    const userEl = findVersionAnchor(group);
+    const actions = userEl && userEl.querySelector(".msgActions");
+    if (!actions) return;
+    const index = group.versions.findIndex((entry) => entry.versionId === group.activeVersionId);
+    if (index < 0) return;
+    const pager = document.createElement("span");
+    pager.className = "versionPager";
     pager.innerHTML =
       `<button class="vBtn prev" title="上一版本"${index === 0 ? " disabled" : ""}>${icon("chevron", 12)}</button>` +
-      `<span class="vCount">${index + 1}/${total}</span>` +
-      `<button class="vBtn next" title="下一版本"${index === total - 1 ? " disabled" : ""}>${icon("chevron", 12)}</button>`;
-  };
-  pager.onclick = (e) => {
-    const btn = e.target.closest(".vBtn");
-    if (!btn || btn.disabled) return;
-    index += btn.classList.contains("prev") ? -1 : 1;
-    applyVersion(userEl, versions[index]);
-    userEl.__versions = versions;  // survive the tail swap
-    render();
+      `<span class="vCount">${index + 1}/${group.versions.length}</span>` +
+      `<button class="vBtn next" title="下一版本"${index === group.versions.length - 1 ? " disabled" : ""}>${icon("chevron", 12)}</button>`;
+    pager.onclick = async (event) => {
+      const button = event.target.closest(".vBtn");
+      if (!button || button.disabled || state.running || state.resuming || state.versionSwitching) return;
+      const targetIndex = index + (button.classList.contains("prev") ? -1 : 1);
+      const target = group.versions[targetIndex];
+      if (target) await selectMessageVersion(target.versionId);
+    };
+    actions.prepend(pager);
+  });
+}
+
+async function selectMessageVersion(versionId) {
+  const navigationId = ++state.resumeRequestId;
+  state.versionSwitching = true;
+  syncRunControls();
+  try {
+    const selectVersion = await apiMethod("select_version");
+    const result = await selectVersion({
+      sessionId: currentSessionId(),
+      versionId,
+      navigationId,
+    });
+    if (navigationId !== state.resumeRequestId) return;
+    if (!result || !result.ok) throw new Error((result && result.error) || "版本切换失败");
+    const box = $("messages");
+    state.currentAssistant = null;
+    state.currentTool = null;
+    state.stickToBottom = false;
+    state.suppressReplayScroll = true;
+    box.innerHTML = "";
+    (result.messages || []).forEach((entry) => replayMessage(entry, result.sessionId));
+    state.suppressReplayScroll = false;
+    state.currentSessionId = String(result.sessionId || currentSessionId());
+    if (state.boot) state.boot.sessionId = state.currentSessionId;
+    installMessageVersionPagers(result.messageVersions || []);
     markMessageActions();
-  };
-  render();
+    scrollMessages();
+    updateContextBadge(result.context || null);
+    setText("sessionState", state.currentSessionId.slice(0, 8));
+    setSaveState("saved", "已切换版本", state.currentSessionId);
+    refreshSessions().catch(() => {});
+  } catch (error) {
+    if (navigationId === state.resumeRequestId) toast(String(error.message || error));
+  } finally {
+    state.versionSwitching = false;
+    syncRunControls();
+  }
 }
 
 async function doBranch(src) {
@@ -4264,6 +4279,7 @@ async function doBranch(src) {
     state.stickToBottom = true;
     $("messages").innerHTML = "";
     (result.messages || []).forEach(replayMessage);
+    installMessageVersionPagers(result.messageVersions || []);
     markMessageActions();
     scrollMessages(true);
     setText("sessionState", branchSessionId.slice(0, 8));
@@ -4283,7 +4299,7 @@ async function doBranch(src) {
 // Codex-style inline edit: the user message becomes an editable box with 取消/保存.
 // Nothing is deleted until you save; Cancel restores the original.
 function doEdit(text, src, msg) {
-  if (state.running || !msg || msg.querySelector(".editBox")) return;
+  if (state.running || state.resuming || state.versionSwitching || !msg || msg.querySelector(".editBox")) return;
   const bubble = msg.querySelector(".bubble");
   const actions = msg.querySelector(".msgActions");
   bubble.style.display = "none";
@@ -4305,17 +4321,15 @@ function doEdit(text, src, msg) {
     const next = area.value.trim();
     if (!next) return;
     restore();
-    // snapshot the full prior turn (old prompt + its whole tail) so the ‹ i/n › pager on
-    // the new user message can flip back to the original question AND everything under it
-    const priorVersions = (msg.__versions) ? msg.__versions.slice() : [];
-    const replacedVersion = { prompt: bubble.dataset.raw || "", tailHTML: tailHTMLFrom(msg) };
+    const users = Array.from($("messages").querySelectorAll(".message.user"));
+    const anchorSrc = msg.dataset.src !== undefined ? Number(msg.dataset.src) : null;
     state.pendingVersions = {
       sessionId: String(currentSessionId() || ""),
       turnId: "",
-      versions: priorVersions.length ? priorVersions : [replacedVersion],
-      newPrompt: next,
+      anchorSrcIndex: Number.isInteger(anchorSrc) ? anchorSrc : null,
+      anchorUserOrdinal: users.indexOf(msg),
     };
-    const removedTurn = removeTurnFrom(msg);
+    const removedTurn = removeBranchFrom(msg);
     setVersionInsertMarker(removedTurn.nextUser);
     state.stickToBottom = true;
     setRunning(true);

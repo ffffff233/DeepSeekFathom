@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 import json
 from pathlib import Path
 import re
@@ -44,7 +45,13 @@ APPROVAL_TOOLS = {
     "write_file",
 }
 
-WRITE_TOOLS = {"apply_patch", "clone_repo", "download_url", "write_file"}
+WRITE_TOOLS = {
+    "apply_patch",
+    "clone_repo",
+    "configure_mcp_server",
+    "download_url",
+    "write_file",
+}
 SHELL_TOOLS = {"run_shell", "start_service", "stop_service"}
 NETWORK_TOOLS = {"clone_repo", "download_url", "web_search"}
 
@@ -219,7 +226,13 @@ def display_path(path: Path, workspace: Path, home: Path) -> str:
     return f"<external>/{resolved.name}" if resolved.is_absolute() else resolved.as_posix()
 
 
-def collect_capability_report(workspace: Path, *, mode: str = "root", home: Path | None = None) -> dict[str, Any]:
+def collect_capability_report(
+    workspace: Path,
+    *,
+    mode: str = "root",
+    home: Path | None = None,
+    runtime_tool_names: Iterable[str] = (),
+) -> dict[str, Any]:
     from .agent import KNOWN_TOOL_NAMES, SYSTEM_PROMPT
     from .extensions import inspect_extensions
 
@@ -297,7 +310,12 @@ def collect_capability_report(workspace: Path, *, mode: str = "root", home: Path
 
     policy = ApprovalPolicy.from_mode(mode)
     registry_names = set(ToolRegistry(root, policy=policy).names)
-    runtime_names = registry_names | set(VIRTUAL_TOOL_DESCRIPTIONS)
+    injected_runtime_names = {
+        str(name).strip()
+        for name in (runtime_tool_names or ())
+        if str(name).strip()
+    }
+    runtime_names = registry_names | set(VIRTUAL_TOOL_DESCRIPTIONS) | injected_runtime_names
     known_names = set(KNOWN_TOOL_NAMES)
     prompt_lines: dict[str, str] = {}
     for line in SYSTEM_PROMPT.splitlines():
@@ -306,7 +324,7 @@ def collect_capability_report(workspace: Path, *, mode: str = "root", home: Path
             prompt_lines[match.group(1)] = line.strip()
 
     tool_entries: list[dict[str, Any]] = []
-    all_tool_names = sorted(known_names | runtime_names | set(TOOL_SCHEMAS))
+    all_tool_names = sorted(known_names | runtime_names | set(TOOL_SCHEMAS) | set(prompt_lines))
     for name in all_tool_names:
         description = VIRTUAL_TOOL_DESCRIPTIONS.get(name) or TOOL_DESCRIPTIONS.get(name, "")
         schema = TOOL_SCHEMAS.get(name)
@@ -320,6 +338,7 @@ def collect_capability_report(workspace: Path, *, mode: str = "root", home: Path
             gate = "disabled"
         elif name in APPROVAL_TOOLS and policy.require_confirmation:
             gate = "approval"
+        provider_prompted = bool(prompt_line)
         entry = {
             "name": name,
             "description": description,
@@ -327,7 +346,7 @@ def collect_capability_report(workspace: Path, *, mode: str = "root", home: Path
             "enabled": enabled,
             "gate": gate,
             "runtimeRegistered": name in runtime_names,
-            "providerPrompted": name in known_names and bool(prompt_line),
+            "providerPrompted": provider_prompted,
             "schema": schema,
             "schemaBytes": len(schema_json.encode("utf-8")),
             "schemaTokenEstimate": estimate_tokens(schema_json),
@@ -335,7 +354,7 @@ def collect_capability_report(workspace: Path, *, mode: str = "root", home: Path
             "promptTokenEstimate": estimate_tokens(prompt_line),
         }
         tool_entries.append(entry)
-        if name in known_names and name not in runtime_names:
+        if provider_prompted and name not in runtime_names:
             issues.append(issue("error", "tool.runtime_missing", "tools", name, "<runtime>", "提示词声明了工具，但运行时未注册。", "修复工具注册表或移除过期提示。", "tools"))
         if name in runtime_names and name not in known_names:
             issues.append(issue("warning", "tool.prompt_missing", "tools", name, "<provider-prompt>", "运行时存在工具，但固定提示词没有声明。", "补充工具提示契约。", "tools"))
